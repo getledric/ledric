@@ -18,5 +18,9 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ledric/schema": "workspace:*",
+    "@ledric/storage": "workspace:*"
   }
 }

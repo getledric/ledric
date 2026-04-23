@@ -18,5 +18,13 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ledric/schema": "workspace:*",
+    "better-sqlite3": "^11.5.0",
+    "uuid": "^11.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12"
   }
 }

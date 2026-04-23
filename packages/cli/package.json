@@ -19,5 +19,11 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ledric/core": "workspace:*",
+    "@ledric/mcp-server": "workspace:*",
+    "@ledric/storage": "workspace:*",
+    "citty": "^0.1.6"
   }
 }
