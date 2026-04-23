@@ -1,0 +1,36 @@
+# macOS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Node
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+
+# Yarn 4
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnp.*
+
+# Env / local
+.env
+.env.local
+.env.*.local
+
+# Local DB files (dev)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
