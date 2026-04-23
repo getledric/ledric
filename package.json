@@ -1,0 +1,27 @@
+{
+  "name": "@ledric/monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ledric monorepo root — MCP/LLM-native self-hosted CMS.",
+  "packageManager": "yarn@4.14.1",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "yarn workspaces foreach --all --topological run build",
+    "dev": "yarn workspaces foreach --all --parallel --interlaced run dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "yarn workspaces foreach --all run clean"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}
