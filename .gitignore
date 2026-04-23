@@ -34,3 +34,6 @@ dist/
 
 # Logs
 *.log
+
+# Local-only MCP config (dev harness — not shipped with the repo)
+.mcp.json
