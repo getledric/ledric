@@ -7,3 +7,4 @@ export type {
   TypeDescription,
   CreateTypeInput
 } from './core.js';
+export { normalizeTypeDef, normalizeField } from './normalize.js';

@@ -37,7 +37,6 @@ export const field = {
 
   slug: (opts: OptsFor<FieldSlug> = {}): FieldSlug => ({
     type: 'slug',
-    unique: true,
     ...opts
   }),
 

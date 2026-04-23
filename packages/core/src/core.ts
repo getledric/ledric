@@ -1,6 +1,7 @@
 import { defineType } from '@ledric/schema';
 import type { FieldDef, TypeDef, TypeDefOptions } from '@ledric/schema';
 import type { Storage } from '@ledric/storage';
+import { normalizeTypeDef } from './normalize.js';
 
 export interface Capabilities {
   vectorSearch: boolean;
@@ -52,7 +53,8 @@ export class Core {
   }
 
   async createType(input: CreateTypeInput): Promise<TypeDescription> {
-    const definition = defineType(input.name, input.fields, input.opts ?? {});
+    const validated = defineType(input.name, input.fields, input.opts ?? {});
+    const definition = normalizeTypeDef(validated);
     await this.storage.createType({
       definition,
       ...(input.author !== undefined ? { author: input.author } : {})

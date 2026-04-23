@@ -30,7 +30,6 @@ export interface FieldDate extends FieldCommon {
 export interface FieldSlug extends FieldCommon {
   type: 'slug';
   from?: string;
-  unique?: boolean;
   on_change?: 'redirect' | 'error' | 'silent';
 }
 

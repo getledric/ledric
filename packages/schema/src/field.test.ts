@@ -23,12 +23,12 @@ describe('field builders', () => {
     });
   });
 
-  it('slug defaults unique to true', () => {
-    expect(field.slug().unique).toBe(true);
+  it('slug with no opts is just a type discriminator (uniqueness is an invariant, not an option)', () => {
+    expect(field.slug()).toEqual({ type: 'slug' });
   });
 
-  it('slug respects an explicit unique override', () => {
-    expect(field.slug({ unique: false }).unique).toBe(false);
+  it('slug carries from when given', () => {
+    expect(field.slug({ from: 'title' })).toEqual({ type: 'slug', from: 'title' });
   });
 
   it('markdown defaults html to sanitize', () => {
