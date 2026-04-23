@@ -631,7 +631,7 @@ The PHP SDK is a separate repo when it lands.
 
 ## 14. Open questions / next up
 
-1. **Skeletal storage schema (detail)** — concrete column types and indexes for the tables in §8.1; how JSONB indexing differs across targets; tombstone GC cadence; version GC knobs. **(next section to write)**
+1. **Skeletal storage schema (detail)** — concrete DDL, SQLite ↔ Postgres deltas, indexing, GC. **Now in [`docs/storage.md`](./storage.md).**
 2. **Runtime schema engine internals** — field-type dispatcher shape, validator composition, where projection (`depth`, `select`, `summary_fields`) lives, how refs are resolved.
 3. **Persisted queries** — API shape, lifecycle, invalidation on schema change.
 4. **Asset storage backends** — filesystem vs S3-compatible; derivatives generation and caching without server-side image processing becoming a rabbit hole.
