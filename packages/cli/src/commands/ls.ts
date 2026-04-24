@@ -14,8 +14,8 @@ export const lsCommand = defineCommand({
   args: {
     type: {
       type: 'positional',
-      description: 'Type name.',
-      required: true
+      description: 'Type name. If omitted, lists all types with entry counts.',
+      required: false
     },
     db: {
       type: 'string',
@@ -42,6 +42,21 @@ export const lsCommand = defineCommand({
     const storage = await SqliteStorage.open({ path: args.db });
     try {
       const core = new Core(storage);
+
+      // No type given → list all types with per-type entry counts.
+      if (args.type === undefined || args.type === '') {
+        const types = await storage.listTypes();
+        const rows: Array<{ name: string; version: number; entries: number }> = [];
+        for (const t of types) {
+          const count = await core.find({ type: t.name, limit: 1 });
+          rows.push({ name: t.name, version: t.current_version, entries: count.total });
+        }
+        process.stdout.write(
+          JSON.stringify({ db: args.db, types: rows }, null, 2) + '\n'
+        );
+        return;
+      }
+
       const typeDetail = await storage.getType(args.type);
       if (!typeDetail) {
         const known = (await storage.listTypes()).map((t) => t.name);

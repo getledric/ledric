@@ -12,7 +12,8 @@ USAGE
   ledric serve --db <path>           use a different SQLite file
   ledric get <type>/<slug>           read one entry (consumer-facing shape)
   ledric get <type>/<slug> --meta    include _meta (version, hash, timestamps)
-  ledric ls <type>                   list entries (summary fields only)
+  ledric ls                          list every type in the DB with entry counts
+  ledric ls <type>                   list entries of a type (summary fields only)
   ledric ls <type> --full            list entries with full content
 
 HOOK IT UP TO YOUR MCP CLIENT
