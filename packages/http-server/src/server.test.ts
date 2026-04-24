@@ -126,6 +126,48 @@ describe('HTTP server', () => {
     expect(res.rawPayload.equals(bytes)).toBe(true);
   });
 
+  it('GET /entries/:type/:slug returns a 301 when the slug was renamed', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      payload: {
+        tool: 'create_type',
+        args: {
+          name: 'note',
+          fields: {
+            title: { type: 'string', required: true },
+            slug: { type: 'slug', from: 'title' }
+          }
+        }
+      }
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      payload: { tool: 'draft', args: { type: 'note', fields: { title: 'First' } } }
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      payload: {
+        tool: 'rename_entry',
+        args: {
+          ref: { type: 'note', slug: 'first' },
+          new_slug: 'the-first-note'
+        }
+      }
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/entries/note/first' });
+    expect(res.statusCode).toBe(301);
+    expect(res.headers.location).toBe('/entries/note/the-first-note');
+    expect(res.headers['x-ledric-redirect']).toBe('the-first-note');
+
+    const direct = await app.inject({ method: 'GET', url: '/entries/note/the-first-note' });
+    expect(direct.statusCode).toBe(200);
+    expect(JSON.parse(direct.body).slug).toBe('the-first-note');
+  });
+
   it('POST /rpc surfaces unknown tool as 400 TOOL_ERROR', async () => {
     const res = await app.inject({
       method: 'POST',

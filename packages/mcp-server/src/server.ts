@@ -106,6 +106,13 @@ const PublishArgsSchema = z
   })
   .strict();
 
+const RenameArgsSchema = z
+  .object({
+    ref: EntryRefSchema,
+    new_slug: z.string()
+  })
+  .strict();
+
 const MigrateEntriesArgsSchema = z
   .object({
     type: z.string(),
@@ -362,6 +369,31 @@ export function createMcpServer(core: Core): Server {
         }
       },
       {
+        name: 'rename_entry',
+        description:
+          'Rename an entry by changing its slug. The old slug is retired into slug_history and will keep resolving (reads of the old slug return the entry with _redirect pointing at the new slug). Uniqueness is enforced per (type, slug).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            ref: {
+              type: 'object',
+              properties: {
+                type: { type: 'string' },
+                slug: { type: 'string' }
+              },
+              required: ['type', 'slug'],
+              additionalProperties: false
+            },
+            new_slug: {
+              type: 'string',
+              description: '1-64 chars, a-z / 0-9 / hyphens; no leading or trailing hyphen.'
+            }
+          },
+          required: ['ref', 'new_slug'],
+          additionalProperties: false
+        }
+      },
+      {
         name: 'publish',
         description:
           'Mark an entry\'s version as published. Defaults to the current version; pass `version` to publish a specific historical version.',
@@ -442,6 +474,13 @@ export function createMcpServer(core: Core): Server {
         case 'publish': {
           const parsed = PublishArgsSchema.parse(args ?? {});
           const result = await core.publish(parsed);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
+          };
+        }
+        case 'rename_entry': {
+          const parsed = RenameArgsSchema.parse(args ?? {});
+          const result = await core.rename(parsed);
           return {
             content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
           };

@@ -89,6 +89,13 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       reply.code(404);
       return { error: { code: 'NOT_FOUND', message: `${req.params.type}/${req.params.slug}` } };
     }
+    if (entry._redirect !== undefined) {
+      const qs = versionNum !== undefined ? `?version=${versionNum}` : '';
+      reply.code(301);
+      reply.header('Location', `/entries/${entry.type}/${entry._redirect.to}${qs}`);
+      reply.header('X-Ledric-Redirect', entry._redirect.to);
+      return reply.send();
+    }
     return {
       id: toHex(entry.id),
       type: entry.type,
@@ -215,6 +222,8 @@ async function dispatchTool(
       return core.find(a as Parameters<Core['find']>[0]);
     case 'publish':
       return core.publish(a as Parameters<Core['publish']>[0]);
+    case 'rename_entry':
+      return core.rename(a as Parameters<Core['rename']>[0]);
     case 'migrate_entries':
       return core.migrateEntries(a as Parameters<Core['migrateEntries']>[0]);
     case 'get_asset':

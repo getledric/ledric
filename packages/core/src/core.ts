@@ -88,6 +88,19 @@ export interface PublishResult extends EntryWrite {
   published_version: number;
 }
 
+export interface RenameInput {
+  ref: EntryRef;
+  new_slug: string;
+}
+
+export interface RenameResult {
+  id: string;
+  type: string;
+  old_slug: string;
+  new_slug: string;
+  retired_at: number;
+}
+
 export interface MigrateEntriesInput {
   type: string;
   merge_patch?: Record<string, unknown>;
@@ -299,6 +312,32 @@ export class Core {
 
   async find(input: FindEntriesInput): Promise<FindEntriesResult> {
     return this.storage.findEntries(input);
+  }
+
+  async rename(input: RenameInput): Promise<RenameResult> {
+    const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+    if (!SLUG_RE.test(input.new_slug)) {
+      throw new ValidationFailedError([
+        {
+          path: '/new_slug',
+          code: 'format',
+          message:
+            'Slug must be 1-64 chars, lowercase a-z/0-9/hyphens, not starting or ending with a hyphen.',
+          actual: input.new_slug
+        }
+      ]);
+    }
+    const result = await this.storage.renameEntry({
+      ref: input.ref,
+      new_slug: input.new_slug
+    });
+    return {
+      id: Buffer.from(result.id).toString('hex'),
+      type: result.type,
+      old_slug: result.old_slug,
+      new_slug: result.new_slug,
+      retired_at: result.retired_at
+    };
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {

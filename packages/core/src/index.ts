@@ -13,6 +13,8 @@ export type {
   ReadInput,
   PublishInput,
   PublishResult,
+  RenameInput,
+  RenameResult,
   MigrateEntriesInput,
   MigrateEntriesResult,
   MigrateFailure,

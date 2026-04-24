@@ -86,6 +86,20 @@ export interface EntryDetail {
   content_hash: Uint8Array;
   created_at: number;
   deleted_at: number | null;
+  _redirect?: { from: string; to: string };
+}
+
+export interface RenameEntryInput {
+  ref: EntryRef;
+  new_slug: string;
+}
+
+export interface RenameEntryResult {
+  id: Uint8Array;
+  type: string;
+  old_slug: string;
+  new_slug: string;
+  retired_at: number;
 }
 
 export interface EntrySummary {
@@ -182,6 +196,7 @@ export interface Storage {
   readEntry(ref: EntryRef, opts?: { version?: number }): Promise<EntryDetail | null>;
   findEntries(input: FindEntriesInput): Promise<FindEntriesResult>;
   publishEntry(input: PublishEntryInput): Promise<EntryWrite>;
+  renameEntry(input: RenameEntryInput): Promise<RenameEntryResult>;
 
   close(): Promise<void>;
 }

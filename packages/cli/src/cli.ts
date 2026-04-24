@@ -5,6 +5,7 @@ import { httpCommand } from './commands/http.js';
 import { getCommand } from './commands/get.js';
 import { lsCommand } from './commands/ls.js';
 import { assetCommand } from './commands/asset.js';
+import { renameCommand } from './commands/rename.js';
 
 const CONFIG_HELP = `
 ledric — MCP/LLM-native self-hosted CMS
@@ -25,6 +26,7 @@ USAGE
   ledric asset ls [--kind image]     list assets
   ledric asset get <id>              read asset metadata
   ledric asset bytes <id>            write asset bytes to stdout
+  ledric rename <type>/<old> <new>   rename an entry (old slug keeps redirecting)
 
 HOOK IT UP TO YOUR MCP CLIENT
 
@@ -59,7 +61,8 @@ const main = defineCommand({
     http: httpCommand,
     get: getCommand,
     ls: lsCommand,
-    asset: assetCommand
+    asset: assetCommand,
+    rename: renameCommand
   },
   run() {
     // Citty invokes the parent's `run` even when a subcommand matches; only

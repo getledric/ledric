@@ -18,6 +18,8 @@ export type {
   EntrySummary,
   FindEntriesInput,
   FindEntriesResult,
+  RenameEntryInput,
+  RenameEntryResult,
   CreateAssetInput,
   AssetMeta,
   AssetWrite,

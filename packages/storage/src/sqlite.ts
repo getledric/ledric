@@ -410,6 +410,42 @@ export class SqliteStorage implements Storage {
   }
 
   async readEntry(ref: EntryRef, opts?: { version?: number }): Promise<EntryDetail | null> {
+    const direct = this.readEntryDirect(ref, opts);
+    if (direct !== null) return direct;
+
+    // Fall through: is this a retired slug for some entry of this type?
+    const envId = Buffer.from(this.mainEnvId);
+    const retired = this.db
+      .prepare<[Buffer, string, string], { entry_id: Buffer }>(
+        `SELECT h.entry_id FROM slug_history h
+         JOIN types t ON t.id = h.type_id
+         WHERE h.env_id = ? AND t.name = ? AND h.slug = ?
+         ORDER BY h.retired_at DESC LIMIT 1`
+      )
+      .get(envId, ref.type, ref.slug);
+
+    if (!retired) return null;
+
+    const currentRow = this.db
+      .prepare<[Buffer], { slug: string; deleted_at: number | null }>(
+        'SELECT slug, deleted_at FROM entries WHERE id = ?'
+      )
+      .get(retired.entry_id);
+
+    if (!currentRow || currentRow.deleted_at !== null) return null;
+
+    const resolved = this.readEntryDirect(
+      { type: ref.type, slug: currentRow.slug },
+      opts
+    );
+    if (!resolved) return null;
+    return { ...resolved, _redirect: { from: ref.slug, to: currentRow.slug } };
+  }
+
+  private readEntryDirect(
+    ref: EntryRef,
+    opts?: { version?: number }
+  ): EntryDetail | null {
     const envId = Buffer.from(this.mainEnvId);
 
     interface JoinRow {
@@ -461,6 +497,53 @@ export class SqliteStorage implements Storage {
       content_hash: new Uint8Array(row.content_hash),
       created_at: row.created_at,
       deleted_at: row.deleted_at
+    };
+  }
+
+  async renameEntry(input: import('./types.js').RenameEntryInput): Promise<import('./types.js').RenameEntryResult> {
+    const typeRow = this.requireTypeId(input.ref.type);
+    const envId = Buffer.from(this.mainEnvId);
+
+    const entryRow = this.db
+      .prepare<[Buffer, Buffer, string], { id: Buffer }>(
+        `SELECT id FROM entries
+         WHERE env_id = ? AND type_id = ? AND slug = ? AND deleted_at IS NULL`
+      )
+      .get(envId, Buffer.from(typeRow.id), input.ref.slug);
+
+    if (!entryRow) throw new NotFoundError('entry', `${input.ref.type}/${input.ref.slug}`);
+
+    if (input.new_slug === input.ref.slug) {
+      return {
+        id: new Uint8Array(entryRow.id),
+        type: input.ref.type,
+        old_slug: input.ref.slug,
+        new_slug: input.new_slug,
+        retired_at: Date.now()
+      };
+    }
+
+    // Uniqueness of new_slug within (env, type) enforced by the UNIQUE index on entries.
+    const now = Date.now();
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare(
+          'INSERT INTO slug_history (env_id, slug, type_id, entry_id, retired_at) VALUES (?, ?, ?, ?, ?)'
+        )
+        .run(envId, input.ref.slug, Buffer.from(typeRow.id), entryRow.id, now);
+
+      this.db
+        .prepare('UPDATE entries SET slug = ? WHERE id = ?')
+        .run(input.new_slug, entryRow.id);
+    });
+    tx();
+
+    return {
+      id: new Uint8Array(entryRow.id),
+      type: input.ref.type,
+      old_slug: input.ref.slug,
+      new_slug: input.new_slug,
+      retired_at: now
     };
   }
 

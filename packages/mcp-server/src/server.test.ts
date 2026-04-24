@@ -52,8 +52,91 @@ describe('MCP server (in-memory round trip)', () => {
       'list_assets',
       'migrate_entries',
       'publish',
-      'read'
+      'read',
+      'rename_entry'
     ]);
+  });
+
+  it('rename_entry retires the old slug; reads of it return _redirect', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true },
+          slug: { type: 'slug', from: 'title' }
+        }
+      }
+    });
+    await client.callTool({
+      name: 'draft',
+      arguments: { type: 'note', fields: { title: 'First' } }
+    });
+
+    const renamed = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'rename_entry',
+          arguments: {
+            ref: { type: 'note', slug: 'first' },
+            new_slug: 'the-first-note'
+          }
+        })
+      ).content
+    ));
+    expect(renamed.old_slug).toBe('first');
+    expect(renamed.new_slug).toBe('the-first-note');
+
+    // Read by new slug — direct hit, no redirect.
+    const direct = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'read',
+          arguments: { ref: { type: 'note', slug: 'the-first-note' } }
+        })
+      ).content
+    ));
+    expect(direct.slug).toBe('the-first-note');
+    expect(direct._redirect).toBeUndefined();
+
+    // Read by old slug — returns current entry with _redirect.
+    const redirected = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'read',
+          arguments: { ref: { type: 'note', slug: 'first' } }
+        })
+      ).content
+    ));
+    expect(redirected.slug).toBe('the-first-note');
+    expect(redirected._redirect).toEqual({ from: 'first', to: 'the-first-note' });
+  });
+
+  it('rename_entry rejects an invalid slug format', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true },
+          slug: { type: 'slug', from: 'title' }
+        }
+      }
+    });
+    await client.callTool({
+      name: 'draft',
+      arguments: { type: 'note', fields: { title: 'First' } }
+    });
+
+    const bad = await client.callTool({
+      name: 'rename_entry',
+      arguments: {
+        ref: { type: 'note', slug: 'first' },
+        new_slug: 'NOT VALID'
+      }
+    });
+    expect(bad.isError).toBe(true);
+    expect(firstText(bad.content)).toMatch(/VALIDATION_FAILED/);
   });
 
   it('migrate_entries: safe alter, then re-stamp existing entries with the new schema_version', async () => {
