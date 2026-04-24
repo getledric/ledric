@@ -1,0 +1,90 @@
+import { defineCommand } from 'citty';
+import { Core } from '@ledric/core';
+import { SqliteStorage } from '@ledric/storage';
+
+function toHex(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('hex');
+}
+
+export const lsCommand = defineCommand({
+  meta: {
+    name: 'ls',
+    description: 'List entries of a type. Prints a compact JSON array.'
+  },
+  args: {
+    type: {
+      type: 'positional',
+      description: 'Type name.',
+      required: true
+    },
+    db: {
+      type: 'string',
+      description: 'Path to the SQLite database file.',
+      default: './ledric.db'
+    },
+    limit: {
+      type: 'string',
+      description: 'Max results to return (default 20, max 200).',
+      default: '20'
+    },
+    offset: {
+      type: 'string',
+      description: 'Offset for pagination.',
+      default: '0'
+    },
+    full: {
+      type: 'boolean',
+      description: 'Include full fields in each row instead of a summary.',
+      default: false
+    }
+  },
+  async run({ args }) {
+    const storage = await SqliteStorage.open({ path: args.db });
+    try {
+      const core = new Core(storage);
+      const typeDetail = await storage.getType(args.type);
+      const summaryFields = typeDetail?.definition.summary_fields ?? [];
+
+      const result = await core.find({
+        type: args.type,
+        limit: parseInt(args.limit, 10),
+        offset: parseInt(args.offset, 10)
+      });
+
+      const rows = result.results.map((r) => {
+        const fields = args.full
+          ? r.content
+          : pick(r.content, summaryFields);
+        return {
+          id: toHex(r.id),
+          slug: r.slug,
+          version: r.current_version,
+          published_version: r.published_version,
+          fields
+        };
+      });
+
+      process.stdout.write(
+        JSON.stringify(
+          { type: args.type, total: result.total, offset: result.offset, results: rows },
+          null,
+          2
+        ) + '\n'
+      );
+    } finally {
+      await storage.close();
+    }
+  }
+});
+
+function pick(
+  source: Record<string, unknown>,
+  keys: readonly string[]
+): Record<string, unknown> {
+  if (keys.length === 0) return source;
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    if (k in source) out[k] = source[k];
+  }
+  return out;
+}

@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 import { defineCommand, runMain } from 'citty';
 import { serveCommand } from './commands/serve.js';
+import { getCommand } from './commands/get.js';
+import { lsCommand } from './commands/ls.js';
 
 const CONFIG_HELP = `
 ledric — MCP/LLM-native self-hosted CMS
 
 USAGE
-  ledric serve                 start the MCP server on stdio (uses ./ledric.db)
-  ledric serve --db <path>     use a different SQLite file
+  ledric serve                       start the MCP server on stdio (uses ./ledric.db)
+  ledric serve --db <path>           use a different SQLite file
+  ledric get <type>/<slug>           read one entry (consumer-facing shape)
+  ledric get <type>/<slug> --meta    include _meta (version, hash, timestamps)
+  ledric ls <type>                   list entries (summary fields only)
+  ledric ls <type> --full            list entries with full content
 
 HOOK IT UP TO YOUR MCP CLIENT
 
@@ -38,7 +44,9 @@ const main = defineCommand({
     description: 'ledric — MCP/LLM-native self-hosted CMS.'
   },
   subCommands: {
-    serve: serveCommand
+    serve: serveCommand,
+    get: getCommand,
+    ls: lsCommand
   },
   run() {
     // Citty invokes the parent's `run` even when a subcommand matches; only
