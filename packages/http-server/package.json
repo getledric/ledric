@@ -18,5 +18,10 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ledric/core": "workspace:*",
+    "@ledric/storage": "workspace:*",
+    "fastify": "^5.1.0"
   }
 }

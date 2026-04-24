@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { defineCommand, runMain } from 'citty';
 import { serveCommand } from './commands/serve.js';
+import { httpCommand } from './commands/http.js';
 import { getCommand } from './commands/get.js';
 import { lsCommand } from './commands/ls.js';
 import { assetCommand } from './commands/asset.js';
@@ -11,6 +12,8 @@ ledric — MCP/LLM-native self-hosted CMS
 USAGE
   ledric serve                       start the MCP server on stdio (uses ./ledric.db)
   ledric serve --db <path>           use a different SQLite file
+  ledric http                        start the HTTP server (default :3000)
+  ledric http --port 8080            … on a different port
   ledric get <type>/<slug>           read one entry (consumer-facing shape)
   ledric get <type>/<slug> --meta    include _meta (version, hash, timestamps)
   ledric ls                          list every type in the DB with entry counts
@@ -53,6 +56,7 @@ const main = defineCommand({
   },
   subCommands: {
     serve: serveCommand,
+    http: httpCommand,
     get: getCommand,
     ls: lsCommand,
     asset: assetCommand

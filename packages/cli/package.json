@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@ledric/core": "workspace:*",
+    "@ledric/http-server": "workspace:*",
     "@ledric/mcp-server": "workspace:*",
     "@ledric/storage": "workspace:*",
     "citty": "^0.1.6"
