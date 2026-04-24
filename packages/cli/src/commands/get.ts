@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 import { Core } from '@ledric/core';
-import { SqliteStorage } from '@ledric/storage';
+import { SqliteStorage, NotFoundError } from '@ledric/storage';
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -44,6 +44,18 @@ export const getCommand = defineCommand({
     const storage = await SqliteStorage.open({ path: args.db });
     try {
       const core = new Core(storage);
+      const typeDetail = await storage.getType(type);
+      if (!typeDetail) {
+        const known = (await storage.listTypes()).map((t) => t.name);
+        process.stderr.write(
+          `ledric: no type "${type}" in ${args.db}\n` +
+            (known.length > 0
+              ? `  known types: ${known.join(', ')}\n`
+              : `  this database has no types yet; create one with create_type over MCP.\n`)
+        );
+        process.exit(1);
+      }
+
       const versionNum = args.version ? parseInt(args.version, 10) : undefined;
       const entry = await core.read({
         ref: { type, slug },
@@ -51,7 +63,7 @@ export const getCommand = defineCommand({
       });
 
       if (!entry) {
-        process.stderr.write(`not found: ${type}/${slug}\n`);
+        process.stderr.write(`ledric: no entry "${type}/${slug}" in ${args.db}\n`);
         process.exit(1);
       }
 
@@ -77,6 +89,12 @@ export const getCommand = defineCommand({
       }
 
       process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        process.stderr.write(`ledric: ${err.message}\n`);
+        process.exit(1);
+      }
+      throw err;
     } finally {
       await storage.close();
     }

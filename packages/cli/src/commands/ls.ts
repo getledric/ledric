@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 import { Core } from '@ledric/core';
-import { SqliteStorage } from '@ledric/storage';
+import { SqliteStorage, NotFoundError } from '@ledric/storage';
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -43,7 +43,17 @@ export const lsCommand = defineCommand({
     try {
       const core = new Core(storage);
       const typeDetail = await storage.getType(args.type);
-      const summaryFields = typeDetail?.definition.summary_fields ?? [];
+      if (!typeDetail) {
+        const known = (await storage.listTypes()).map((t) => t.name);
+        process.stderr.write(
+          `ledric: no type "${args.type}" in ${args.db}\n` +
+            (known.length > 0
+              ? `  known types: ${known.join(', ')}\n`
+              : `  this database has no types yet; create one with create_type over MCP.\n`)
+        );
+        process.exit(1);
+      }
+      const summaryFields = typeDetail.definition.summary_fields ?? [];
 
       const result = await core.find({
         type: args.type,
@@ -71,6 +81,12 @@ export const lsCommand = defineCommand({
           2
         ) + '\n'
       );
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        process.stderr.write(`ledric: ${err.message}\n`);
+        process.exit(1);
+      }
+      throw err;
     } finally {
       await storage.close();
     }
