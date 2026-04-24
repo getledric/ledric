@@ -53,12 +53,16 @@ const AlterTypeArgsSchema = z
   })
   .strict();
 
-const EntryRefSchema = z
+const EntryRefObject = z
   .object({
     type: z.string(),
     slug: z.string()
   })
   .strict();
+
+const EntryRefSchema = z
+  .union([EntryRefObject, z.string()])
+  .transform((v) => (typeof v === 'string' ? (EntryRefObject.parse(JSON.parse(v))) : v));
 
 const DraftArgsSchema = z
   .object({
