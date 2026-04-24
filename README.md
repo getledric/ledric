@@ -20,7 +20,11 @@ ledric sits in the middle and gets out of the way.
 
 **Draft, then publish.** A post doesn't go live until you say so. Publishing is a pointer move — instant. Unpublishing is the same move in reverse.
 
-**BYO preferred storage, or just roll with the built-in one.** Your content lives in a SQLite file (commit it, scp it, cp it — it's just a file). For image and file bytes, you get two adapters out of the box: stash everything inside the DB for zero config, or write to a folder on disk if you'd rather rsync them separately. A future S3 adapter plugs into the same slot.
+**BYO preferred storage, or just roll with the built-in.** Your content lives in a SQLite file you can commit, scp, or `cp` like any other file. Assets? Same story — we'll store and serve the bytes for you (in the DB, or on disk, your call), or point us at your S3 / R2 / whatever bucket if you'd rather bring your own.
+
+**Localization without the footguns.** Write once, translate per-field or per-entry, fall back cleanly, and let agents draft translations in place — all under the same versioning, publish, and history flow as the original.
+
+**Renames don't break the web.** Change a post's slug and the old URL keeps resolving forever. Every retired slug is remembered. Your old tweets and Google juice stay valid.
 
 **Agents are properly invited.** Connect Claude Desktop, Cursor, or anything else that speaks MCP. Your AI gets the same surface you do — with validation, with version history, with structured errors — so it can draft posts, publish them, and evolve the content model without you holding its hand.
 
@@ -63,21 +67,15 @@ yarn cli asset upload hero.jpg           # store an image
 ## Inside the box
 
 - A full content model: types, fields, references, assets, examples
-- Ten MCP tools covering the whole lifecycle (introspect → create → draft → publish → migrate)
-- Versioning on both entries *and* schemas — evolve a type and old content still reads correctly
-- An asset pipeline with SQLite-blob storage by default, local filesystem as option two, plugin slot for S3 / R2 / whatever
+- An MCP surface that covers the whole lifecycle — introspect, draft, publish, evolve the schema, backfill existing content, manage assets
+- An HTTP API with the same shape, so websites and SDKs don't need MCP
+- Versioning on both entries *and* schemas — evolve a type and old content still reads correctly; time-travel to any version with one call
+- Asset storage + serving, with SQLite-blob and local-filesystem backends built in and an adapter slot for S3 / R2 / whatever
 - Markdown-first rich text with per-field HTML policies (allow / sanitize / forbid)
+- Full localization — per-field or per-entry, with fallback rules
+- Slug renames with permanent redirects, so links never rot
 - A CLI for everything you'd want to do from a terminal
 - One SQLite file you can back up with `cp`
-
-## Not in the box (yet)
-
-- A browser editor UI — BYO, or drive it from the CLI for now
-- An HTTP API — today the surface is MCP + CLI; HTTP is on the roadmap
-- Slug rename + redirect — the data model is ready, the tool isn't wired
-- A revert-to-version convenience call — versions are stored, the one-shot isn't
-- Localization — deliberately cut from v1, the slug model already plans for it
-- S3 asset backend — designed for, not written
 
 ## The design philosophy
 
