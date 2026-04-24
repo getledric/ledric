@@ -6,6 +6,8 @@ export type {
   TypeDetail,
   CreateTypeInput,
   CreateTypeResult,
+  AlterTypeInput,
+  AlterTypeResult,
   ChangeClass,
   CreateEntryInput,
   UpdateEntryInput,

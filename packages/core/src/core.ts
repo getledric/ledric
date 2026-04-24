@@ -2,6 +2,7 @@ import { defineType } from '@ledric/schema';
 import type { FieldDef, TypeDef, TypeDefOptions } from '@ledric/schema';
 import type {
   Storage,
+  ChangeClass,
   EntryDetail,
   EntryRef,
   EntryWrite,
@@ -11,6 +12,8 @@ import type {
 import { normalizeTypeDef } from './normalize.js';
 import { deriveContent } from './derive.js';
 import { validateContent, type ValidationError } from './validate.js';
+import { classifyChange, type TypeDiff } from './classify.js';
+import { applyMergePatch } from './merge-patch.js';
 
 export interface Capabilities {
   vectorSearch: boolean;
@@ -33,6 +36,23 @@ export interface CreateTypeInput {
   fields: Record<string, FieldDef>;
   opts?: TypeDefOptions;
   author?: string;
+}
+
+export interface AlterTypeInput {
+  name: string;
+  parent_version: number;
+  merge_patch: Record<string, unknown>;
+  dry_run?: boolean;
+  author?: string;
+}
+
+export interface AlterTypeResult {
+  name: string;
+  version: number;
+  change_class: ChangeClass;
+  diff: TypeDiff;
+  dry_run?: boolean;
+  definition: TypeDef;
 }
 
 export interface DraftInput {
@@ -103,6 +123,72 @@ export class Core {
       ...(input.author !== undefined ? { author: input.author } : {})
     });
     return { ...definition, version: 1 };
+  }
+
+  async alterType(input: AlterTypeInput): Promise<AlterTypeResult> {
+    const current = await this.storage.getType(input.name);
+    if (!current) throw new Error(`Unknown type "${input.name}"`);
+
+    if (
+      typeof (input.merge_patch as { name?: unknown }).name === 'string' &&
+      (input.merge_patch as { name: string }).name !== input.name
+    ) {
+      throw new Error(
+        `alterType cannot rename "${input.name}" — renaming is a separate operation.`
+      );
+    }
+
+    const merged = applyMergePatch(current.definition, {
+      ...input.merge_patch,
+      name: input.name
+    }) as TypeDef;
+
+    const validated = defineType(merged.name, merged.fields, {
+      ...(merged.description !== undefined ? { description: merged.description } : {}),
+      ...(merged.identifier_field !== undefined
+        ? { identifier_field: merged.identifier_field }
+        : {}),
+      ...(merged.display_field !== undefined
+        ? { display_field: merged.display_field }
+        : {}),
+      ...(merged.summary_fields !== undefined
+        ? { summary_fields: merged.summary_fields }
+        : {}),
+      ...(merged.on_slug_change !== undefined
+        ? { on_slug_change: merged.on_slug_change }
+        : {}),
+      ...(merged.example !== undefined ? { example: merged.example } : {})
+    });
+    const definition = normalizeTypeDef(validated);
+
+    const diff = classifyChange(current.definition, definition);
+
+    if (input.dry_run === true) {
+      return {
+        name: input.name,
+        version: current.current_version,
+        change_class: diff.class,
+        diff,
+        definition,
+        dry_run: true
+      };
+    }
+
+    const write = await this.storage.alterType({
+      name: input.name,
+      parent_version: input.parent_version,
+      definition,
+      change_class: diff.class,
+      ...(input.author !== undefined ? { author: input.author } : {})
+    });
+
+    return {
+      name: input.name,
+      version: write.version,
+      change_class: diff.class,
+      diff,
+      definition
+    };
   }
 
   async draft(input: DraftInput): Promise<DraftResult> {

@@ -26,6 +26,21 @@ export interface CreateTypeResult {
   version: number;
 }
 
+export interface AlterTypeInput {
+  name: string;
+  parent_version: number;
+  definition: TypeDef;
+  change_class: ChangeClass;
+  author?: string;
+}
+
+export interface AlterTypeResult {
+  id: Uint8Array;
+  name: string;
+  version: number;
+  change_class: ChangeClass;
+}
+
 export interface CreateEntryInput {
   type: string;
   slug: string;
@@ -99,6 +114,7 @@ export interface FindEntriesResult {
 
 export interface Storage {
   createType(input: CreateTypeInput): Promise<CreateTypeResult>;
+  alterType(input: AlterTypeInput): Promise<AlterTypeResult>;
   listTypes(opts?: { includeDeleted?: boolean }): Promise<TypeSummary[]>;
   getType(name: string): Promise<TypeDetail | null>;
 

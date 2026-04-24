@@ -43,6 +43,7 @@ describe('MCP server (in-memory round trip)', () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'alter_type',
       'create_type',
       'describe_model',
       'draft',
@@ -50,6 +51,140 @@ describe('MCP server (in-memory round trip)', () => {
       'publish',
       'read'
     ]);
+  });
+
+  it('alter_type with dry_run returns change_class without writing', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true, max: 200 },
+          slug: { type: 'slug', from: 'title' }
+        }
+      }
+    });
+
+    const dryRun = await client.callTool({
+      name: 'alter_type',
+      arguments: {
+        name: 'note',
+        parent_version: 1,
+        merge_patch: {
+          fields: { tags: { type: 'array', of: { type: 'string' }, max: 20 } }
+        },
+        dry_run: true
+      }
+    });
+    const dryRunResult = JSON.parse(firstText(dryRun.content));
+    expect(dryRunResult.change_class).toBe('safe');
+    expect(dryRunResult.dry_run).toBe(true);
+    expect(dryRunResult.version).toBe(1); // unchanged
+
+    const after = JSON.parse(firstText(
+      (await client.callTool({ name: 'describe_model' })).content
+    ));
+    expect(after.types.note.version).toBe(1);
+    expect(after.types.note.fields.tags).toBeUndefined();
+  });
+
+  it('alter_type applied: safe change adds a field and bumps version', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true },
+          slug: { type: 'slug', from: 'title' }
+        }
+      }
+    });
+
+    const applied = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'alter_type',
+          arguments: {
+            name: 'note',
+            parent_version: 1,
+            merge_patch: {
+              fields: { tags: { type: 'array', of: { type: 'string' }, max: 20 } }
+            }
+          }
+        })
+      ).content
+    ));
+    expect(applied.change_class).toBe('safe');
+    expect(applied.version).toBe(2);
+
+    const after = JSON.parse(firstText(
+      (await client.callTool({ name: 'describe_model' })).content
+    ));
+    expect(after.types.note.version).toBe(2);
+    expect(after.types.note.fields.tags).toEqual({
+      type: 'array',
+      of: { type: 'string' },
+      max: 20
+    });
+  });
+
+  it('alter_type classifies field removal as destructive', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true },
+          slug: { type: 'slug', from: 'title' },
+          body: { type: 'markdown' }
+        }
+      }
+    });
+
+    const result = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'alter_type',
+          arguments: {
+            name: 'note',
+            parent_version: 1,
+            merge_patch: { fields: { body: null } },
+            dry_run: true
+          }
+        })
+      ).content
+    ));
+    expect(result.change_class).toBe('destructive');
+  });
+
+  it('alter_type classifies required-field add as needs_backfill', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true },
+          slug: { type: 'slug', from: 'title' }
+        }
+      }
+    });
+
+    const result = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'alter_type',
+          arguments: {
+            name: 'note',
+            parent_version: 1,
+            merge_patch: {
+              fields: { author: { type: 'string', required: true } }
+            },
+            dry_run: true
+          }
+        })
+      ).content
+    ));
+    expect(result.change_class).toBe('needs_backfill');
   });
 
   it('draft → read → find → publish round trip', async () => {

@@ -151,6 +151,60 @@ export class SqliteStorage implements Storage {
     return { id: typeId, name: definition.name, version: 1 };
   }
 
+  async alterType(input: import('./types.js').AlterTypeInput): Promise<import('./types.js').AlterTypeResult> {
+    const envId = Buffer.from(this.mainEnvId);
+
+    const row = this.db
+      .prepare<[Buffer, string], { id: Buffer; current_version: number }>(
+        'SELECT id, current_version FROM types WHERE env_id = ? AND name = ? AND deleted_at IS NULL'
+      )
+      .get(envId, input.name);
+    if (!row) throw new NotFoundError('type', input.name);
+
+    if (row.current_version !== input.parent_version) {
+      throw new VersionConflictError(
+        'type',
+        input.name,
+        row.current_version,
+        input.parent_version
+      );
+    }
+
+    const nextVersion = row.current_version + 1;
+    const now = Date.now();
+    const definitionJson = JSON.stringify(input.definition);
+
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO type_versions
+             (type_id, version, definition, change_class, parent_version, author, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          row.id,
+          nextVersion,
+          definitionJson,
+          input.change_class,
+          row.current_version,
+          input.author ?? null,
+          now
+        );
+
+      this.db
+        .prepare('UPDATE types SET current_version = ? WHERE id = ?')
+        .run(nextVersion, row.id);
+    });
+    tx();
+
+    return {
+      id: new Uint8Array(row.id),
+      name: input.name,
+      version: nextVersion,
+      change_class: input.change_class
+    };
+  }
+
   async listTypes(opts?: { includeDeleted?: boolean }): Promise<TypeSummary[]> {
     const includeDeleted = opts?.includeDeleted === true;
     const envId = Buffer.from(this.mainEnvId);

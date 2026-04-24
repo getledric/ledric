@@ -37,6 +37,16 @@ const CreateTypeArgsSchema = z
   })
   .strict();
 
+const AlterTypeArgsSchema = z
+  .object({
+    name: z.string(),
+    parent_version: z.number().int(),
+    merge_patch: z.record(z.unknown()),
+    dry_run: z.boolean().optional(),
+    author: z.string().optional()
+  })
+  .strict();
+
 const EntryRefSchema = z
   .object({
     type: z.string(),
@@ -139,6 +149,31 @@ export function createMcpServer(core: Core): Server {
             author: { type: 'string' }
           },
           required: ['name', 'fields'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'alter_type',
+        description:
+          'Mutate an existing content type via JSON Merge Patch (RFC 7396). Returns { name, version, change_class, diff }. `change_class` is one of safe | needs_backfill | destructive. Pass `dry_run: true` to preview without writing. `parent_version` must equal the type\'s current version (optimistic concurrency).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            parent_version: {
+              type: 'integer',
+              description: "The type's current version. Must match."
+            },
+            merge_patch: {
+              type: 'object',
+              description:
+                'Recursive RFC 7396 merge patch applied to the stored TypeDef. Null values delete keys.',
+              additionalProperties: true
+            },
+            dry_run: { type: 'boolean' },
+            author: { type: 'string' }
+          },
+          required: ['name', 'parent_version', 'merge_patch'],
           additionalProperties: false
         }
       },
@@ -269,6 +304,13 @@ export function createMcpServer(core: Core): Server {
         case 'create_type': {
           const parsed = CreateTypeArgsSchema.parse(args ?? {});
           const result = await core.createType(parsed);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+          };
+        }
+        case 'alter_type': {
+          const parsed = AlterTypeArgsSchema.parse(args ?? {});
+          const result = await core.alterType(parsed);
           return {
             content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
           };
