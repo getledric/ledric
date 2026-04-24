@@ -74,6 +74,65 @@ describe('SqliteStorage', () => {
     await expect(storage.createType({ definition: def })).rejects.toThrow(/already exists/);
   });
 
+  it('round-trips an asset through the db backend', async () => {
+    const bytes = Buffer.from('hello asset world', 'utf8');
+    const write = await storage.createAsset({
+      kind: 'file',
+      bytes,
+      meta: { mime: 'text/plain', alt: 'greeting' }
+    });
+    expect(write.version).toBe(1);
+    expect(write.storage_ref.startsWith('db:')).toBe(true);
+    expect(write.meta.size).toBe(bytes.byteLength);
+
+    const detail = await storage.getAsset(write.id);
+    expect(detail).not.toBeNull();
+    expect(detail?.kind).toBe('file');
+    expect(detail?.meta.mime).toBe('text/plain');
+
+    const read = await storage.readAssetBytes(write.id);
+    expect(read.equals(bytes)).toBe(true);
+  });
+
+  it('round-trips an asset through the local backend', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'ledric-assets-'));
+    try {
+      await storage.close();
+      storage = await SqliteStorage.open({
+        path: ':memory:',
+        assets: { backend: 'local', root: dir }
+      });
+      const bytes = Buffer.from('hello local backend', 'utf8');
+      const write = await storage.createAsset({
+        kind: 'file',
+        bytes,
+        meta: { mime: 'text/plain' }
+      });
+      expect(write.storage_ref.startsWith('local:')).toBe(true);
+
+      const read = await storage.readAssetBytes(write.id);
+      expect(read.equals(bytes)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('lists assets with kind filter', async () => {
+    await storage.createAsset({ kind: 'image', bytes: Buffer.from([1, 2, 3]) });
+    await storage.createAsset({ kind: 'image', bytes: Buffer.from([4, 5, 6]) });
+    await storage.createAsset({ kind: 'file', bytes: Buffer.from([7, 8, 9]) });
+
+    const images = await storage.listAssets({ kind: 'image' });
+    expect(images.total).toBe(2);
+    expect(images.results.every((r) => r.kind === 'image')).toBe(true);
+
+    const all = await storage.listAssets();
+    expect(all.total).toBe(3);
+  });
+
   it('is idempotent on migrations (re-opening the same file is fine)', async () => {
     const { mkdtempSync, rmSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');

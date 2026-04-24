@@ -48,6 +48,8 @@ describe('MCP server (in-memory round trip)', () => {
       'describe_model',
       'draft',
       'find',
+      'get_asset',
+      'list_assets',
       'migrate_entries',
       'publish',
       'read'

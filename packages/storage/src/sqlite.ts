@@ -14,11 +14,24 @@ import type {
   EntryWrite,
   EntryDetail,
   FindEntriesInput,
-  FindEntriesResult
+  FindEntriesResult,
+  CreateAssetInput,
+  AssetDetail,
+  AssetMeta,
+  AssetSummary,
+  AssetWrite,
+  ListAssetsInput,
+  ListAssetsResult
 } from './types.js';
 import { migrations } from './migrations.js';
 import { uuidv7Bytes } from './uuid.js';
 import { contentHash } from './hash.js';
+import {
+  AssetBackendRegistry,
+  DbAssetBackend,
+  LocalAssetBackend
+} from './assets/index.js';
+import type { AssetBackend } from './assets/index.js';
 
 export class VersionConflictError extends Error {
   readonly code = 'VERSION_CONFLICT';
@@ -36,19 +49,29 @@ export class VersionConflictError extends Error {
 
 export class NotFoundError extends Error {
   readonly code = 'NOT_FOUND';
-  constructor(public readonly kind: 'type' | 'entry', public readonly ref: string) {
+  constructor(
+    public readonly kind: 'type' | 'entry' | 'asset' | 'asset_blob',
+    public readonly ref: string
+  ) {
     super(`NOT_FOUND: ${kind} "${ref}"`);
   }
 }
 
 const MAIN_ENV_NAME = 'main';
 
+export type AssetsConfig =
+  | { backend: 'db' }
+  | { backend: 'local'; root: string }
+  | { backend: AssetBackend; extras?: AssetBackend[] };
+
 export interface OpenOptions {
   path: string;
+  assets?: AssetsConfig;
 }
 
 export class SqliteStorage implements Storage {
   readonly db: BetterSqliteDatabase;
+  readonly assetBackends: AssetBackendRegistry;
   private mainEnvId!: Uint8Array;
 
   static async open(opts: OpenOptions): Promise<SqliteStorage> {
@@ -59,11 +82,30 @@ export class SqliteStorage implements Storage {
     const storage = new SqliteStorage(db);
     storage.migrate();
     storage.bootstrapMainEnv();
+    storage.configureAssetBackends(opts.assets);
     return storage;
   }
 
   private constructor(db: BetterSqliteDatabase) {
     this.db = db;
+    this.assetBackends = new AssetBackendRegistry();
+  }
+
+  private configureAssetBackends(config: AssetsConfig | undefined): void {
+    // Always register db backend — cheap and useful as a fallback for resolving refs.
+    this.assetBackends.register(new DbAssetBackend(this.db));
+
+    const cfg: AssetsConfig = config ?? { backend: 'db' };
+    if (typeof cfg.backend === 'string') {
+      if (cfg.backend === 'db') {
+        // already default
+      } else if (cfg.backend === 'local') {
+        this.assetBackends.register(new LocalAssetBackend(cfg.root), { asDefault: true });
+      }
+    } else {
+      this.assetBackends.register(cfg.backend, { asDefault: true });
+      for (const extra of cfg.extras ?? []) this.assetBackends.register(extra);
+    }
   }
 
   private migrate(): void {
@@ -548,6 +590,164 @@ export class SqliteStorage implements Storage {
       slug: input.ref.slug,
       version: targetVersion
     };
+  }
+
+  async createAsset(input: CreateAssetInput): Promise<AssetWrite> {
+    const assetId = uuidv7Bytes();
+    const now = Date.now();
+    const backend = this.assetBackends.default();
+    const meta: AssetMeta = {
+      ...(input.meta ?? {}),
+      size: input.bytes.byteLength
+    };
+
+    const storageRef = await backend.put({
+      assetId,
+      version: 1,
+      bytes: input.bytes,
+      ...(meta.mime !== undefined ? { mime: meta.mime } : {})
+    });
+
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO assets (id, env_id, kind, current_version, published_version, deleted_at)
+           VALUES (?, ?, ?, 1, NULL, NULL)`
+        )
+        .run(assetId, this.mainEnvId, input.kind);
+
+      this.db
+        .prepare(
+          `INSERT INTO asset_versions
+             (asset_id, version, storage_ref, meta, parent_version, author, created_at)
+           VALUES (?, 1, ?, ?, NULL, ?, ?)`
+        )
+        .run(assetId, storageRef, JSON.stringify(meta), input.author ?? null, now);
+    });
+    tx();
+
+    return { id: assetId, version: 1, kind: input.kind, storage_ref: storageRef, meta };
+  }
+
+  async getAsset(
+    id: Uint8Array,
+    opts?: { version?: number }
+  ): Promise<AssetDetail | null> {
+    const envId = Buffer.from(this.mainEnvId);
+
+    interface JoinRow {
+      kind: string;
+      current_version: number;
+      published_version: number | null;
+      deleted_at: number | null;
+      version: number;
+      storage_ref: string;
+      meta: string;
+      author: string | null;
+      created_at: number;
+    }
+
+    const row = opts?.version !== undefined
+      ? this.db
+          .prepare<[number, Buffer, Buffer], JoinRow>(
+            `SELECT a.kind, a.current_version, a.published_version, a.deleted_at,
+                    av.version, av.storage_ref, av.meta, av.author, av.created_at
+             FROM assets a
+             JOIN asset_versions av ON av.asset_id = a.id AND av.version = ?
+             WHERE a.env_id = ? AND a.id = ?`
+          )
+          .get(opts.version, envId, Buffer.from(id))
+      : this.db
+          .prepare<[Buffer, Buffer], JoinRow>(
+            `SELECT a.kind, a.current_version, a.published_version, a.deleted_at,
+                    av.version, av.storage_ref, av.meta, av.author, av.created_at
+             FROM assets a
+             JOIN asset_versions av ON av.asset_id = a.id AND av.version = a.current_version
+             WHERE a.env_id = ? AND a.id = ?`
+          )
+          .get(envId, Buffer.from(id));
+
+    if (!row) return null;
+
+    return {
+      id: new Uint8Array(id),
+      kind: row.kind,
+      current_version: row.current_version,
+      published_version: row.published_version,
+      deleted_at: row.deleted_at,
+      version: row.version,
+      storage_ref: row.storage_ref,
+      meta: JSON.parse(row.meta) as AssetMeta,
+      author: row.author,
+      created_at: row.created_at
+    };
+  }
+
+  async listAssets(input?: ListAssetsInput): Promise<ListAssetsResult> {
+    const envId = Buffer.from(this.mainEnvId);
+    const limit = input?.limit ?? 50;
+    const offset = input?.offset ?? 0;
+    const kindFilter = input?.kind !== undefined ? ' AND a.kind = ?' : '';
+    const deletedFilter = input?.includeDeleted === true ? '' : ' AND a.deleted_at IS NULL';
+
+    interface Row {
+      id: Buffer;
+      kind: string;
+      current_version: number;
+      published_version: number | null;
+      deleted_at: number | null;
+      storage_ref: string;
+      meta: string;
+      created_at: number;
+    }
+
+    const params: unknown[] = [envId];
+    if (input?.kind !== undefined) params.push(input.kind);
+    params.push(limit, offset);
+
+    const rows = this.db
+      .prepare<unknown[], Row>(
+        `SELECT a.id, a.kind, a.current_version, a.published_version, a.deleted_at,
+                av.storage_ref, av.meta, av.created_at
+         FROM assets a
+         JOIN asset_versions av ON av.asset_id = a.id AND av.version = a.current_version
+         WHERE a.env_id = ?${kindFilter}${deletedFilter}
+         ORDER BY av.created_at DESC
+         LIMIT ? OFFSET ?`
+      )
+      .all(...params);
+
+    const countParams: unknown[] = [envId];
+    if (input?.kind !== undefined) countParams.push(input.kind);
+
+    const countRow = this.db
+      .prepare<unknown[], { c: number }>(
+        `SELECT COUNT(*) AS c FROM assets a WHERE a.env_id = ?${kindFilter}${deletedFilter}`
+      )
+      .get(...countParams);
+
+    return {
+      results: rows.map((r) => ({
+        id: new Uint8Array(r.id),
+        kind: r.kind,
+        current_version: r.current_version,
+        published_version: r.published_version,
+        deleted_at: r.deleted_at,
+        storage_ref: r.storage_ref,
+        meta: JSON.parse(r.meta) as AssetMeta,
+        created_at: r.created_at
+      })),
+      total: countRow?.c ?? 0,
+      offset
+    };
+  }
+
+  async readAssetBytes(id: Uint8Array, opts?: { version?: number }): Promise<Buffer> {
+    const asset = await this.getAsset(id, opts);
+    if (!asset) throw new NotFoundError('asset', Buffer.from(id).toString('hex'));
+    const backend = this.assetBackends.resolve(asset.storage_ref);
+    const { bytes } = await backend.get(asset.storage_ref);
+    return bytes;
   }
 
   async close(): Promise<void> {

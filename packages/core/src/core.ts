@@ -7,7 +7,13 @@ import type {
   EntryRef,
   EntryWrite,
   FindEntriesInput,
-  FindEntriesResult
+  FindEntriesResult,
+  AssetMeta,
+  AssetDetail,
+  AssetSummary,
+  AssetWrite,
+  ListAssetsInput,
+  ListAssetsResult
 } from '@ledric/storage';
 import { normalizeTypeDef } from './normalize.js';
 import { deriveContent } from './derive.js';
@@ -103,6 +109,18 @@ export interface MigrateEntriesResult {
   migrated: number;
   failed: MigrateFailure[];
   dry_run?: boolean;
+}
+
+export interface UploadAssetInput {
+  kind: string;
+  bytes: Uint8Array;
+  meta?: AssetMeta;
+  author?: string;
+}
+
+export interface GetAssetInput {
+  id: string; // hex
+  version?: number;
 }
 
 export class ValidationFailedError extends Error {
@@ -289,6 +307,41 @@ export class Core {
       ...(input.version !== undefined ? { version: input.version } : {})
     });
     return { ...write, published_version: write.version };
+  }
+
+  async uploadAsset(input: UploadAssetInput): Promise<AssetWrite> {
+    return this.storage.createAsset({
+      kind: input.kind,
+      bytes: input.bytes,
+      ...(input.meta !== undefined ? { meta: input.meta } : {}),
+      ...(input.author !== undefined ? { author: input.author } : {})
+    });
+  }
+
+  async getAsset(input: GetAssetInput): Promise<AssetDetail | null> {
+    const id = Buffer.from(input.id, 'hex');
+    if (id.byteLength !== 16) {
+      throw new Error(`Invalid asset id "${input.id}" (expected 32-char hex)`);
+    }
+    return this.storage.getAsset(
+      new Uint8Array(id),
+      ...(input.version !== undefined ? [{ version: input.version }] : [])
+    );
+  }
+
+  async listAssets(input?: ListAssetsInput): Promise<ListAssetsResult> {
+    return this.storage.listAssets(input);
+  }
+
+  async readAssetBytes(input: GetAssetInput): Promise<Buffer> {
+    const id = Buffer.from(input.id, 'hex');
+    if (id.byteLength !== 16) {
+      throw new Error(`Invalid asset id "${input.id}" (expected 32-char hex)`);
+    }
+    return this.storage.readAssetBytes(
+      new Uint8Array(id),
+      ...(input.version !== undefined ? [{ version: input.version }] : [])
+    );
   }
 
   async migrateEntries(input: MigrateEntriesInput): Promise<MigrateEntriesResult> {

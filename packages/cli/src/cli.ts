@@ -3,6 +3,7 @@ import { defineCommand, runMain } from 'citty';
 import { serveCommand } from './commands/serve.js';
 import { getCommand } from './commands/get.js';
 import { lsCommand } from './commands/ls.js';
+import { assetCommand } from './commands/asset.js';
 
 const CONFIG_HELP = `
 ledric — MCP/LLM-native self-hosted CMS
@@ -15,6 +16,12 @@ USAGE
   ledric ls                          list every type in the DB with entry counts
   ledric ls <type>                   list entries of a type (summary fields only)
   ledric ls <type> --full            list entries with full content
+  ledric asset upload <file>         upload a file (db backend by default)
+  ledric asset upload <file> --assets-backend local
+                                     … or write bytes to ./ledric-assets
+  ledric asset ls [--kind image]     list assets
+  ledric asset get <id>              read asset metadata
+  ledric asset bytes <id>            write asset bytes to stdout
 
 HOOK IT UP TO YOUR MCP CLIENT
 
@@ -47,7 +54,8 @@ const main = defineCommand({
   subCommands: {
     serve: serveCommand,
     get: getCommand,
-    ls: lsCommand
+    ls: lsCommand,
+    asset: assetCommand
   },
   run() {
     // Citty invokes the parent's `run` even when a subcommand matches; only

@@ -17,8 +17,22 @@ export type {
   EntryDetail,
   EntrySummary,
   FindEntriesInput,
-  FindEntriesResult
+  FindEntriesResult,
+  CreateAssetInput,
+  AssetMeta,
+  AssetWrite,
+  AssetSummary,
+  AssetDetail,
+  ListAssetsInput,
+  ListAssetsResult
 } from './types.js';
 
 export { SqliteStorage, VersionConflictError, NotFoundError } from './sqlite.js';
-export type { OpenOptions } from './sqlite.js';
+export type { OpenOptions, AssetsConfig } from './sqlite.js';
+
+export type {
+  AssetBackend,
+  AssetPutInput,
+  AssetGetResult
+} from './assets/index.js';
+export { AssetBackendRegistry, DbAssetBackend, LocalAssetBackend } from './assets/index.js';

@@ -117,6 +117,22 @@ const MigrateEntriesArgsSchema = z
   })
   .strict();
 
+const GetAssetArgsSchema = z
+  .object({
+    id: z.string().length(32),
+    version: z.number().int().optional()
+  })
+  .strict();
+
+const ListAssetsArgsSchema = z
+  .object({
+    kind: z.string().optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().min(0).optional(),
+    includeDeleted: z.boolean().optional()
+  })
+  .strict();
+
 export const SERVER_NAME = 'ledric';
 export const SERVER_VERSION = '0.0.0';
 
@@ -287,6 +303,38 @@ export function createMcpServer(core: Core): Server {
         }
       },
       {
+        name: 'get_asset',
+        description:
+          'Read an asset by id (32-char hex UUIDv7). Returns metadata only — bytes are fetched via the CLI (ledric asset bytes <id>) or a future HTTP endpoint. Uploads go through the CLI (ledric asset upload <file>) for the same reason.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description: 'Asset id (32-char hex).'
+            },
+            version: { type: 'integer' }
+          },
+          required: ['id'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'list_assets',
+        description:
+          'List assets. Optional `kind` filter (image / video / file / …). Returns summary rows with metadata and storage_ref but no bytes.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string' },
+            limit: { type: 'integer', minimum: 1, maximum: 200 },
+            offset: { type: 'integer', minimum: 0 },
+            includeDeleted: { type: 'boolean' }
+          },
+          additionalProperties: false
+        }
+      },
+      {
         name: 'migrate_entries',
         description:
           'Re-validate every entry of a type against the type\'s current schema; optionally apply a merge_patch to each matching entry first. Entries that change are re-written as new versions stamped with the current schema_version. Pass `dry_run: true` to preview. `filter` is an exact-match map over top-level fields. Returns { type, schema_version, checked, migrated, failed[] }.',
@@ -394,6 +442,28 @@ export function createMcpServer(core: Core): Server {
         case 'publish': {
           const parsed = PublishArgsSchema.parse(args ?? {});
           const result = await core.publish(parsed);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
+          };
+        }
+        case 'get_asset': {
+          const parsed = GetAssetArgsSchema.parse(args ?? {});
+          const result = await core.getAsset(parsed);
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  result === null
+                    ? `not_found: asset ${parsed.id}`
+                    : JSON.stringify(toJsonSafe(result), null, 2)
+              }
+            ]
+          };
+        }
+        case 'list_assets': {
+          const parsed = ListAssetsArgsSchema.parse(args ?? {});
+          const result = await core.listAssets(parsed);
           return {
             content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
           };

@@ -89,5 +89,41 @@ export const migrations: Migration[] = [
       CREATE INDEX idx_slug_history_entry ON slug_history (entry_id);
       CREATE INDEX idx_slug_history_type  ON slug_history (env_id, type_id);
     `
+  },
+  {
+    id: 3,
+    name: '0003_assets',
+    sql: `
+      CREATE TABLE assets (
+        id                BLOB    PRIMARY KEY,
+        env_id            BLOB    NOT NULL REFERENCES envs(id),
+        kind              TEXT    NOT NULL,
+        current_version   INTEGER NOT NULL,
+        published_version INTEGER,
+        deleted_at        INTEGER
+      ) STRICT;
+
+      CREATE INDEX idx_assets_env_kind ON assets (env_id, kind, deleted_at);
+
+      CREATE TABLE asset_versions (
+        asset_id       BLOB    NOT NULL REFERENCES assets(id),
+        version        INTEGER NOT NULL,
+        storage_ref    TEXT    NOT NULL,
+        meta           TEXT    NOT NULL,
+        parent_version INTEGER,
+        author         TEXT,
+        created_at     INTEGER NOT NULL,
+        PRIMARY KEY (asset_id, version)
+      ) STRICT;
+
+      CREATE INDEX idx_asset_versions_created ON asset_versions (created_at);
+
+      CREATE TABLE asset_blobs (
+        asset_id BLOB    NOT NULL,
+        version  INTEGER NOT NULL,
+        bytes    BLOB    NOT NULL,
+        PRIMARY KEY (asset_id, version)
+      ) STRICT;
+    `
   }
 ];

@@ -112,11 +112,70 @@ export interface FindEntriesResult {
   offset: number;
 }
 
+// -------- Assets --------
+
+export interface AssetMeta {
+  mime?: string;
+  size?: number;
+  alt?: string;
+  dims?: { w: number; h: number };
+  [k: string]: unknown;
+}
+
+export interface CreateAssetInput {
+  kind: string;
+  bytes: Uint8Array;
+  meta?: AssetMeta;
+  author?: string;
+}
+
+export interface AssetWrite {
+  id: Uint8Array;
+  version: number;
+  kind: string;
+  storage_ref: string;
+  meta: AssetMeta;
+}
+
+export interface AssetSummary {
+  id: Uint8Array;
+  kind: string;
+  current_version: number;
+  published_version: number | null;
+  deleted_at: number | null;
+  storage_ref: string;
+  meta: AssetMeta;
+  created_at: number;
+}
+
+export interface AssetDetail extends AssetSummary {
+  version: number;
+  author: string | null;
+}
+
+export interface ListAssetsInput {
+  kind?: string;
+  limit?: number;
+  offset?: number;
+  includeDeleted?: boolean;
+}
+
+export interface ListAssetsResult {
+  results: AssetSummary[];
+  total: number;
+  offset: number;
+}
+
 export interface Storage {
   createType(input: CreateTypeInput): Promise<CreateTypeResult>;
   alterType(input: AlterTypeInput): Promise<AlterTypeResult>;
   listTypes(opts?: { includeDeleted?: boolean }): Promise<TypeSummary[]>;
   getType(name: string): Promise<TypeDetail | null>;
+
+  createAsset(input: CreateAssetInput): Promise<AssetWrite>;
+  getAsset(id: Uint8Array, opts?: { version?: number }): Promise<AssetDetail | null>;
+  listAssets(input?: ListAssetsInput): Promise<ListAssetsResult>;
+  readAssetBytes(id: Uint8Array, opts?: { version?: number }): Promise<Buffer>;
 
   createEntry(input: CreateEntryInput): Promise<EntryWrite>;
   updateEntry(input: UpdateEntryInput): Promise<EntryWrite>;

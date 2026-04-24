@@ -1,0 +1,308 @@
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import { defineCommand } from 'citty';
+import { Core } from '@ledric/core';
+import { SqliteStorage, NotFoundError } from '@ledric/storage';
+import type { AssetsConfig } from '@ledric/storage';
+
+function toHex(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('hex');
+}
+
+function guessMime(filePath: string): string | undefined {
+  const ext = path.extname(filePath).toLowerCase();
+  const MAP: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.avif': 'image/avif',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.pdf': 'application/pdf',
+    '.json': 'application/json',
+    '.txt': 'text/plain',
+    '.md': 'text/markdown'
+  };
+  return MAP[ext];
+}
+
+function guessKind(mime: string | undefined): string {
+  if (mime === undefined) return 'file';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
+function assetsConfigFromArgs(args: { assetsBackend?: string; assetsRoot?: string }): AssetsConfig {
+  if (args.assetsBackend === 'local') {
+    return { backend: 'local', root: args.assetsRoot ?? './ledric-assets' };
+  }
+  return { backend: 'db' };
+}
+
+const uploadCommand = defineCommand({
+  meta: {
+    name: 'upload',
+    description: 'Upload a file as an asset. Writes to the configured backend.'
+  },
+  args: {
+    file: {
+      type: 'positional',
+      description: 'Path to the file to upload.',
+      required: true
+    },
+    db: {
+      type: 'string',
+      description: 'Path to the SQLite database file.',
+      default: './ledric.db'
+    },
+    kind: {
+      type: 'string',
+      description: 'Asset kind (image, video, audio, file). Auto-detected from extension if omitted.'
+    },
+    mime: {
+      type: 'string',
+      description: 'MIME type. Auto-detected from extension if omitted.'
+    },
+    alt: {
+      type: 'string',
+      description: 'Alt text (for images; stored in meta).'
+    },
+    'assets-backend': {
+      type: 'string',
+      description: 'Asset backend: db (default) or local.'
+    },
+    'assets-root': {
+      type: 'string',
+      description: 'For the local backend: directory where bytes are written (default ./ledric-assets).'
+    }
+  },
+  async run({ args }) {
+    const abs = path.resolve(args.file);
+    const bytes = await fs.readFile(abs);
+    const mime = args.mime ?? guessMime(abs);
+    const kind = args.kind ?? guessKind(mime);
+
+    const storage = await SqliteStorage.open({
+      path: args.db,
+      assets: assetsConfigFromArgs({
+        assetsBackend: args['assets-backend'],
+        assetsRoot: args['assets-root']
+      })
+    });
+    try {
+      const core = new Core(storage);
+      const result = await core.uploadAsset({
+        kind,
+        bytes,
+        meta: {
+          ...(mime !== undefined ? { mime } : {}),
+          ...(args.alt !== undefined ? { alt: args.alt } : {})
+        }
+      });
+      process.stdout.write(
+        JSON.stringify(
+          {
+            id: toHex(result.id),
+            version: result.version,
+            kind: result.kind,
+            storage_ref: result.storage_ref,
+            meta: result.meta
+          },
+          null,
+          2
+        ) + '\n'
+      );
+    } finally {
+      await storage.close();
+    }
+  }
+});
+
+const lsCommand = defineCommand({
+  meta: {
+    name: 'ls',
+    description: 'List assets.'
+  },
+  args: {
+    db: {
+      type: 'string',
+      description: 'Path to the SQLite database file.',
+      default: './ledric.db'
+    },
+    kind: {
+      type: 'string',
+      description: 'Filter by kind (image / video / file / …).'
+    },
+    limit: {
+      type: 'string',
+      default: '50'
+    },
+    offset: {
+      type: 'string',
+      default: '0'
+    }
+  },
+  async run({ args }) {
+    const storage = await SqliteStorage.open({ path: args.db });
+    try {
+      const core = new Core(storage);
+      const result = await core.listAssets({
+        ...(args.kind !== undefined ? { kind: args.kind } : {}),
+        limit: parseInt(args.limit, 10),
+        offset: parseInt(args.offset, 10)
+      });
+      process.stdout.write(
+        JSON.stringify(
+          {
+            total: result.total,
+            offset: result.offset,
+            results: result.results.map((r) => ({
+              id: toHex(r.id),
+              kind: r.kind,
+              version: r.current_version,
+              storage_ref: r.storage_ref,
+              meta: r.meta
+            }))
+          },
+          null,
+          2
+        ) + '\n'
+      );
+    } finally {
+      await storage.close();
+    }
+  }
+});
+
+const getCommand = defineCommand({
+  meta: {
+    name: 'get',
+    description: 'Read asset metadata by id (32-char hex).'
+  },
+  args: {
+    id: {
+      type: 'positional',
+      description: 'Asset id (hex).',
+      required: true
+    },
+    db: {
+      type: 'string',
+      default: './ledric.db'
+    },
+    version: {
+      type: 'string',
+      description: 'Specific historical version.'
+    }
+  },
+  async run({ args }) {
+    const storage = await SqliteStorage.open({ path: args.db });
+    try {
+      const core = new Core(storage);
+      const versionNum = args.version ? parseInt(args.version, 10) : undefined;
+      const asset = await core.getAsset({
+        id: args.id,
+        ...(versionNum !== undefined ? { version: versionNum } : {})
+      });
+      if (!asset) {
+        process.stderr.write(`ledric: no asset ${args.id} in ${args.db}\n`);
+        process.exit(1);
+      }
+      process.stdout.write(
+        JSON.stringify(
+          {
+            id: toHex(asset.id),
+            kind: asset.kind,
+            version: asset.version,
+            current_version: asset.current_version,
+            published_version: asset.published_version,
+            storage_ref: asset.storage_ref,
+            meta: asset.meta,
+            author: asset.author,
+            created_at: new Date(asset.created_at).toISOString()
+          },
+          null,
+          2
+        ) + '\n'
+      );
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        process.stderr.write(`ledric: ${err.message}\n`);
+        process.exit(1);
+      }
+      throw err;
+    } finally {
+      await storage.close();
+    }
+  }
+});
+
+const bytesCommand = defineCommand({
+  meta: {
+    name: 'bytes',
+    description: 'Write asset bytes to stdout.'
+  },
+  args: {
+    id: {
+      type: 'positional',
+      description: 'Asset id (hex).',
+      required: true
+    },
+    db: {
+      type: 'string',
+      default: './ledric.db'
+    },
+    version: {
+      type: 'string'
+    },
+    'assets-root': {
+      type: 'string',
+      description: 'For local-backend assets: directory where bytes live (default ./ledric-assets).'
+    }
+  },
+  async run({ args }) {
+    const storage = await SqliteStorage.open({
+      path: args.db,
+      assets: {
+        backend: 'local',
+        root: args['assets-root'] ?? './ledric-assets'
+      }
+    });
+    try {
+      const core = new Core(storage);
+      const versionNum = args.version ? parseInt(args.version, 10) : undefined;
+      const bytes = await core.readAssetBytes({
+        id: args.id,
+        ...(versionNum !== undefined ? { version: versionNum } : {})
+      });
+      process.stdout.write(bytes);
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        process.stderr.write(`ledric: ${err.message}\n`);
+        process.exit(1);
+      }
+      throw err;
+    } finally {
+      await storage.close();
+    }
+  }
+});
+
+export const assetCommand = defineCommand({
+  meta: {
+    name: 'asset',
+    description: 'Manage assets (upload, list, read).'
+  },
+  subCommands: {
+    upload: uploadCommand,
+    ls: lsCommand,
+    get: getCommand,
+    bytes: bytesCommand
+  }
+});

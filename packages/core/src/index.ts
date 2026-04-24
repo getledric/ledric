@@ -15,7 +15,9 @@ export type {
   PublishResult,
   MigrateEntriesInput,
   MigrateEntriesResult,
-  MigrateFailure
+  MigrateFailure,
+  UploadAssetInput,
+  GetAssetInput
 } from './core.js';
 export { normalizeTypeDef, normalizeField } from './normalize.js';
 export { validateContent } from './validate.js';
