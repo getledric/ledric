@@ -6,6 +6,12 @@ import {
 import { z } from 'zod';
 import type { Core } from '@ledric/core';
 
+// Some MCP clients serialize a free-form object as a JSON string when the
+// tool's inputSchema uses `additionalProperties: true`. Accept either shape.
+const ObjectOrJsonString = z
+  .union([z.record(z.unknown()), z.string()])
+  .transform((v) => (typeof v === 'string' ? (JSON.parse(v) as Record<string, unknown>) : v));
+
 const FieldDefSchema: z.ZodTypeAny = z
   .lazy(() =>
     z.object({
@@ -41,7 +47,7 @@ const AlterTypeArgsSchema = z
   .object({
     name: z.string(),
     parent_version: z.number().int(),
-    merge_patch: z.record(z.unknown()),
+    merge_patch: ObjectOrJsonString,
     dry_run: z.boolean().optional(),
     author: z.string().optional()
   })
@@ -57,7 +63,7 @@ const EntryRefSchema = z
 const DraftArgsSchema = z
   .object({
     type: z.string(),
-    fields: z.record(z.unknown()),
+    fields: ObjectOrJsonString,
     ref: EntryRefSchema.optional(),
     parent_version: z.number().int().optional(),
     author: z.string().optional()
@@ -74,7 +80,7 @@ const ReadArgsSchema = z
 const FindArgsSchema = z
   .object({
     type: z.string(),
-    where: z.record(z.unknown()).optional(),
+    where: ObjectOrJsonString.optional(),
     limit: z.number().int().min(1).max(200).optional(),
     offset: z.number().int().min(0).optional(),
     order: z
