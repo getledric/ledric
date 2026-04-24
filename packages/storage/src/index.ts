@@ -6,8 +6,17 @@ export type {
   TypeDetail,
   CreateTypeInput,
   CreateTypeResult,
-  ChangeClass
+  ChangeClass,
+  CreateEntryInput,
+  UpdateEntryInput,
+  PublishEntryInput,
+  EntryRef,
+  EntryWrite,
+  EntryDetail,
+  EntrySummary,
+  FindEntriesInput,
+  FindEntriesResult
 } from './types.js';
 
-export { SqliteStorage } from './sqlite.js';
+export { SqliteStorage, VersionConflictError, NotFoundError } from './sqlite.js';
 export type { OpenOptions } from './sqlite.js';

@@ -41,5 +41,53 @@ export const migrations: Migration[] = [
 
       CREATE INDEX idx_type_versions_created ON type_versions (created_at);
     `
+  },
+  {
+    id: 2,
+    name: '0002_entries',
+    sql: `
+      CREATE TABLE entries (
+        id                BLOB    PRIMARY KEY,
+        env_id            BLOB    NOT NULL REFERENCES envs(id),
+        type_id           BLOB    NOT NULL REFERENCES types(id),
+        slug              TEXT    NOT NULL,
+        current_version   INTEGER NOT NULL,
+        published_version INTEGER,
+        deleted_at        INTEGER,
+        UNIQUE (env_id, type_id, slug)
+      ) STRICT;
+
+      CREATE INDEX idx_entries_env_type_deleted ON entries (env_id, type_id, deleted_at);
+      CREATE INDEX idx_entries_published
+        ON entries (env_id, type_id, published_version)
+        WHERE published_version IS NOT NULL AND deleted_at IS NULL;
+
+      CREATE TABLE entry_versions (
+        entry_id       BLOB    NOT NULL REFERENCES entries(id),
+        version        INTEGER NOT NULL,
+        content        TEXT    NOT NULL,
+        schema_version INTEGER NOT NULL,
+        content_hash   BLOB    NOT NULL,
+        parent_version INTEGER,
+        author         TEXT,
+        created_at     INTEGER NOT NULL,
+        PRIMARY KEY (entry_id, version)
+      ) STRICT;
+
+      CREATE INDEX idx_entry_versions_hash    ON entry_versions (content_hash);
+      CREATE INDEX idx_entry_versions_created ON entry_versions (created_at);
+
+      CREATE TABLE slug_history (
+        env_id     BLOB    NOT NULL REFERENCES envs(id),
+        slug       TEXT    NOT NULL,
+        type_id    BLOB    NOT NULL REFERENCES types(id),
+        entry_id   BLOB    NOT NULL REFERENCES entries(id),
+        retired_at INTEGER NOT NULL,
+        PRIMARY KEY (env_id, slug, retired_at)
+      ) STRICT;
+
+      CREATE INDEX idx_slug_history_entry ON slug_history (entry_id);
+      CREATE INDEX idx_slug_history_type  ON slug_history (env_id, type_id);
+    `
   }
 ];

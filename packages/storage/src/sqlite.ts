@@ -6,10 +6,40 @@ import type {
   TypeSummary,
   TypeDetail,
   CreateTypeInput,
-  CreateTypeResult
+  CreateTypeResult,
+  CreateEntryInput,
+  UpdateEntryInput,
+  PublishEntryInput,
+  EntryRef,
+  EntryWrite,
+  EntryDetail,
+  FindEntriesInput,
+  FindEntriesResult
 } from './types.js';
 import { migrations } from './migrations.js';
 import { uuidv7Bytes } from './uuid.js';
+import { contentHash } from './hash.js';
+
+export class VersionConflictError extends Error {
+  readonly code = 'VERSION_CONFLICT';
+  constructor(
+    public readonly type: string,
+    public readonly slug: string,
+    public readonly current_version: number,
+    public readonly your_parent_version: number
+  ) {
+    super(
+      `VERSION_CONFLICT: ${type}/${slug} is at version ${current_version}; your parent_version was ${your_parent_version}`
+    );
+  }
+}
+
+export class NotFoundError extends Error {
+  readonly code = 'NOT_FOUND';
+  constructor(public readonly kind: 'type' | 'entry', public readonly ref: string) {
+    super(`NOT_FOUND: ${kind} "${ref}"`);
+  }
+}
 
 const MAIN_ENV_NAME = 'main';
 
@@ -188,6 +218,281 @@ export class SqliteStorage implements Storage {
       deleted_at: row.deleted_at,
       schema_version: row.current_version,
       definition
+    };
+  }
+
+  private requireTypeId(name: string): { id: Uint8Array; current_version: number } {
+    const row = this.db
+      .prepare<[Buffer, string], { id: Buffer; current_version: number }>(
+        'SELECT id, current_version FROM types WHERE env_id = ? AND name = ? AND deleted_at IS NULL'
+      )
+      .get(Buffer.from(this.mainEnvId), name);
+    if (!row) throw new NotFoundError('type', name);
+    return { id: new Uint8Array(row.id), current_version: row.current_version };
+  }
+
+  async createEntry(input: CreateEntryInput): Promise<EntryWrite> {
+    const typeRow = this.requireTypeId(input.type);
+    const entryId = uuidv7Bytes();
+    const now = Date.now();
+    const hash = contentHash(input.content);
+    const contentJson = JSON.stringify(input.content);
+
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO entries (id, env_id, type_id, slug, current_version, published_version, deleted_at)
+           VALUES (?, ?, ?, ?, 1, NULL, NULL)`
+        )
+        .run(entryId, this.mainEnvId, typeRow.id, input.slug);
+
+      this.db
+        .prepare(
+          `INSERT INTO entry_versions
+             (entry_id, version, content, schema_version, content_hash, parent_version, author, created_at)
+           VALUES (?, 1, ?, ?, ?, NULL, ?, ?)`
+        )
+        .run(entryId, contentJson, input.schema_version, hash, input.author ?? null, now);
+    });
+    tx();
+
+    return { id: entryId, type: input.type, slug: input.slug, version: 1 };
+  }
+
+  async updateEntry(input: UpdateEntryInput): Promise<EntryWrite> {
+    const typeRow = this.requireTypeId(input.ref.type);
+
+    const row = this.db
+      .prepare<[Buffer, Buffer, string], { id: Buffer; current_version: number }>(
+        `SELECT id, current_version FROM entries
+         WHERE env_id = ? AND type_id = ? AND slug = ? AND deleted_at IS NULL`
+      )
+      .get(Buffer.from(this.mainEnvId), Buffer.from(typeRow.id), input.ref.slug);
+
+    if (!row) throw new NotFoundError('entry', `${input.ref.type}/${input.ref.slug}`);
+
+    if (row.current_version !== input.parent_version) {
+      throw new VersionConflictError(
+        input.ref.type,
+        input.ref.slug,
+        row.current_version,
+        input.parent_version
+      );
+    }
+
+    const entryId = new Uint8Array(row.id);
+    const nextVersion = row.current_version + 1;
+    const now = Date.now();
+    const hash = contentHash(input.content);
+    const contentJson = JSON.stringify(input.content);
+
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO entry_versions
+             (entry_id, version, content, schema_version, content_hash, parent_version, author, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          entryId,
+          nextVersion,
+          contentJson,
+          input.schema_version,
+          hash,
+          row.current_version,
+          input.author ?? null,
+          now
+        );
+
+      this.db
+        .prepare('UPDATE entries SET current_version = ? WHERE id = ?')
+        .run(nextVersion, entryId);
+    });
+    tx();
+
+    return { id: entryId, type: input.ref.type, slug: input.ref.slug, version: nextVersion };
+  }
+
+  async readEntry(ref: EntryRef, opts?: { version?: number }): Promise<EntryDetail | null> {
+    const envId = Buffer.from(this.mainEnvId);
+
+    interface JoinRow {
+      id: Buffer;
+      slug: string;
+      current_version: number;
+      published_version: number | null;
+      deleted_at: number | null;
+      version: number;
+      content: string;
+      schema_version: number;
+      content_hash: Buffer;
+      created_at: number;
+    }
+
+    const row = opts?.version !== undefined
+      ? this.db
+          .prepare<[number, Buffer, string, string], JoinRow>(
+            `SELECT e.id, e.slug, e.current_version, e.published_version, e.deleted_at,
+                    ev.version, ev.content, ev.schema_version, ev.content_hash, ev.created_at
+             FROM entries e
+             JOIN types t ON t.id = e.type_id
+             JOIN entry_versions ev ON ev.entry_id = e.id AND ev.version = ?
+             WHERE e.env_id = ? AND t.name = ? AND e.slug = ?`
+          )
+          .get(opts.version, envId, ref.type, ref.slug)
+      : this.db
+          .prepare<[Buffer, string, string], JoinRow>(
+            `SELECT e.id, e.slug, e.current_version, e.published_version, e.deleted_at,
+                    ev.version, ev.content, ev.schema_version, ev.content_hash, ev.created_at
+             FROM entries e
+             JOIN types t ON t.id = e.type_id
+             JOIN entry_versions ev ON ev.entry_id = e.id AND ev.version = e.current_version
+             WHERE e.env_id = ? AND t.name = ? AND e.slug = ?`
+          )
+          .get(envId, ref.type, ref.slug);
+
+    if (!row) return null;
+
+    return {
+      id: new Uint8Array(row.id),
+      type: ref.type,
+      slug: row.slug,
+      version: row.version,
+      current_version: row.current_version,
+      published_version: row.published_version,
+      schema_version: row.schema_version,
+      content: JSON.parse(row.content) as Record<string, unknown>,
+      content_hash: new Uint8Array(row.content_hash),
+      created_at: row.created_at,
+      deleted_at: row.deleted_at
+    };
+  }
+
+  async findEntries(input: FindEntriesInput): Promise<FindEntriesResult> {
+    const typeRow = this.requireTypeId(input.type);
+    const envId = Buffer.from(this.mainEnvId);
+    const limit = input.limit ?? 20;
+    const offset = input.offset ?? 0;
+    const where = input.where ?? {};
+
+    // Build dynamic WHERE for top-level fields via json_extract.
+    const whereFragments: string[] = [];
+    const whereParams: unknown[] = [];
+    for (const [field, value] of Object.entries(where)) {
+      whereFragments.push(`json_extract(ev.content, '$.' || ?) = ?`);
+      whereParams.push(field, value);
+    }
+
+    // Deleted filter
+    const deletedClause = input.includeDeleted ? '' : 'AND e.deleted_at IS NULL';
+
+    // Order
+    let orderClause = 'ORDER BY ev.created_at DESC';
+    if (input.order && input.order.length > 0) {
+      const parts = input.order.map((o) => {
+        const dir = o.dir === 'asc' ? 'ASC' : 'DESC';
+        return `json_extract(ev.content, '$.' || '${o.field.replace(/'/g, "''")}') ${dir}`;
+      });
+      orderClause = `ORDER BY ${parts.join(', ')}`;
+    }
+
+    const whereSql = whereFragments.length > 0 ? `AND ${whereFragments.join(' AND ')}` : '';
+
+    interface JoinRow {
+      id: Buffer;
+      slug: string;
+      current_version: number;
+      published_version: number | null;
+      deleted_at: number | null;
+      version: number;
+      content: string;
+      schema_version: number;
+      content_hash: Buffer;
+      created_at: number;
+    }
+
+    const selectSql = `
+      SELECT e.id, e.slug, e.current_version, e.published_version, e.deleted_at,
+             ev.version, ev.content, ev.schema_version, ev.content_hash, ev.created_at
+      FROM entries e
+      JOIN entry_versions ev ON ev.entry_id = e.id AND ev.version = e.current_version
+      WHERE e.env_id = ? AND e.type_id = ? ${deletedClause} ${whereSql}
+      ${orderClause}
+      LIMIT ? OFFSET ?
+    `;
+
+    const rows = this.db
+      .prepare<unknown[], JoinRow>(selectSql)
+      .all(envId, Buffer.from(typeRow.id), ...whereParams, limit, offset);
+
+    const countSql = `
+      SELECT COUNT(*) AS c
+      FROM entries e
+      JOIN entry_versions ev ON ev.entry_id = e.id AND ev.version = e.current_version
+      WHERE e.env_id = ? AND e.type_id = ? ${deletedClause} ${whereSql}
+    `;
+
+    const countRow = this.db
+      .prepare<unknown[], { c: number }>(countSql)
+      .get(envId, Buffer.from(typeRow.id), ...whereParams);
+
+    const total = countRow?.c ?? 0;
+
+    const results: EntryDetail[] = rows.map((r) => ({
+      id: new Uint8Array(r.id),
+      type: input.type,
+      slug: r.slug,
+      version: r.version,
+      current_version: r.current_version,
+      published_version: r.published_version,
+      schema_version: r.schema_version,
+      content: JSON.parse(r.content) as Record<string, unknown>,
+      content_hash: new Uint8Array(r.content_hash),
+      created_at: r.created_at,
+      deleted_at: r.deleted_at
+    }));
+
+    return { results, total, offset };
+  }
+
+  async publishEntry(input: PublishEntryInput): Promise<EntryWrite> {
+    const typeRow = this.requireTypeId(input.ref.type);
+    const envId = Buffer.from(this.mainEnvId);
+
+    const row = this.db
+      .prepare<[Buffer, Buffer, string], { id: Buffer; current_version: number }>(
+        `SELECT id, current_version FROM entries
+         WHERE env_id = ? AND type_id = ? AND slug = ? AND deleted_at IS NULL`
+      )
+      .get(envId, Buffer.from(typeRow.id), input.ref.slug);
+
+    if (!row) throw new NotFoundError('entry', `${input.ref.type}/${input.ref.slug}`);
+
+    const targetVersion = input.version ?? row.current_version;
+
+    // Ensure the target version exists.
+    const versionRow = this.db
+      .prepare<[Buffer, number], { version: number }>(
+        'SELECT version FROM entry_versions WHERE entry_id = ? AND version = ?'
+      )
+      .get(row.id, targetVersion);
+
+    if (!versionRow) {
+      throw new NotFoundError(
+        'entry',
+        `${input.ref.type}/${input.ref.slug}@v${targetVersion}`
+      );
+    }
+
+    this.db
+      .prepare('UPDATE entries SET published_version = ? WHERE id = ?')
+      .run(targetVersion, row.id);
+
+    return {
+      id: new Uint8Array(row.id),
+      type: input.ref.type,
+      slug: input.ref.slug,
+      version: targetVersion
     };
   }
 

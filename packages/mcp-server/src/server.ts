@@ -37,6 +37,55 @@ const CreateTypeArgsSchema = z
   })
   .strict();
 
+const EntryRefSchema = z
+  .object({
+    type: z.string(),
+    slug: z.string()
+  })
+  .strict();
+
+const DraftArgsSchema = z
+  .object({
+    type: z.string(),
+    fields: z.record(z.unknown()),
+    ref: EntryRefSchema.optional(),
+    parent_version: z.number().int().optional(),
+    author: z.string().optional()
+  })
+  .strict();
+
+const ReadArgsSchema = z
+  .object({
+    ref: EntryRefSchema,
+    version: z.number().int().optional()
+  })
+  .strict();
+
+const FindArgsSchema = z
+  .object({
+    type: z.string(),
+    where: z.record(z.unknown()).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().min(0).optional(),
+    order: z
+      .array(
+        z.object({
+          field: z.string(),
+          dir: z.enum(['asc', 'desc'])
+        })
+      )
+      .optional(),
+    includeDeleted: z.boolean().optional()
+  })
+  .strict();
+
+const PublishArgsSchema = z
+  .object({
+    ref: EntryRefSchema,
+    version: z.number().int().optional()
+  })
+  .strict();
+
 export const SERVER_NAME = 'ledric';
 export const SERVER_VERSION = '0.0.0';
 
@@ -92,6 +141,116 @@ export function createMcpServer(core: Core): Server {
           required: ['name', 'fields'],
           additionalProperties: false
         }
+      },
+      {
+        name: 'draft',
+        description:
+          'Create or update a draft entry. Omit `ref` to create a new entry (slug derived from the type\'s identifier_field). Provide `ref` + `parent_version` to update an existing entry with optimistic concurrency. The returned object is the new content plus its version.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', description: 'Content type name.' },
+            fields: {
+              type: 'object',
+              description: 'Entry content keyed by field name.',
+              additionalProperties: true
+            },
+            ref: {
+              type: 'object',
+              description: 'Optional ref identifying an existing entry to update.',
+              properties: {
+                type: { type: 'string' },
+                slug: { type: 'string' }
+              },
+              required: ['type', 'slug'],
+              additionalProperties: false
+            },
+            parent_version: {
+              type: 'integer',
+              description: 'Required on update. Must equal the entry\'s current version.'
+            },
+            author: { type: 'string' }
+          },
+          required: ['type', 'fields'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'read',
+        description:
+          'Read a single entry by type + slug. Returns the current version by default; pass `version` for a specific historical version.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            ref: {
+              type: 'object',
+              properties: {
+                type: { type: 'string' },
+                slug: { type: 'string' }
+              },
+              required: ['type', 'slug'],
+              additionalProperties: false
+            },
+            version: { type: 'integer' }
+          },
+          required: ['ref'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'find',
+        description:
+          'List entries of a type. `where` supports exact-match filters on top-level fields. `limit` defaults to 20 (max 200). `order` sorts by one or more fields. Returns { results, total, offset }.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            type: { type: 'string' },
+            where: {
+              type: 'object',
+              description: 'Map of field name → exact-match value.',
+              additionalProperties: true
+            },
+            limit: { type: 'integer', minimum: 1, maximum: 200 },
+            offset: { type: 'integer', minimum: 0 },
+            order: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  field: { type: 'string' },
+                  dir: { enum: ['asc', 'desc'] }
+                },
+                required: ['field', 'dir'],
+                additionalProperties: false
+              }
+            },
+            includeDeleted: { type: 'boolean' }
+          },
+          required: ['type'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'publish',
+        description:
+          'Mark an entry\'s version as published. Defaults to the current version; pass `version` to publish a specific historical version.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            ref: {
+              type: 'object',
+              properties: {
+                type: { type: 'string' },
+                slug: { type: 'string' }
+              },
+              required: ['type', 'slug'],
+              additionalProperties: false
+            },
+            version: { type: 'integer' }
+          },
+          required: ['ref'],
+          additionalProperties: false
+        }
       }
     ]
   }));
@@ -114,6 +273,41 @@ export function createMcpServer(core: Core): Server {
             content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
           };
         }
+        case 'draft': {
+          const parsed = DraftArgsSchema.parse(args ?? {});
+          const result = await core.draft(parsed);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
+          };
+        }
+        case 'read': {
+          const parsed = ReadArgsSchema.parse(args ?? {});
+          const result = await core.read(parsed);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: result === null
+                  ? `not_found: ${parsed.ref.type}/${parsed.ref.slug}`
+                  : JSON.stringify(toJsonSafe(result), null, 2)
+              }
+            ]
+          };
+        }
+        case 'find': {
+          const parsed = FindArgsSchema.parse(args ?? {});
+          const result = await core.find(parsed);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
+          };
+        }
+        case 'publish': {
+          const parsed = PublishArgsSchema.parse(args ?? {});
+          const result = await core.publish(parsed);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
+          };
+        }
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -127,4 +321,17 @@ export function createMcpServer(core: Core): Server {
   });
 
   return server;
+}
+
+function toJsonSafe(value: unknown): unknown {
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value).toString('hex');
+  }
+  if (Array.isArray(value)) return value.map(toJsonSafe);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = toJsonSafe(v);
+    return out;
+  }
+  return value;
 }
