@@ -12,7 +12,10 @@ export type {
   DraftResult,
   ReadInput,
   PublishInput,
-  PublishResult
+  PublishResult,
+  MigrateEntriesInput,
+  MigrateEntriesResult,
+  MigrateFailure
 } from './core.js';
 export { normalizeTypeDef, normalizeField } from './normalize.js';
 export { validateContent } from './validate.js';

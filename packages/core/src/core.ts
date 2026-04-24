@@ -12,7 +12,7 @@ import type {
 import { normalizeTypeDef } from './normalize.js';
 import { deriveContent } from './derive.js';
 import { validateContent, type ValidationError } from './validate.js';
-import { classifyChange, type TypeDiff } from './classify.js';
+import { classifyChange, deepEqual, type TypeDiff } from './classify.js';
 import { applyMergePatch } from './merge-patch.js';
 
 export interface Capabilities {
@@ -80,6 +80,29 @@ export interface PublishInput {
 
 export interface PublishResult extends EntryWrite {
   published_version: number;
+}
+
+export interface MigrateEntriesInput {
+  type: string;
+  merge_patch?: Record<string, unknown>;
+  filter?: Record<string, unknown>;
+  dry_run?: boolean;
+  author?: string;
+  limit?: number;
+}
+
+export interface MigrateFailure {
+  ref: EntryRef;
+  errors: ValidationError[];
+}
+
+export interface MigrateEntriesResult {
+  type: string;
+  schema_version: number;
+  checked: number;
+  migrated: number;
+  failed: MigrateFailure[];
+  dry_run?: boolean;
 }
 
 export class ValidationFailedError extends Error {
@@ -266,5 +289,74 @@ export class Core {
       ...(input.version !== undefined ? { version: input.version } : {})
     });
     return { ...write, published_version: write.version };
+  }
+
+  async migrateEntries(input: MigrateEntriesInput): Promise<MigrateEntriesResult> {
+    const typeDetail = await this.storage.getType(input.type);
+    if (!typeDetail) throw new Error(`Unknown type "${input.type}"`);
+
+    const PAGE = Math.min(input.limit ?? 500, 500);
+    let offset = 0;
+    let checked = 0;
+    let migrated = 0;
+    const failed: MigrateFailure[] = [];
+
+    // Stable page ordering (created_at DESC by default) is fine here because
+    // we re-query each page and mutate current_version under optimistic
+    // concurrency; if a page shifts we'll just skip what we already saw.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const page = await this.storage.findEntries({
+        type: input.type,
+        ...(input.filter !== undefined ? { where: input.filter } : {}),
+        limit: PAGE,
+        offset
+      });
+      if (page.results.length === 0) break;
+
+      for (const entry of page.results) {
+        checked++;
+        const ref: EntryRef = { type: entry.type, slug: entry.slug };
+
+        let candidate = entry.content;
+        if (input.merge_patch !== undefined) {
+          candidate = applyMergePatch(candidate, input.merge_patch) as Record<string, unknown>;
+        }
+        candidate = deriveContent(typeDetail.definition, candidate);
+
+        const v = validateContent(typeDetail.definition, candidate);
+        if (!v.ok) {
+          failed.push({ ref, errors: v.errors });
+          continue;
+        }
+
+        const schemaChanged = entry.schema_version !== typeDetail.current_version;
+        const contentChanged = !deepEqual(entry.content, v.value);
+        if (!contentChanged && !schemaChanged) continue;
+
+        migrated++;
+        if (input.dry_run === true) continue;
+
+        await this.storage.updateEntry({
+          ref,
+          content: v.value,
+          parent_version: entry.current_version,
+          schema_version: typeDetail.current_version,
+          ...(input.author !== undefined ? { author: input.author } : {})
+        });
+      }
+
+      if (page.results.length < PAGE) break;
+      offset += page.results.length;
+    }
+
+    return {
+      type: input.type,
+      schema_version: typeDetail.current_version,
+      checked,
+      migrated,
+      failed,
+      ...(input.dry_run === true ? { dry_run: true } : {})
+    };
   }
 }

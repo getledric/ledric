@@ -48,9 +48,195 @@ describe('MCP server (in-memory round trip)', () => {
       'describe_model',
       'draft',
       'find',
+      'migrate_entries',
       'publish',
       'read'
     ]);
+  });
+
+  it('migrate_entries: safe alter, then re-stamp existing entries with the new schema_version', async () => {
+    // Create type at v1 with just title + slug.
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true },
+          slug: { type: 'slug', from: 'title' }
+        }
+      }
+    });
+    // Draft two entries under v1.
+    await client.callTool({
+      name: 'draft',
+      arguments: { type: 'note', fields: { title: 'First' } }
+    });
+    await client.callTool({
+      name: 'draft',
+      arguments: { type: 'note', fields: { title: 'Second' } }
+    });
+
+    // Alter type to v2 adding optional tags. Entries still match (safe class).
+    await client.callTool({
+      name: 'alter_type',
+      arguments: {
+        name: 'note',
+        parent_version: 1,
+        merge_patch: { fields: { tags: { type: 'array', of: { type: 'string' } } } }
+      }
+    });
+
+    // Migrate: no transform, just re-stamp.
+    const migrated = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'migrate_entries',
+          arguments: { type: 'note' }
+        })
+      ).content
+    ));
+    expect(migrated.schema_version).toBe(2);
+    expect(migrated.checked).toBe(2);
+    expect(migrated.migrated).toBe(2);
+    expect(migrated.failed).toEqual([]);
+
+    // Both entries now stamped with schema_version 2.
+    const read = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'read',
+          arguments: { ref: { type: 'note', slug: 'first' } }
+        })
+      ).content
+    ));
+    expect(read.schema_version).toBe(2);
+  });
+
+  it('migrate_entries with merge_patch mutates content and bumps versions', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true },
+          slug: { type: 'slug', from: 'title' },
+          tags: { type: 'array', of: { type: 'string' } }
+        }
+      }
+    });
+    await client.callTool({
+      name: 'draft',
+      arguments: { type: 'note', fields: { title: 'First', tags: ['a'] } }
+    });
+
+    const result = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'migrate_entries',
+          arguments: {
+            type: 'note',
+            merge_patch: { tags: ['a', 'migrated'] }
+          }
+        })
+      ).content
+    ));
+    expect(result.migrated).toBe(1);
+    expect(result.failed).toEqual([]);
+
+    const read = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'read',
+          arguments: { ref: { type: 'note', slug: 'first' } }
+        })
+      ).content
+    ));
+    expect(read.content.tags).toEqual(['a', 'migrated']);
+    expect(read.current_version).toBe(2);
+  });
+
+  it('migrate_entries with dry_run does not write', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true },
+          slug: { type: 'slug', from: 'title' }
+        }
+      }
+    });
+    await client.callTool({
+      name: 'draft',
+      arguments: { type: 'note', fields: { title: 'First' } }
+    });
+
+    const result = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'migrate_entries',
+          arguments: {
+            type: 'note',
+            merge_patch: { title: 'Changed' },
+            dry_run: true
+          }
+        })
+      ).content
+    ));
+    expect(result.migrated).toBe(1);
+    expect(result.dry_run).toBe(true);
+
+    const read = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'read',
+          arguments: { ref: { type: 'note', slug: 'first' } }
+        })
+      ).content
+    ));
+    expect(read.content.title).toBe('First');
+    expect(read.current_version).toBe(1);
+  });
+
+  it('migrate_entries collects validation failures without aborting', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true },
+          slug: { type: 'slug', from: 'title' }
+        }
+      }
+    });
+    await client.callTool({
+      name: 'draft',
+      arguments: { type: 'note', fields: { title: 'Ok' } }
+    });
+
+    // alter_type to add a required field without a default —
+    // existing entries will fail validation on the next migrate pass.
+    await client.callTool({
+      name: 'alter_type',
+      arguments: {
+        name: 'note',
+        parent_version: 1,
+        merge_patch: {
+          fields: { author: { type: 'string', required: true } }
+        }
+      }
+    });
+
+    const result = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'migrate_entries',
+          arguments: { type: 'note' }
+        })
+      ).content
+    ));
+    expect(result.failed.length).toBe(1);
+    expect(result.failed[0].errors[0].code).toBe('required');
   });
 
   it('alter_type with dry_run returns change_class without writing', async () => {

@@ -106,6 +106,17 @@ const PublishArgsSchema = z
   })
   .strict();
 
+const MigrateEntriesArgsSchema = z
+  .object({
+    type: z.string(),
+    merge_patch: ObjectOrJsonString.optional(),
+    filter: ObjectOrJsonString.optional(),
+    dry_run: z.boolean().optional(),
+    author: z.string().optional(),
+    limit: z.number().int().min(1).max(500).optional()
+  })
+  .strict();
+
 export const SERVER_NAME = 'ledric';
 export const SERVER_VERSION = '0.0.0';
 
@@ -276,6 +287,33 @@ export function createMcpServer(core: Core): Server {
         }
       },
       {
+        name: 'migrate_entries',
+        description:
+          'Re-validate every entry of a type against the type\'s current schema; optionally apply a merge_patch to each matching entry first. Entries that change are re-written as new versions stamped with the current schema_version. Pass `dry_run: true` to preview. `filter` is an exact-match map over top-level fields. Returns { type, schema_version, checked, migrated, failed[] }.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            type: { type: 'string' },
+            merge_patch: {
+              type: 'object',
+              description:
+                'RFC 7396 merge patch applied to each entry\'s content before re-validation. Null values delete keys.',
+              additionalProperties: true
+            },
+            filter: {
+              type: 'object',
+              description: 'Exact-match filter on top-level fields (e.g., only rows published before a cutoff).',
+              additionalProperties: true
+            },
+            dry_run: { type: 'boolean' },
+            author: { type: 'string' },
+            limit: { type: 'integer', minimum: 1, maximum: 500 }
+          },
+          required: ['type'],
+          additionalProperties: false
+        }
+      },
+      {
         name: 'publish',
         description:
           'Mark an entry\'s version as published. Defaults to the current version; pass `version` to publish a specific historical version.',
@@ -356,6 +394,13 @@ export function createMcpServer(core: Core): Server {
         case 'publish': {
           const parsed = PublishArgsSchema.parse(args ?? {});
           const result = await core.publish(parsed);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
+          };
+        }
+        case 'migrate_entries': {
+          const parsed = MigrateEntriesArgsSchema.parse(args ?? {});
+          const result = await core.migrateEntries(parsed);
           return {
             content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
           };
