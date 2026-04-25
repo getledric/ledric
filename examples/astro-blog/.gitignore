@@ -1,0 +1,7 @@
+# Astro generated output
+dist/
+.astro/
+
+# Local env overrides
+.env
+.env.local

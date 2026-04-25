@@ -1,0 +1,175 @@
+---
+import Base from '../../layouts/Base.astro';
+import { client, isAssetId, formatPrice } from '../../lib/ledric';
+import { marked } from 'marked';
+
+interface RelatedView {
+  slug: string;
+  title: string;
+  heroId: string | null;
+  priceLabel: string;
+}
+
+const { slug } = Astro.params;
+const product = slug ? await client.read(`product/${slug}`) : null;
+if (!product) {
+  return new Response('Not found', { status: 404 });
+}
+
+const f = product.fields as Record<string, unknown>;
+const title = typeof f.title === 'string' ? f.title : '(untitled)';
+const summary = typeof f.summary === 'string' ? f.summary : '';
+const heroId = isAssetId(f.hero) ? f.hero : null;
+const priceLabel = formatPrice(f.price, f.currency);
+const inStock = f.in_stock !== false;
+const tags: string[] = Array.isArray(f.tags) ? (f.tags as string[]) : [];
+const bodyMd = typeof f.body === 'string' ? f.body : '';
+const bodyHtml = marked.parse(bodyMd, { async: false }) as string;
+
+const relatedRefs: string[] = Array.isArray(f.related)
+  ? (f.related as unknown[]).filter((s): s is string => typeof s === 'string')
+  : [];
+
+const related: RelatedView[] = (
+  await Promise.all(
+    relatedRefs.map(async (ref) => {
+      try {
+        const r = await client.read(`product/${ref}`);
+        if (!r) return null;
+        const rf = r.fields as Record<string, unknown>;
+        return {
+          slug: r.slug,
+          title: typeof rf.title === 'string' ? rf.title : '(untitled)',
+          heroId: isAssetId(rf.hero) ? rf.hero : null,
+          priceLabel: formatPrice(rf.price, rf.currency)
+        } as RelatedView;
+      } catch {
+        return null;
+      }
+    })
+  )
+).filter((p): p is RelatedView => p !== null);
+---
+<Base title={title}>
+  <div class="product-layout">
+    {heroId
+      ? <img class="hero" src={client.assetUrl(heroId)} alt={title} />
+      : <div class="hero-placeholder">no image</div>}
+
+    <div>
+      <div class="meta-row meta-version">v{product.version}</div>
+      <div class="price">{priceLabel}</div>
+      <div class={inStock ? 'stock' : 'stock oos'}>
+        {inStock ? 'In stock' : 'Out of stock'}
+      </div>
+
+      {summary && <p class="lede">{summary}</p>}
+
+      {tags.length > 0 && (
+        <div class="tags tag-row">
+          {tags.map((t) => <span>{t}</span>)}
+        </div>
+      )}
+    </div>
+  </div>
+
+  <article class="prose" set:html={bodyHtml} />
+
+  {related.length > 0 && (
+    <section class="related">
+      <h3>Related</h3>
+      <ul class="related-grid">
+        {related.map((r) => (
+          <li>
+            <a href={`/products/${r.slug}`} class="card">
+              {r.heroId
+                ? <img class="hero" src={client.assetUrl(r.heroId)} alt={r.title} />
+                : <div class="hero-placeholder">no image</div>}
+              <h4>{r.title}</h4>
+              <div class="meta-row">{r.priceLabel}</div>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  <p class="back"><a href="/products">← back to products</a></p>
+</Base>
+
+<style>
+  .product-layout {
+    display: grid;
+    grid-template-columns: 480px 1fr;
+    gap: 40px;
+    margin-bottom: 48px;
+  }
+  @media (max-width: 720px) {
+    .product-layout { grid-template-columns: 1fr; }
+  }
+  .meta-version { margin-bottom: 6px; }
+  .price {
+    font-size: 32px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--accent);
+  }
+  .stock { font-size: 14px; color: var(--muted); }
+  .stock.oos { color: #ff8a8a; }
+  .lede {
+    font-size: 17px;
+    color: var(--ink);
+    margin: 24px 0 0;
+  }
+  .tag-row { margin-top: 20px; }
+  .related {
+    margin-top: 48px;
+    padding-top: 32px;
+    border-top: 1px solid var(--line);
+  }
+  .related h3 {
+    font-size: 14px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+  .related-grid {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+  .related-grid h4 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 10px 0 4px;
+  }
+  .back { margin-top: 48px; }
+  .back a { color: var(--muted); font-size: 14px; }
+</style>
+
+<style is:global>
+  .prose {
+    font-size: 16px;
+    line-height: 1.7;
+  }
+  .prose h2 { margin-top: 32px; font-size: 22px; }
+  .prose ul { margin: 0 0 18px; padding-left: 22px; }
+  .prose li { margin-bottom: 8px; }
+  .prose p { margin: 0 0 18px; }
+  .prose code {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+</style>

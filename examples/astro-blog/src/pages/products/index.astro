@@ -1,0 +1,99 @@
+---
+import Base from '../../layouts/Base.astro';
+import { client, isAssetId, formatPrice } from '../../lib/ledric';
+
+interface ProductView {
+  slug: string;
+  title: string;
+  heroId: string | null;
+  priceLabel: string;
+  inStock: boolean;
+}
+
+let products: ProductView[] = [];
+let total = 0;
+let error: string | null = null;
+try {
+  const result = await client.find('product', { limit: 24 });
+  total = result.total;
+  products = result.results.map((p): ProductView => {
+    const f = p.fields as Record<string, unknown>;
+    return {
+      slug: p.slug,
+      title: typeof f.title === 'string' ? f.title : '(untitled)',
+      heroId: isAssetId(f.hero) ? f.hero : null,
+      priceLabel: formatPrice(f.price, f.currency),
+      inStock: f.in_stock !== false
+    };
+  });
+} catch (err) {
+  error = err instanceof Error ? err.message : String(err);
+}
+
+const subtitle = error ? 'Could not reach the API.' : `${total} live in the catalogue.`;
+---
+<Base title="Products" subtitle={subtitle}>
+  {error && (
+    <p class="error-banner">{error}</p>
+  )}
+
+  {!error && products.length === 0 && (
+    <p class="empty">No products yet. Try <code>yarn cli ls product</code> to see what's there.</p>
+  )}
+
+  {products.length > 0 && (
+    <ul class="product-grid">
+      {products.map((p) => (
+        <li>
+          <a href={`/products/${p.slug}`} class="card">
+            {p.heroId
+              ? <img class="hero" src={client.assetUrl(p.heroId)} alt={p.title} loading="lazy" />
+              : <div class="hero-placeholder">no image</div>}
+            <h2>{p.title}</h2>
+            <div class="meta-row">
+              {p.priceLabel}
+              {!p.inStock && <span class="oos">out of stock</span>}
+            </div>
+          </a>
+        </li>
+      ))}
+    </ul>
+  )}
+</Base>
+
+<style>
+  .error-banner {
+    background: var(--panel);
+    border: 1px solid #5a2a2a;
+    color: #ff8a8a;
+    padding: 18px 22px;
+    border-radius: 8px;
+  }
+  .empty { color: var(--muted); }
+  .product-grid {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 24px;
+  }
+  .card {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+  .product-grid h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 12px 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .product-grid .meta-row {
+    margin-bottom: 8px;
+  }
+  .oos {
+    color: #ff8a8a;
+    margin-left: 10px;
+  }
+</style>

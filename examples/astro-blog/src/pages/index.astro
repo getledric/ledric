@@ -1,0 +1,108 @@
+---
+import Base from '../layouts/Base.astro';
+import { client, isAssetId, formatDate } from '../lib/ledric';
+
+interface PostView {
+  slug: string;
+  title: string;
+  author: string;
+  publishedAt: string;
+  summary: string;
+  heroId: string | null;
+  tags: string[];
+}
+
+let posts: PostView[] = [];
+let total = 0;
+let error: string | null = null;
+try {
+  const result = await client.find('blog_post', { limit: 20 });
+  total = result.total;
+  posts = result.results.map((p): PostView => {
+    const f = p.fields as Record<string, unknown>;
+    return {
+      slug: p.slug,
+      title: typeof f.title === 'string' ? f.title : '(untitled)',
+      author: typeof f.author === 'string' ? f.author : 'unknown',
+      publishedAt: formatDate(f.published_at),
+      summary: typeof f.summary === 'string' ? f.summary : '',
+      heroId: isAssetId(f.hero) ? f.hero : null,
+      tags: Array.isArray(f.tags) ? (f.tags as string[]) : []
+    };
+  });
+} catch (err) {
+  error = err instanceof Error ? err.message : String(err);
+}
+
+const subtitle = error ? 'Could not reach the API.' : `${total} published posts, served live from ledric.`;
+---
+<Base title="The latest from the team" subtitle={subtitle}>
+  {error && (
+    <p class="error-banner">
+      Could not reach <code>{client.baseUrl}</code>. Run <code>yarn cli http</code> from the repo root and refresh.
+      <br /><small>{error}</small>
+    </p>
+  )}
+
+  {posts.length > 0 && (
+    <ul class="post-list">
+      {posts.map((p) => (
+        <li class="post-card">
+          <div>
+            {p.heroId
+              ? <img class="hero" src={client.assetUrl(p.heroId)} alt={p.title} loading="lazy" />
+              : <div class="hero-placeholder">no hero</div>}
+          </div>
+          <div>
+            <h2><a href={`/posts/${p.slug}`}>{p.title}</a></h2>
+            <div class="meta-row">{p.author} · {p.publishedAt}</div>
+            {p.summary && <p class="summary">{p.summary}</p>}
+            {p.tags.length > 0 && (
+              <div class="tags">{p.tags.map((t) => <span>{t}</span>)}</div>
+            )}
+          </div>
+        </li>
+      ))}
+    </ul>
+  )}
+</Base>
+
+<style>
+  .error-banner {
+    background: var(--panel);
+    border: 1px solid #5a2a2a;
+    color: #ff8a8a;
+    padding: 18px 22px;
+    border-radius: 8px;
+  }
+  .post-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 32px;
+  }
+  .post-card {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 28px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 32px;
+  }
+  .post-card h2 {
+    margin: 0 0 6px;
+    font-size: 26px;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+  .post-card h2 a {
+    text-decoration: none;
+  }
+  .post-card .summary {
+    margin: 12px 0 0;
+    line-height: 1.5;
+  }
+  @media (max-width: 720px) {
+    .post-card { grid-template-columns: 1fr; }
+  }
+</style>

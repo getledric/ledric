@@ -1,0 +1,128 @@
+---
+import Base from '../../layouts/Base.astro';
+import { client, isAssetId, formatDate } from '../../lib/ledric';
+import { marked } from 'marked';
+
+const { slug } = Astro.params;
+const post = slug ? await client.read(`blog_post/${slug}`) : null;
+
+if (!post) {
+  return new Response('Not found', { status: 404 });
+}
+
+const f = post.fields as Record<string, unknown>;
+const title = typeof f.title === 'string' ? f.title : '(untitled)';
+const author = typeof f.author === 'string' ? f.author : 'unknown';
+const summary = typeof f.summary === 'string' ? f.summary : '';
+const publishedAt = formatDate(f.published_at);
+const heroId = isAssetId(f.hero) ? f.hero : null;
+const bodyMd = typeof f.body === 'string' ? f.body : '';
+const bodyHtml = marked.parse(bodyMd, { async: false }) as string;
+const tags: string[] = Array.isArray(f.tags) ? (f.tags as string[]) : [];
+const redirect = post._redirect;
+---
+<Base title={title}>
+  {redirect && (
+    <p class="redirect-note">
+      Came from the old slug <code>{redirect.from}</code> — this post is now at <code>{redirect.to}</code>.
+    </p>
+  )}
+
+  {heroId && <img class="hero hero-top" src={client.assetUrl(heroId)} alt={title} />}
+
+  <div class="meta-row meta-spaced">
+    {author} · {publishedAt} · v{post.version}
+  </div>
+
+  {summary && <p class="lede">{summary}</p>}
+
+  <article class="prose" set:html={bodyHtml} />
+
+  {tags.length > 0 && (
+    <div class="tags tag-footer">
+      {tags.map((t) => <span>{t}</span>)}
+    </div>
+  )}
+
+  <p class="back"><a href="/">← back</a></p>
+</Base>
+
+<style>
+  .redirect-note {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 12px 16px;
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 24px;
+  }
+  .hero-top { margin-bottom: 32px; }
+  .meta-spaced { margin-bottom: 8px; }
+  .lede {
+    font-size: 18px;
+    color: var(--muted);
+    font-style: italic;
+    border-left: 3px solid var(--accent);
+    padding: 0 0 0 16px;
+    margin: 0 0 32px;
+  }
+  .tag-footer {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+  .back {
+    margin-top: 48px;
+  }
+  .back a {
+    color: var(--muted);
+    font-size: 14px;
+  }
+</style>
+
+<style is:global>
+  .prose {
+    font-size: 17px;
+    line-height: 1.7;
+  }
+  .prose h2 {
+    margin-top: 36px;
+    margin-bottom: 12px;
+    font-size: 24px;
+    letter-spacing: -0.01em;
+  }
+  .prose h3 {
+    margin-top: 28px;
+    font-size: 19px;
+  }
+  .prose p {
+    margin: 0 0 18px;
+  }
+  .prose code {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  .prose pre {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    padding: 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .prose pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-size: 13px;
+  }
+  .prose a {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+</style>

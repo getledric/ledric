@@ -1,0 +1,19 @@
+{
+  "name": "@ledric/example-astro-blog",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "start": "node ./dist/server/entry.mjs",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/node": "^9.1.0",
+    "@ledric/sdk": "workspace:*",
+    "astro": "^5.1.0",
+    "marked": "^15.0.0"
+  }
+}
