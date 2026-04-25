@@ -97,6 +97,8 @@ export interface FindOptions {
   limit?: number;
   offset?: number;
   locale?: string;
+  /** Resolve asset-typed fields. true expands all; string[] picks specific. */
+  expandAssets?: boolean | string[];
 }
 
 export interface ListAssetsOptions {
@@ -108,4 +110,6 @@ export interface ListAssetsOptions {
 export interface ReadOptions {
   version?: number;
   locale?: string;
+  /** Resolve asset-typed fields. true expands all; string[] picks specific. */
+  expandAssets?: boolean | string[];
 }

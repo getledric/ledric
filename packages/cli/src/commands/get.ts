@@ -30,6 +30,11 @@ export const getCommand = defineCommand({
       type: 'string',
       description: 'Project the entry into this locale.'
     },
+    'expand-assets': {
+      type: 'boolean',
+      description: 'Resolve asset-typed fields to { id, kind, meta, url } inline.',
+      default: false
+    },
     meta: {
       type: 'boolean',
       description: 'Include _meta (version numbers, content hash, created_at).',
@@ -64,7 +69,8 @@ export const getCommand = defineCommand({
       const entry = await core.read({
         ref: { type, slug },
         ...(versionNum !== undefined ? { version: versionNum } : {}),
-        ...(args.locale !== undefined ? { locale: args.locale } : {})
+        ...(args.locale !== undefined ? { locale: args.locale } : {}),
+        ...(args['expand-assets'] === true ? { expand_assets: true } : {})
       });
 
       if (!entry) {

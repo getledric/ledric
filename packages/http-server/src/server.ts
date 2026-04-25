@@ -18,6 +18,13 @@ function toJsonSafe(value: unknown): unknown {
   return value;
 }
 
+function parseExpandAssets(raw: string | undefined): boolean | string[] | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  if (raw === '1' || raw === 'true') return true;
+  if (raw === '0' || raw === 'false') return false;
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 export interface HttpServerOptions {
   logger?: boolean;
   /** CORS origin policy. Default: '*' (open). Set to false to disable CORS. */
@@ -66,15 +73,17 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
 
   app.get<{
     Params: { type: string };
-    Querystring: { limit?: string; offset?: string; locale?: string };
+    Querystring: { limit?: string; offset?: string; locale?: string; expand_assets?: string };
   }>('/entries/:type', async (req) => {
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
     const offset = req.query.offset ? parseInt(req.query.offset, 10) : undefined;
+    const expandAssets = parseExpandAssets(req.query.expand_assets);
     const result = await core.find({
       type: req.params.type,
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {}),
-      ...(req.query.locale !== undefined ? { locale: req.query.locale } : {})
+      ...(req.query.locale !== undefined ? { locale: req.query.locale } : {}),
+      ...(expandAssets !== undefined ? { expand_assets: expandAssets } : {})
     });
     return toJsonSafe({
       total: result.total,
@@ -92,14 +101,16 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
 
   app.get<{
     Params: { type: string; slug: string };
-    Querystring: { version?: string; locale?: string };
+    Querystring: { version?: string; locale?: string; expand_assets?: string };
   }>('/entries/:type/:slug', async (req, reply) => {
     const versionNum = req.query.version ? parseInt(req.query.version, 10) : undefined;
     const localeArg = req.query.locale;
+    const expandAssets = parseExpandAssets(req.query.expand_assets);
     const entry = await core.read({
       ref: { type: req.params.type, slug: req.params.slug },
       ...(versionNum !== undefined ? { version: versionNum } : {}),
-      ...(localeArg !== undefined ? { locale: localeArg } : {})
+      ...(localeArg !== undefined ? { locale: localeArg } : {}),
+      ...(expandAssets !== undefined ? { expand_assets: expandAssets } : {})
     });
     if (!entry) {
       reply.code(404);

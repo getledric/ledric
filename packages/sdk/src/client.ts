@@ -64,6 +64,14 @@ export class LedricClient {
     const params = new URLSearchParams();
     if (opts.version !== undefined) params.set('version', String(opts.version));
     if (opts.locale !== undefined) params.set('locale', opts.locale);
+    if (opts.expandAssets !== undefined) {
+      params.set(
+        'expand_assets',
+        opts.expandAssets === true ? '1'
+          : opts.expandAssets === false ? '0'
+          : opts.expandAssets.join(',')
+      );
+    }
     const qs = params.toString() ? `?${params.toString()}` : '';
     const url = `${this.baseUrl}/entries/${encodeURIComponent(type)}/${encodeURIComponent(slug)}${qs}`;
     const res = await this._fetch(url, { headers: this._headers });
@@ -81,6 +89,14 @@ export class LedricClient {
     if (opts.limit !== undefined) params.set('limit', String(opts.limit));
     if (opts.offset !== undefined) params.set('offset', String(opts.offset));
     if (opts.locale !== undefined) params.set('locale', opts.locale);
+    if (opts.expandAssets !== undefined) {
+      params.set(
+        'expand_assets',
+        opts.expandAssets === true ? '1'
+          : opts.expandAssets === false ? '0'
+          : opts.expandAssets.join(',')
+      );
+    }
     const qs = params.toString() ? `?${params.toString()}` : '';
     const url = `${this.baseUrl}/entries/${encodeURIComponent(type)}${qs}`;
     const res = await this._fetch(url, { headers: this._headers });

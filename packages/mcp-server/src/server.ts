@@ -81,11 +81,16 @@ const DraftArgsSchema = z
   })
   .strict();
 
+const ExpandAssetsSchema = z
+  .union([z.boolean(), z.array(z.string())])
+  .optional();
+
 const ReadArgsSchema = z
   .object({
     ref: EntryRefSchema,
     version: IntFromStringOrNumber.optional(),
-    locale: z.string().optional()
+    locale: z.string().optional(),
+    expand_assets: ExpandAssetsSchema
   })
   .strict();
 
@@ -104,7 +109,8 @@ const FindArgsSchema = z
       )
       .optional(),
     includeDeleted: z.boolean().optional(),
-    locale: z.string().optional()
+    locale: z.string().optional(),
+    expand_assets: ExpandAssetsSchema
   })
   .strict();
 
@@ -281,7 +287,15 @@ export function createMcpServer(core: Core): Server {
               additionalProperties: false
             },
             version: { type: 'integer' },
-            locale: { type: 'string', description: 'IETF locale tag (e.g. "fr"). Must be in the type\'s locales[].' }
+            locale: { type: 'string', description: 'IETF locale tag (e.g. "fr"). Must be in the type\'s locales[].' },
+            expand_assets: {
+              description:
+                'Resolve asset-typed fields. true expands every asset field on the type; an array of field names expands just those.',
+              oneOf: [
+                { type: 'boolean' },
+                { type: 'array', items: { type: 'string' } }
+              ]
+            }
           },
           required: ['ref'],
           additionalProperties: false
@@ -315,7 +329,13 @@ export function createMcpServer(core: Core): Server {
               }
             },
             includeDeleted: { type: 'boolean' },
-            locale: { type: 'string' }
+            locale: { type: 'string' },
+            expand_assets: {
+              oneOf: [
+                { type: 'boolean' },
+                { type: 'array', items: { type: 'string' } }
+              ]
+            }
           },
           required: ['type'],
           additionalProperties: false

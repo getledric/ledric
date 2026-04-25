@@ -21,6 +21,7 @@ import { validateContent, type ValidationError } from './validate.js';
 import { classifyChange, deepEqual, type TypeDiff } from './classify.js';
 import { applyMergePatch } from './merge-patch.js';
 import { projectForLocale, extractLocaleSlugs } from './locale.js';
+import { resolveAssets } from './resolve-assets.js';
 
 export interface Capabilities {
   vectorSearch: boolean;
@@ -79,6 +80,13 @@ export interface ReadInput {
   ref: EntryRef;
   version?: number;
   locale?: string;
+  /**
+   * Resolve asset-typed fields in the response.
+   *   true       → every asset-typed field on the type
+   *   string[]   → only the named asset fields
+   *   undefined  → leave as opaque ids (default)
+   */
+  expand_assets?: boolean | readonly string[];
 }
 
 export interface PublishInput {
@@ -339,17 +347,36 @@ export class Core {
       typeDetail.definition,
       input.locale
     );
-    return { ...entry, content: projected };
+    const resolved = await resolveAssets(
+      projected,
+      typeDetail.definition,
+      this.storage,
+      input.expand_assets
+    );
+    return { ...entry, content: resolved };
   }
 
-  async find(input: FindEntriesInput & { locale?: string }): Promise<FindEntriesResult> {
+  async find(
+    input: FindEntriesInput & { locale?: string; expand_assets?: boolean | readonly string[] }
+  ): Promise<FindEntriesResult> {
     const result = await this.storage.findEntries(input);
     const typeDetail = await this.storage.getType(input.type);
     if (!typeDetail) return result;
-    const projected = result.results.map((r) => ({
-      ...r,
-      content: projectForLocale(r.content, typeDetail.definition, input.locale)
-    }));
+    const projected: typeof result.results = [];
+    for (const r of result.results) {
+      const localeProjected = projectForLocale(
+        r.content,
+        typeDetail.definition,
+        input.locale
+      );
+      const resolved = await resolveAssets(
+        localeProjected,
+        typeDetail.definition,
+        this.storage,
+        input.expand_assets
+      );
+      projected.push({ ...r, content: resolved });
+    }
     return { ...result, results: projected };
   }
 
