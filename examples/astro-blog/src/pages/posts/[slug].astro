@@ -4,11 +4,18 @@ import { client, isAssetId, formatDate } from '../../lib/ledric';
 import { marked } from 'marked';
 
 const { slug } = Astro.params;
-const post = slug ? await client.read(`blog_post/${slug}`) : null;
+const lang = Astro.url.searchParams.get('lang') ?? undefined;
+const post = slug
+  ? await client.read(`blog_post/${slug}`, lang ? { locale: lang } : {})
+  : null;
 
 if (!post) {
   return new Response('Not found', { status: 404 });
 }
+
+// Available locales for this type — used to render the EN/FR/etc switcher.
+const typeDetail = await client.type('blog_post');
+const availableLocales: string[] = typeDetail?.locales ?? [];
 
 const f = post.fields as Record<string, unknown>;
 const title = typeof f.title === 'string' ? f.title : '(untitled)';
@@ -26,6 +33,24 @@ const redirect = post._redirect;
     <p class="redirect-note">
       Came from the old slug <code>{redirect.from}</code> — this post is now at <code>{redirect.to}</code>.
     </p>
+  )}
+
+  {availableLocales.length > 1 && (
+    <div class="locale-switcher">
+      {availableLocales.map((loc) => {
+        const isDefault = loc === (typeDetail?.default_locale ?? availableLocales[0]);
+        const active = (lang ?? typeDetail?.default_locale ?? availableLocales[0]) === loc;
+        // Keep the URL path slug stable when toggling — backend resolves
+        // either the EN or the locale-specific slug via entries_slugs.
+        const pathSlug = slug;
+        const href = isDefault
+          ? `/posts/${pathSlug}`
+          : `/posts/${pathSlug}?lang=${loc}`;
+        return (
+          <a href={href} class={active ? 'loc active' : 'loc'}>{loc.toUpperCase()}</a>
+        );
+      })}
+    </div>
   )}
 
   {heroId && <img class="hero hero-top" src={client.assetUrl(heroId)} alt={title} />}
@@ -48,6 +73,25 @@ const redirect = post._redirect;
 </Base>
 
 <style>
+  .locale-switcher {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 24px;
+  }
+  .locale-switcher .loc {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .locale-switcher .loc.active {
+    color: var(--ink);
+    background: var(--panel);
+    border-color: var(--accent);
+  }
   .redirect-note {
     background: var(--panel);
     border: 1px solid var(--line);

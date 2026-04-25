@@ -12,11 +12,16 @@ interface PostView {
   tags: string[];
 }
 
+const lang = Astro.url.searchParams.get('lang') ?? undefined;
+
 let posts: PostView[] = [];
 let total = 0;
 let error: string | null = null;
 try {
-  const result = await client.find('blog_post', { limit: 20 });
+  const result = await client.find('blog_post', {
+    limit: 20,
+    ...(lang ? { locale: lang } : {})
+  });
   total = result.total;
   posts = result.results.map((p): PostView => {
     const f = p.fields as Record<string, unknown>;
@@ -54,7 +59,7 @@ const subtitle = error ? 'Could not reach the API.' : `${total} published posts,
               : <div class="hero-placeholder">no hero</div>}
           </div>
           <div>
-            <h2><a href={`/posts/${p.slug}`}>{p.title}</a></h2>
+            <h2><a href={lang ? `/posts/${p.slug}?lang=${lang}` : `/posts/${p.slug}`}>{p.title}</a></h2>
             <div class="meta-row">{p.author} · {p.publishedAt}</div>
             {p.summary && <p class="summary">{p.summary}</p>}
             {p.tags.length > 0 && (
