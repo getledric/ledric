@@ -21,6 +21,10 @@ export const renameCommand = defineCommand({
     db: {
       type: 'string',
       default: './ledric.db'
+    },
+    locale: {
+      type: 'string',
+      description: 'Rename the slug for this non-default locale only.'
     }
   },
   async run({ args }) {
@@ -34,7 +38,8 @@ export const renameCommand = defineCommand({
       const core = new Core(storage);
       const result = await core.rename({
         ref: { type, slug },
-        new_slug: args['new-slug']
+        new_slug: args['new-slug'],
+        ...(args.locale !== undefined ? { locale: args.locale } : {})
       });
       process.stdout.write(JSON.stringify(result, null, 2) + '\n');
     } catch (err) {

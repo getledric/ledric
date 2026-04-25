@@ -30,7 +30,10 @@ const TypeDefOptionsSchema = z
     display_field: z.string().optional(),
     summary_fields: z.array(z.string()).optional(),
     on_slug_change: z.enum(['redirect', 'error', 'silent']).optional(),
-    example: z.record(z.unknown()).optional()
+    example: z.record(z.unknown()).optional(),
+    locales: z.array(z.string()).optional(),
+    default_locale: z.string().optional(),
+    fallback: z.record(z.string()).optional()
   })
   .strict();
 
@@ -77,7 +80,8 @@ const DraftArgsSchema = z
 const ReadArgsSchema = z
   .object({
     ref: EntryRefSchema,
-    version: z.number().int().optional()
+    version: z.number().int().optional(),
+    locale: z.string().optional()
   })
   .strict();
 
@@ -95,7 +99,8 @@ const FindArgsSchema = z
         })
       )
       .optional(),
-    includeDeleted: z.boolean().optional()
+    includeDeleted: z.boolean().optional(),
+    locale: z.string().optional()
   })
   .strict();
 
@@ -109,7 +114,8 @@ const PublishArgsSchema = z
 const RenameArgsSchema = z
   .object({
     ref: EntryRefSchema,
-    new_slug: z.string()
+    new_slug: z.string(),
+    locale: z.string().optional()
   })
   .strict();
 
@@ -257,7 +263,7 @@ export function createMcpServer(core: Core): Server {
       {
         name: 'read',
         description:
-          'Read a single entry by type + slug. Returns the current version by default; pass `version` for a specific historical version.',
+          'Read a single entry by type + slug. Returns the current version by default; pass `version` for a specific historical version. Pass `locale` to project the entry into that locale (returns the localized field values flat, with fallback chain applied).',
         inputSchema: {
           type: 'object',
           properties: {
@@ -270,7 +276,8 @@ export function createMcpServer(core: Core): Server {
               required: ['type', 'slug'],
               additionalProperties: false
             },
-            version: { type: 'integer' }
+            version: { type: 'integer' },
+            locale: { type: 'string', description: 'IETF locale tag (e.g. "fr"). Must be in the type\'s locales[].' }
           },
           required: ['ref'],
           additionalProperties: false
@@ -279,7 +286,7 @@ export function createMcpServer(core: Core): Server {
       {
         name: 'find',
         description:
-          'List entries of a type. `where` supports exact-match filters on top-level fields. `limit` defaults to 20 (max 200). `order` sorts by one or more fields. Returns { results, total, offset }.',
+          'List entries of a type. `where` supports exact-match filters on top-level fields. `limit` defaults to 20 (max 200). `order` sorts by one or more fields. Pass `locale` to project each result into that locale. Returns { results, total, offset }.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -303,7 +310,8 @@ export function createMcpServer(core: Core): Server {
                 additionalProperties: false
               }
             },
-            includeDeleted: { type: 'boolean' }
+            includeDeleted: { type: 'boolean' },
+            locale: { type: 'string' }
           },
           required: ['type'],
           additionalProperties: false
@@ -371,7 +379,7 @@ export function createMcpServer(core: Core): Server {
       {
         name: 'rename_entry',
         description:
-          'Rename an entry by changing its slug. The old slug is retired into slug_history and will keep resolving (reads of the old slug return the entry with _redirect pointing at the new slug). Uniqueness is enforced per (type, slug).',
+          'Rename an entry by changing its slug. The old slug is retired into slug_history and will keep resolving (reads of the old slug return the entry with _redirect pointing at the new slug). Uniqueness is enforced per (type, slug). Pass `locale` to rename a non-default-locale slug; without it, renames the default-locale slug.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -387,7 +395,8 @@ export function createMcpServer(core: Core): Server {
             new_slug: {
               type: 'string',
               description: '1-64 chars, a-z / 0-9 / hyphens; no leading or trailing hyphen.'
-            }
+            },
+            locale: { type: 'string' }
           },
           required: ['ref', 'new_slug'],
           additionalProperties: false

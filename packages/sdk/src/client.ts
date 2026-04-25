@@ -61,7 +61,10 @@ export class LedricClient {
     opts: ReadOptions = {}
   ): Promise<Entry<F> | null> {
     const { type, slug } = parseRef(ref);
-    const qs = opts.version !== undefined ? `?version=${encodeURIComponent(opts.version)}` : '';
+    const params = new URLSearchParams();
+    if (opts.version !== undefined) params.set('version', String(opts.version));
+    if (opts.locale !== undefined) params.set('locale', opts.locale);
+    const qs = params.toString() ? `?${params.toString()}` : '';
     const url = `${this.baseUrl}/entries/${encodeURIComponent(type)}/${encodeURIComponent(slug)}${qs}`;
     const res = await this._fetch(url, { headers: this._headers });
     if (res.status === 404) return null;
@@ -77,6 +80,7 @@ export class LedricClient {
     const params = new URLSearchParams();
     if (opts.limit !== undefined) params.set('limit', String(opts.limit));
     if (opts.offset !== undefined) params.set('offset', String(opts.offset));
+    if (opts.locale !== undefined) params.set('locale', opts.locale);
     const qs = params.toString() ? `?${params.toString()}` : '';
     const url = `${this.baseUrl}/entries/${encodeURIComponent(type)}${qs}`;
     const res = await this._fetch(url, { headers: this._headers });

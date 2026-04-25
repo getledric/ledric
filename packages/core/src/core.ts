@@ -20,6 +20,7 @@ import { deriveContent } from './derive.js';
 import { validateContent, type ValidationError } from './validate.js';
 import { classifyChange, deepEqual, type TypeDiff } from './classify.js';
 import { applyMergePatch } from './merge-patch.js';
+import { projectForLocale, extractLocaleSlugs } from './locale.js';
 
 export interface Capabilities {
   vectorSearch: boolean;
@@ -77,6 +78,7 @@ export interface DraftResult extends EntryWrite {
 export interface ReadInput {
   ref: EntryRef;
   version?: number;
+  locale?: string;
 }
 
 export interface PublishInput {
@@ -91,6 +93,7 @@ export interface PublishResult extends EntryWrite {
 export interface RenameInput {
   ref: EntryRef;
   new_slug: string;
+  locale?: string;
 }
 
 export interface RenameResult {
@@ -98,6 +101,7 @@ export interface RenameResult {
   type: string;
   old_slug: string;
   new_slug: string;
+  locale: string | null;
   retired_at: number;
 }
 
@@ -265,6 +269,12 @@ export class Core {
       ]);
     }
 
+    // Compute locale_slugs from any per-locale slug fields. Only included
+    // when the type is localized AND the slug field itself is localized
+    // AND the locale block contains one. For non-localized types this is
+    // always undefined — zero overhead at the storage layer.
+    const localeSlugs = extractLocaleSlugs(typeDetail.definition, validated.value, slugField);
+
     if (input.ref !== undefined) {
       if (input.ref.slug !== slug) {
         throw new ValidationFailedError([
@@ -289,7 +299,8 @@ export class Core {
         content: validated.value,
         parent_version: input.parent_version,
         schema_version: typeDetail.current_version,
-        ...(input.author !== undefined ? { author: input.author } : {})
+        ...(input.author !== undefined ? { author: input.author } : {}),
+        ...(localeSlugs !== undefined ? { locale_slugs: localeSlugs } : {})
       });
       return { ...write, status: 'draft', content: validated.value };
     }
@@ -299,19 +310,42 @@ export class Core {
       slug,
       content: validated.value,
       schema_version: typeDetail.current_version,
-      ...(input.author !== undefined ? { author: input.author } : {})
+      ...(input.author !== undefined ? { author: input.author } : {}),
+      ...(localeSlugs !== undefined ? { locale_slugs: localeSlugs } : {})
     });
     return { ...write, status: 'draft', content: validated.value };
   }
 
   async read(input: ReadInput): Promise<EntryDetail | null> {
-    const opts =
-      input.version !== undefined ? { version: input.version } : undefined;
-    return this.storage.readEntry(input.ref, opts);
+    const opts: { version?: number; locale?: string } = {};
+    if (input.version !== undefined) opts.version = input.version;
+    if (input.locale !== undefined) opts.locale = input.locale;
+    const entry = await this.storage.readEntry(input.ref, opts);
+    if (!entry) return null;
+
+    // For localized types, always run projection — even for the default
+    // locale or no-locale reads — so consumers never see other locales'
+    // translations leaking through `_locale`. For non-localized types
+    // this is a cheap no-op.
+    const typeDetail = await this.storage.getType(entry.type);
+    if (!typeDetail) return entry;
+    const projected = projectForLocale(
+      entry.content,
+      typeDetail.definition,
+      input.locale
+    );
+    return { ...entry, content: projected };
   }
 
-  async find(input: FindEntriesInput): Promise<FindEntriesResult> {
-    return this.storage.findEntries(input);
+  async find(input: FindEntriesInput & { locale?: string }): Promise<FindEntriesResult> {
+    const result = await this.storage.findEntries(input);
+    const typeDetail = await this.storage.getType(input.type);
+    if (!typeDetail) return result;
+    const projected = result.results.map((r) => ({
+      ...r,
+      content: projectForLocale(r.content, typeDetail.definition, input.locale)
+    }));
+    return { ...result, results: projected };
   }
 
   async rename(input: RenameInput): Promise<RenameResult> {
@@ -329,13 +363,15 @@ export class Core {
     }
     const result = await this.storage.renameEntry({
       ref: input.ref,
-      new_slug: input.new_slug
+      new_slug: input.new_slug,
+      ...(input.locale !== undefined ? { locale: input.locale } : {})
     });
     return {
       id: Buffer.from(result.id).toString('hex'),
       type: result.type,
       old_slug: result.old_slug,
       new_slug: result.new_slug,
+      locale: result.locale,
       retired_at: result.retired_at
     };
   }
@@ -383,6 +419,7 @@ export class Core {
     );
   }
 
+  // No-op pass-through used by tests and future hooks.
   async migrateEntries(input: MigrateEntriesInput): Promise<MigrateEntriesResult> {
     const typeDetail = await this.storage.getType(input.type);
     if (!typeDetail) throw new Error(`Unknown type "${input.type}"`);
@@ -429,12 +466,16 @@ export class Core {
         migrated++;
         if (input.dry_run === true) continue;
 
+        const slugField = typeDetail.definition.identifier_field ?? 'slug';
+        const localeSlugs = extractLocaleSlugs(typeDetail.definition, v.value, slugField);
+
         await this.storage.updateEntry({
           ref,
           content: v.value,
           parent_version: entry.current_version,
           schema_version: typeDetail.current_version,
-          ...(input.author !== undefined ? { author: input.author } : {})
+          ...(input.author !== undefined ? { author: input.author } : {}),
+          ...(localeSlugs !== undefined ? { locale_slugs: localeSlugs } : {})
         });
       }
 

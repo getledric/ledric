@@ -26,6 +26,10 @@ export const getCommand = defineCommand({
       type: 'string',
       description: 'Read a specific historical version (integer).'
     },
+    locale: {
+      type: 'string',
+      description: 'Project the entry into this locale.'
+    },
     meta: {
       type: 'boolean',
       description: 'Include _meta (version numbers, content hash, created_at).',
@@ -59,7 +63,8 @@ export const getCommand = defineCommand({
       const versionNum = args.version ? parseInt(args.version, 10) : undefined;
       const entry = await core.read({
         ref: { type, slug },
-        ...(versionNum !== undefined ? { version: versionNum } : {})
+        ...(versionNum !== undefined ? { version: versionNum } : {}),
+        ...(args.locale !== undefined ? { locale: args.locale } : {})
       });
 
       if (!entry) {
@@ -72,7 +77,9 @@ export const getCommand = defineCommand({
         type: entry.type,
         slug: entry.slug,
         version: entry.version,
-        fields: entry.content
+        ...(args.locale !== undefined ? { locale: args.locale } : {}),
+        fields: entry.content,
+        ...(entry._redirect !== undefined ? { _redirect: entry._redirect } : {})
       };
 
       if (args.meta) {

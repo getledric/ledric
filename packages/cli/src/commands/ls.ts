@@ -36,6 +36,10 @@ export const lsCommand = defineCommand({
       type: 'boolean',
       description: 'Include full fields in each row instead of a summary.',
       default: false
+    },
+    locale: {
+      type: 'string',
+      description: 'Project each entry into this locale.'
     }
   },
   async run({ args }) {
@@ -73,7 +77,8 @@ export const lsCommand = defineCommand({
       const result = await core.find({
         type: args.type,
         limit: parseInt(args.limit, 10),
-        offset: parseInt(args.offset, 10)
+        offset: parseInt(args.offset, 10),
+        ...(args.locale !== undefined ? { locale: args.locale } : {})
       });
 
       const rows = result.results.map((r) => {

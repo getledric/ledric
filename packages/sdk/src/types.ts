@@ -6,8 +6,9 @@ export interface Entry<F = Record<string, unknown>> {
   type: string;
   slug: string;
   version: number;
+  locale?: string;
   fields: F;
-  _redirect?: { from: string; to: string };
+  _redirect?: { from: string; to: string; locale?: string };
 }
 
 export interface EntrySummary<F = Record<string, unknown>> {
@@ -95,6 +96,7 @@ export type EntryRef = string | { type: string; slug: string };
 export interface FindOptions {
   limit?: number;
   offset?: number;
+  locale?: string;
 }
 
 export interface ListAssetsOptions {
@@ -105,4 +107,5 @@ export interface ListAssetsOptions {
 
 export interface ReadOptions {
   version?: number;
+  locale?: string;
 }

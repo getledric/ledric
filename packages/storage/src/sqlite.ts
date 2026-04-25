@@ -333,6 +333,8 @@ export class SqliteStorage implements Storage {
     const now = Date.now();
     const hash = contentHash(input.content);
     const contentJson = JSON.stringify(input.content);
+    const localeSlugs = input.locale_slugs ?? {};
+    const hasLocaleSlugs = Object.keys(localeSlugs).length > 0;
 
     const tx = this.db.transaction(() => {
       this.db
@@ -349,6 +351,16 @@ export class SqliteStorage implements Storage {
            VALUES (?, 1, ?, ?, ?, NULL, ?, ?)`
         )
         .run(entryId, contentJson, input.schema_version, hash, input.author ?? null, now);
+
+      if (hasLocaleSlugs) {
+        const insert = this.db.prepare(
+          `INSERT INTO entries_slugs (env_id, type_id, locale, slug, entry_id)
+           VALUES (?, ?, ?, ?, ?)`
+        );
+        for (const [locale, slug] of Object.entries(localeSlugs)) {
+          insert.run(this.mainEnvId, Buffer.from(typeRow.id), locale, slug, entryId);
+        }
+      }
     });
     tx();
 
@@ -403,26 +415,87 @@ export class SqliteStorage implements Storage {
       this.db
         .prepare('UPDATE entries SET current_version = ? WHERE id = ?')
         .run(nextVersion, entryId);
+
+      // locale_slugs === undefined means "don't touch routing"; an empty
+      // map or populated map replaces the entry's per-locale slugs.
+      if (input.locale_slugs !== undefined) {
+        this.db
+          .prepare('DELETE FROM entries_slugs WHERE entry_id = ?')
+          .run(Buffer.from(entryId));
+        const insert = this.db.prepare(
+          `INSERT INTO entries_slugs (env_id, type_id, locale, slug, entry_id)
+           VALUES (?, ?, ?, ?, ?)`
+        );
+        for (const [locale, slug] of Object.entries(input.locale_slugs)) {
+          insert.run(
+            this.mainEnvId,
+            Buffer.from(typeRow.id),
+            locale,
+            slug,
+            Buffer.from(entryId)
+          );
+        }
+      }
     });
     tx();
 
     return { id: entryId, type: input.ref.type, slug: input.ref.slug, version: nextVersion };
   }
 
-  async readEntry(ref: EntryRef, opts?: { version?: number }): Promise<EntryDetail | null> {
+  async readEntry(
+    ref: EntryRef,
+    opts?: { version?: number; locale?: string }
+  ): Promise<EntryDetail | null> {
+    const envId = Buffer.from(this.mainEnvId);
+    const locale = opts?.locale;
+
+    // Locale-aware lookup path: try entries_slugs(locale, slug) first when
+    // a locale is supplied. Falls through to the default-locale entries.slug
+    // path below — consumers can read via either the localized slug OR the
+    // default slug + project.
+    if (locale !== undefined) {
+      const localeRow = this.db
+        .prepare<[Buffer, string, string, string], { entry_id: Buffer; current_slug: string }>(
+          `SELECT es.entry_id, e.slug AS current_slug
+           FROM entries_slugs es
+           JOIN types t  ON t.id  = es.type_id
+           JOIN entries e ON e.id = es.entry_id
+           WHERE es.env_id = ? AND t.name = ? AND es.locale = ? AND es.slug = ?
+             AND e.deleted_at IS NULL`
+        )
+        .get(envId, ref.type, locale, ref.slug);
+      if (localeRow) {
+        const resolved = this.readEntryDirect(
+          { type: ref.type, slug: localeRow.current_slug },
+          opts
+        );
+        if (resolved) return resolved;
+      }
+    }
+
     const direct = this.readEntryDirect(ref, opts);
     if (direct !== null) return direct;
 
-    // Fall through: is this a retired slug for some entry of this type?
-    const envId = Buffer.from(this.mainEnvId);
-    const retired = this.db
-      .prepare<[Buffer, string, string], { entry_id: Buffer }>(
-        `SELECT h.entry_id FROM slug_history h
-         JOIN types t ON t.id = h.type_id
-         WHERE h.env_id = ? AND t.name = ? AND h.slug = ?
-         ORDER BY h.retired_at DESC LIMIT 1`
-      )
-      .get(envId, ref.type, ref.slug);
+    // Fall through: is this a retired slug for some entry of this type? Honour
+    // locale: a retired FR slug only matches when the reader asks for FR
+    // (or unspecified, which we treat as "any locale" for back-compat).
+    const retired = locale !== undefined
+      ? this.db
+          .prepare<[Buffer, string, string, string], { entry_id: Buffer }>(
+            `SELECT h.entry_id FROM slug_history h
+             JOIN types t ON t.id = h.type_id
+             WHERE h.env_id = ? AND t.name = ? AND h.slug = ? AND h.locale = ?
+             ORDER BY h.retired_at DESC LIMIT 1`
+          )
+          .get(envId, ref.type, ref.slug, locale)
+      : this.db
+          .prepare<[Buffer, string, string], { entry_id: Buffer }>(
+            `SELECT h.entry_id FROM slug_history h
+             JOIN types t ON t.id = h.type_id
+             WHERE h.env_id = ? AND t.name = ? AND h.slug = ?
+             ORDER BY h.retired_at DESC LIMIT 1`
+          )
+          .get(envId, ref.type, ref.slug);
 
     if (!retired) return null;
 
@@ -434,12 +507,31 @@ export class SqliteStorage implements Storage {
 
     if (!currentRow || currentRow.deleted_at !== null) return null;
 
+    // For non-default-locale renames, look up the entry's current locale slug
+    // to surface in the redirect target.
+    let redirectTo = currentRow.slug;
+    if (locale !== undefined) {
+      const currentLocaleSlug = this.db
+        .prepare<[Buffer, string], { slug: string }>(
+          'SELECT slug FROM entries_slugs WHERE entry_id = ? AND locale = ?'
+        )
+        .get(retired.entry_id, locale);
+      if (currentLocaleSlug) redirectTo = currentLocaleSlug.slug;
+    }
+
     const resolved = this.readEntryDirect(
       { type: ref.type, slug: currentRow.slug },
       opts
     );
     if (!resolved) return null;
-    return { ...resolved, _redirect: { from: ref.slug, to: currentRow.slug } };
+    return {
+      ...resolved,
+      _redirect: {
+        from: ref.slug,
+        to: redirectTo,
+        ...(locale !== undefined ? { locale } : {})
+      }
+    };
   }
 
   private readEntryDirect(
@@ -503,46 +595,82 @@ export class SqliteStorage implements Storage {
   async renameEntry(input: import('./types.js').RenameEntryInput): Promise<import('./types.js').RenameEntryResult> {
     const typeRow = this.requireTypeId(input.ref.type);
     const envId = Buffer.from(this.mainEnvId);
+    const localeArg = input.locale ?? null;
 
-    const entryRow = this.db
-      .prepare<[Buffer, Buffer, string], { id: Buffer }>(
-        `SELECT id FROM entries
-         WHERE env_id = ? AND type_id = ? AND slug = ? AND deleted_at IS NULL`
-      )
-      .get(envId, Buffer.from(typeRow.id), input.ref.slug);
-
-    if (!entryRow) throw new NotFoundError('entry', `${input.ref.type}/${input.ref.slug}`);
+    let entryId: Buffer;
+    if (input.locale === undefined) {
+      // Default-locale (or non-localized) rename — look up via entries.slug.
+      const entryRow = this.db
+        .prepare<[Buffer, Buffer, string], { id: Buffer }>(
+          `SELECT id FROM entries
+           WHERE env_id = ? AND type_id = ? AND slug = ? AND deleted_at IS NULL`
+        )
+        .get(envId, Buffer.from(typeRow.id), input.ref.slug);
+      if (!entryRow) throw new NotFoundError('entry', `${input.ref.type}/${input.ref.slug}`);
+      entryId = entryRow.id;
+    } else {
+      // Non-default-locale rename — look up via entries_slugs.
+      const localeRow = this.db
+        .prepare<[Buffer, Buffer, string, string], { entry_id: Buffer }>(
+          `SELECT entry_id FROM entries_slugs
+           WHERE env_id = ? AND type_id = ? AND locale = ? AND slug = ?`
+        )
+        .get(envId, Buffer.from(typeRow.id), input.locale, input.ref.slug);
+      if (!localeRow) {
+        throw new NotFoundError(
+          'entry',
+          `${input.ref.type}/${input.ref.slug}@${input.locale}`
+        );
+      }
+      entryId = localeRow.entry_id;
+    }
 
     if (input.new_slug === input.ref.slug) {
       return {
-        id: new Uint8Array(entryRow.id),
+        id: new Uint8Array(entryId),
         type: input.ref.type,
         old_slug: input.ref.slug,
         new_slug: input.new_slug,
+        locale: localeArg,
         retired_at: Date.now()
       };
     }
 
-    // Uniqueness of new_slug within (env, type) enforced by the UNIQUE index on entries.
     const now = Date.now();
     const tx = this.db.transaction(() => {
       this.db
         .prepare(
-          'INSERT INTO slug_history (env_id, slug, type_id, entry_id, retired_at) VALUES (?, ?, ?, ?, ?)'
+          'INSERT INTO slug_history (env_id, slug, type_id, entry_id, retired_at, locale) VALUES (?, ?, ?, ?, ?, ?)'
         )
-        .run(envId, input.ref.slug, Buffer.from(typeRow.id), entryRow.id, now);
+        .run(envId, input.ref.slug, Buffer.from(typeRow.id), entryId, now, localeArg);
 
-      this.db
-        .prepare('UPDATE entries SET slug = ? WHERE id = ?')
-        .run(input.new_slug, entryRow.id);
+      if (input.locale === undefined) {
+        this.db
+          .prepare('UPDATE entries SET slug = ? WHERE id = ?')
+          .run(input.new_slug, entryId);
+      } else {
+        this.db
+          .prepare(
+            `UPDATE entries_slugs SET slug = ?
+             WHERE env_id = ? AND type_id = ? AND locale = ? AND slug = ?`
+          )
+          .run(
+            input.new_slug,
+            envId,
+            Buffer.from(typeRow.id),
+            input.locale,
+            input.ref.slug
+          );
+      }
     });
     tx();
 
     return {
-      id: new Uint8Array(entryRow.id),
+      id: new Uint8Array(entryId),
       type: input.ref.type,
       old_slug: input.ref.slug,
       new_slug: input.new_slug,
+      locale: localeArg,
       retired_at: now
     };
   }

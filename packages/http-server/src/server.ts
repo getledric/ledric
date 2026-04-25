@@ -33,7 +33,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     app.register(cors, {
       origin: corsOption,
       methods: ['GET', 'POST', 'OPTIONS'],
-      exposedHeaders: ['X-Ledric-Redirect']
+      exposedHeaders: ['X-Ledric-Redirect', 'X-Ledric-Redirect-Locale']
     });
   }
 
@@ -66,14 +66,15 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
 
   app.get<{
     Params: { type: string };
-    Querystring: { limit?: string; offset?: string };
+    Querystring: { limit?: string; offset?: string; locale?: string };
   }>('/entries/:type', async (req) => {
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
     const offset = req.query.offset ? parseInt(req.query.offset, 10) : undefined;
     const result = await core.find({
       type: req.params.type,
       ...(limit !== undefined ? { limit } : {}),
-      ...(offset !== undefined ? { offset } : {})
+      ...(offset !== undefined ? { offset } : {}),
+      ...(req.query.locale !== undefined ? { locale: req.query.locale } : {})
     });
     return toJsonSafe({
       total: result.total,
@@ -91,22 +92,30 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
 
   app.get<{
     Params: { type: string; slug: string };
-    Querystring: { version?: string };
+    Querystring: { version?: string; locale?: string };
   }>('/entries/:type/:slug', async (req, reply) => {
     const versionNum = req.query.version ? parseInt(req.query.version, 10) : undefined;
+    const localeArg = req.query.locale;
     const entry = await core.read({
       ref: { type: req.params.type, slug: req.params.slug },
-      ...(versionNum !== undefined ? { version: versionNum } : {})
+      ...(versionNum !== undefined ? { version: versionNum } : {}),
+      ...(localeArg !== undefined ? { locale: localeArg } : {})
     });
     if (!entry) {
       reply.code(404);
       return { error: { code: 'NOT_FOUND', message: `${req.params.type}/${req.params.slug}` } };
     }
     if (entry._redirect !== undefined) {
-      const qs = versionNum !== undefined ? `?version=${versionNum}` : '';
+      const params = new URLSearchParams();
+      if (versionNum !== undefined) params.set('version', String(versionNum));
+      if (localeArg !== undefined) params.set('locale', localeArg);
+      const qs = params.toString() ? `?${params.toString()}` : '';
       reply.code(301);
       reply.header('Location', `/entries/${entry.type}/${entry._redirect.to}${qs}`);
       reply.header('X-Ledric-Redirect', entry._redirect.to);
+      if (entry._redirect.locale !== undefined) {
+        reply.header('X-Ledric-Redirect-Locale', entry._redirect.locale);
+      }
       return reply.send();
     }
     return {
@@ -114,6 +123,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       type: entry.type,
       slug: entry.slug,
       version: entry.version,
+      ...(localeArg !== undefined ? { locale: localeArg } : {}),
       fields: entry.content
     };
   });

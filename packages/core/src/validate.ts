@@ -1,4 +1,5 @@
 import type { FieldDef, TypeDef } from '@ledric/schema';
+import { LOCALE_KEY } from './locale.js';
 
 export interface ValidationError {
   path: string;
@@ -23,8 +24,10 @@ export function validateContent(
   const errors: ValidationError[] = [];
   const value: Record<string, unknown> = {};
 
-  // Detect unknown fields — strict by default in this slice.
+  // Detect unknown fields — strict by default in this slice. The `_locale`
+  // sidecar is handled separately below.
   for (const key of Object.keys(content)) {
+    if (key === LOCALE_KEY) continue;
     if (!(key in def.fields)) {
       errors.push({
         path: `/${key}`,
@@ -54,6 +57,81 @@ export function validateContent(
       errors.push(...fieldErrors);
     } else {
       value[name] = raw;
+    }
+  }
+
+  // Localization sidecar.
+  const localeBlock = content[LOCALE_KEY];
+  if (localeBlock !== undefined && localeBlock !== null) {
+    if (def.locales === undefined) {
+      errors.push({
+        path: `/${LOCALE_KEY}`,
+        code: 'unknown_field',
+        message: `Type "${def.name}" has no locales[] declared, _locale is not allowed.`
+      });
+    } else if (typeof localeBlock !== 'object' || Array.isArray(localeBlock)) {
+      errors.push({
+        path: `/${LOCALE_KEY}`,
+        code: 'type',
+        message: '_locale must be an object keyed by locale name.'
+      });
+    } else {
+      const localeMap = localeBlock as Record<string, unknown>;
+      const projected: Record<string, Record<string, unknown>> = {};
+      for (const [locale, perLocale] of Object.entries(localeMap)) {
+        if (!def.locales.includes(locale)) {
+          errors.push({
+            path: `/${LOCALE_KEY}/${locale}`,
+            code: 'unknown_locale',
+            message: `Locale "${locale}" is not in type "${def.name}".locales[].`,
+            expected: def.locales,
+            actual: locale
+          });
+          continue;
+        }
+        if (typeof perLocale !== 'object' || perLocale === null || Array.isArray(perLocale)) {
+          errors.push({
+            path: `/${LOCALE_KEY}/${locale}`,
+            code: 'type',
+            message: `_locale.${locale} must be an object.`
+          });
+          continue;
+        }
+        const perLocaleObj = perLocale as Record<string, unknown>;
+        const accepted: Record<string, unknown> = {};
+        for (const [fname, fvalue] of Object.entries(perLocaleObj)) {
+          if (fvalue === undefined || fvalue === null) continue;
+          const fdef = def.fields[fname];
+          if (!fdef) {
+            errors.push({
+              path: `/${LOCALE_KEY}/${locale}/${fname}`,
+              code: 'unknown_field',
+              message: `Field "${fname}" is not in the schema.`
+            });
+            continue;
+          }
+          if (fdef.localized !== true) {
+            errors.push({
+              path: `/${LOCALE_KEY}/${locale}/${fname}`,
+              code: 'not_localized',
+              message: `Field "${fname}" is not localized — only fields with localized:true can appear inside _locale.`
+            });
+            continue;
+          }
+          const fieldErrors = validateField(
+            `/${LOCALE_KEY}/${locale}/${fname}`,
+            fdef,
+            fvalue
+          );
+          if (fieldErrors.length > 0) {
+            errors.push(...fieldErrors);
+          } else {
+            accepted[fname] = fvalue;
+          }
+        }
+        if (Object.keys(accepted).length > 0) projected[locale] = accepted;
+      }
+      if (Object.keys(projected).length > 0) value[LOCALE_KEY] = projected;
     }
   }
 

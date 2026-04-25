@@ -47,6 +47,8 @@ export interface CreateEntryInput {
   content: Record<string, unknown>;
   schema_version: number;
   author?: string;
+  /** Non-default-locale slug overrides ({ "fr": "bonjour-le-monde", … }). */
+  locale_slugs?: Record<string, string>;
 }
 
 export interface UpdateEntryInput {
@@ -55,6 +57,8 @@ export interface UpdateEntryInput {
   parent_version: number;
   schema_version: number;
   author?: string;
+  /** Replaces the entry's set of non-default-locale slugs. */
+  locale_slugs?: Record<string, string>;
 }
 
 export interface PublishEntryInput {
@@ -86,12 +90,14 @@ export interface EntryDetail {
   content_hash: Uint8Array;
   created_at: number;
   deleted_at: number | null;
-  _redirect?: { from: string; to: string };
+  _redirect?: { from: string; to: string; locale?: string };
 }
 
 export interface RenameEntryInput {
   ref: EntryRef;
   new_slug: string;
+  /** When set, renames the slug for this non-default locale only. */
+  locale?: string;
 }
 
 export interface RenameEntryResult {
@@ -99,6 +105,7 @@ export interface RenameEntryResult {
   type: string;
   old_slug: string;
   new_slug: string;
+  locale: string | null;
   retired_at: number;
 }
 
@@ -193,7 +200,7 @@ export interface Storage {
 
   createEntry(input: CreateEntryInput): Promise<EntryWrite>;
   updateEntry(input: UpdateEntryInput): Promise<EntryWrite>;
-  readEntry(ref: EntryRef, opts?: { version?: number }): Promise<EntryDetail | null>;
+  readEntry(ref: EntryRef, opts?: { version?: number; locale?: string }): Promise<EntryDetail | null>;
   findEntries(input: FindEntriesInput): Promise<FindEntriesResult>;
   publishEntry(input: PublishEntryInput): Promise<EntryWrite>;
   renameEntry(input: RenameEntryInput): Promise<RenameEntryResult>;

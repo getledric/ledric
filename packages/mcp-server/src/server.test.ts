@@ -112,6 +112,178 @@ describe('MCP server (in-memory round trip)', () => {
     expect(redirected._redirect).toEqual({ from: 'first', to: 'the-first-note' });
   });
 
+  it('localization: draft + read project per-locale; rename per-locale slug works', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'post',
+        fields: {
+          title: { type: 'string', required: true, localized: true },
+          slug: { type: 'slug', from: 'title', localized: true },
+          body: { type: 'markdown', localized: true },
+          published_at: { type: 'date' }
+        },
+        opts: {
+          locales: ['en', 'fr', 'de'],
+          default_locale: 'en',
+          fallback: { de: 'fr' },
+          identifier_field: 'slug'
+        }
+      }
+    });
+
+    // Draft with English at the top, FR + DE inside _locale (DE sparse).
+    const drafted = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'draft',
+          arguments: {
+            type: 'post',
+            fields: {
+              title: 'Hello World',
+              body: '## hi',
+              published_at: '2026-04-25',
+              _locale: {
+                fr: { title: 'Bonjour le monde', body: '## salut' },
+                de: { title: 'Hallo Welt' } // body / slug intentionally missing
+              }
+            }
+          }
+        })
+      ).content
+    ));
+    expect(drafted.slug).toBe('hello-world');
+    expect(drafted.content._locale.fr.slug).toBe('bonjour-le-monde');
+    expect(drafted.content._locale.de.slug).toBe('hallo-welt');
+
+    // Default-locale read: top-level fields, _locale stripped.
+    const en = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'read',
+          arguments: { ref: { type: 'post', slug: 'hello-world' } }
+        })
+      ).content
+    ));
+    expect(en.content.title).toBe('Hello World');
+    expect(en.content._locale).toBeUndefined();
+
+    // FR read by FR slug — gets FR projection.
+    const fr = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'read',
+          arguments: {
+            ref: { type: 'post', slug: 'bonjour-le-monde' },
+            locale: 'fr'
+          }
+        })
+      ).content
+    ));
+    expect(fr.content.title).toBe('Bonjour le monde');
+    expect(fr.content.body).toBe('## salut');
+
+    // DE read — title from de, body falls through de → fr (per fallback).
+    const de = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'read',
+          arguments: {
+            ref: { type: 'post', slug: 'hallo-welt' },
+            locale: 'de'
+          }
+        })
+      ).content
+    ));
+    expect(de.content.title).toBe('Hallo Welt');
+    expect(de.content.body).toBe('## salut');
+
+    // Rename FR slug — old FR slug should redirect.
+    const renamed = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'rename_entry',
+          arguments: {
+            ref: { type: 'post', slug: 'bonjour-le-monde' },
+            new_slug: 'salut-le-monde',
+            locale: 'fr'
+          }
+        })
+      ).content
+    ));
+    expect(renamed.locale).toBe('fr');
+    expect(renamed.new_slug).toBe('salut-le-monde');
+
+    const oldFr = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'read',
+          arguments: {
+            ref: { type: 'post', slug: 'bonjour-le-monde' },
+            locale: 'fr'
+          }
+        })
+      ).content
+    ));
+    expect(oldFr._redirect).toEqual({
+      from: 'bonjour-le-monde',
+      to: 'salut-le-monde',
+      locale: 'fr'
+    });
+
+    // Default-locale slug still works untouched.
+    const stillEn = JSON.parse(firstText(
+      (
+        await client.callTool({
+          name: 'read',
+          arguments: { ref: { type: 'post', slug: 'hello-world' } }
+        })
+      ).content
+    ));
+    expect(stillEn.slug).toBe('hello-world');
+  });
+
+  it('localization: validator rejects unknown locales and non-localized fields in _locale', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'post',
+        fields: {
+          title: { type: 'string', required: true, localized: true },
+          slug: { type: 'slug', from: 'title', localized: true },
+          published_at: { type: 'date' } // NOT localized
+        },
+        opts: { locales: ['en', 'fr'], default_locale: 'en' }
+      }
+    });
+
+    const unknownLocale = await client.callTool({
+      name: 'draft',
+      arguments: {
+        type: 'post',
+        fields: {
+          title: 'Hello',
+          _locale: { es: { title: 'Hola' } }
+        }
+      }
+    });
+    expect(unknownLocale.isError).toBe(true);
+    expect(firstText(unknownLocale.content)).toMatch(/unknown_locale|VALIDATION_FAILED/);
+
+    const notLocalized = await client.callTool({
+      name: 'draft',
+      arguments: {
+        type: 'post',
+        fields: {
+          title: 'Hello',
+          _locale: { fr: { title: 'Bonjour', published_at: '2026-04-25' } }
+        }
+      }
+    });
+    expect(notLocalized.isError).toBe(true);
+    expect(firstText(notLocalized.content)).toMatch(/not_localized|VALIDATION_FAILED/);
+  });
+
   it('rename_entry rejects an invalid slug format', async () => {
     await client.callTool({
       name: 'create_type',

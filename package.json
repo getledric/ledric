@@ -12,12 +12,12 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "yarn workspaces foreach --all --topological --exclude='@ledric/example-*' run build",
-    "dev": "yarn workspaces foreach --all --parallel --interlaced --exclude='@ledric/example-*' run dev",
+    "build": "yarn workspaces foreach --all --topological --exclude '@ledric/example-*' run build",
+    "dev": "yarn workspaces foreach --all --parallel --interlaced --exclude '@ledric/example-*' run dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "clean": "yarn workspaces foreach --all --exclude='@ledric/example-*' run clean",
+    "clean": "yarn workspaces foreach --all --exclude '@ledric/example-*' run clean",
     "cli": "node packages/cli/dist/cli.js"
   },
   "devDependencies": {

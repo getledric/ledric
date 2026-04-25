@@ -28,3 +28,10 @@ export { deriveContent, slugify } from './derive.js';
 export { classifyChange } from './classify.js';
 export type { TypeDiff, FieldDiff } from './classify.js';
 export { applyMergePatch } from './merge-patch.js';
+export {
+  LOCALE_KEY,
+  defaultLocale,
+  computeFallbackChain,
+  projectForLocale,
+  extractLocaleSlugs
+} from './locale.js';

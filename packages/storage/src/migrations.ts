@@ -125,5 +125,23 @@ export const migrations: Migration[] = [
         PRIMARY KEY (asset_id, version)
       ) STRICT;
     `
+  },
+  {
+    id: 4,
+    name: '0004_locales',
+    sql: `
+      ALTER TABLE slug_history ADD COLUMN locale TEXT;
+
+      CREATE TABLE entries_slugs (
+        env_id   BLOB    NOT NULL REFERENCES envs(id),
+        type_id  BLOB    NOT NULL REFERENCES types(id),
+        locale   TEXT    NOT NULL,
+        slug     TEXT    NOT NULL,
+        entry_id BLOB    NOT NULL REFERENCES entries(id),
+        PRIMARY KEY (env_id, type_id, locale, slug)
+      ) STRICT;
+
+      CREATE INDEX idx_entries_slugs_entry ON entries_slugs (entry_id);
+    `
   }
 ];
