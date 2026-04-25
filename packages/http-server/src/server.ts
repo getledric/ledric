@@ -73,17 +73,25 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
 
   app.get<{
     Params: { type: string };
-    Querystring: { limit?: string; offset?: string; locale?: string; expand_assets?: string };
+    Querystring: {
+      limit?: string;
+      offset?: string;
+      locale?: string;
+      expand_assets?: string;
+      resolve_refs?: string;
+    };
   }>('/entries/:type', async (req) => {
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
     const offset = req.query.offset ? parseInt(req.query.offset, 10) : undefined;
     const expandAssets = parseExpandAssets(req.query.expand_assets);
+    const resolveRefs = req.query.resolve_refs === '1' || req.query.resolve_refs === 'true';
     const result = await core.find({
       type: req.params.type,
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {}),
       ...(req.query.locale !== undefined ? { locale: req.query.locale } : {}),
-      ...(expandAssets !== undefined ? { expand_assets: expandAssets } : {})
+      ...(expandAssets !== undefined ? { expand_assets: expandAssets } : {}),
+      ...(resolveRefs ? { resolve_refs: true } : {})
     });
     return toJsonSafe({
       total: result.total,
@@ -94,23 +102,31 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
         slug: r.slug,
         version: r.current_version,
         published_version: r.published_version,
-        fields: r.content
+        fields: r.content,
+        ...(r._refs !== undefined ? { _refs: r._refs } : {})
       }))
     });
   });
 
   app.get<{
     Params: { type: string; slug: string };
-    Querystring: { version?: string; locale?: string; expand_assets?: string };
+    Querystring: {
+      version?: string;
+      locale?: string;
+      expand_assets?: string;
+      resolve_refs?: string;
+    };
   }>('/entries/:type/:slug', async (req, reply) => {
     const versionNum = req.query.version ? parseInt(req.query.version, 10) : undefined;
     const localeArg = req.query.locale;
     const expandAssets = parseExpandAssets(req.query.expand_assets);
+    const resolveRefs = req.query.resolve_refs === '1' || req.query.resolve_refs === 'true';
     const entry = await core.read({
       ref: { type: req.params.type, slug: req.params.slug },
       ...(versionNum !== undefined ? { version: versionNum } : {}),
       ...(localeArg !== undefined ? { locale: localeArg } : {}),
-      ...(expandAssets !== undefined ? { expand_assets: expandAssets } : {})
+      ...(expandAssets !== undefined ? { expand_assets: expandAssets } : {}),
+      ...(resolveRefs ? { resolve_refs: true } : {})
     });
     if (!entry) {
       reply.code(404);
@@ -135,7 +151,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       slug: entry.slug,
       version: entry.version,
       ...(localeArg !== undefined ? { locale: localeArg } : {}),
-      fields: entry.content
+      fields: entry.content,
+      ...(entry._refs !== undefined ? { _refs: entry._refs } : {})
     };
   });
 

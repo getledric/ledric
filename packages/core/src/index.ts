@@ -31,6 +31,16 @@ export { applyMergePatch } from './merge-patch.js';
 export { resolveAssets } from './resolve-assets.js';
 export type { ResolvedAsset } from './resolve-assets.js';
 export {
+  extractInlineRefs,
+  collectInlineRefs,
+  resolveInlineRefs
+} from './resolve-refs.js';
+export type {
+  InlineRefAttrs,
+  InlineRefSource,
+  ResolvedRef
+} from './resolve-refs.js';
+export {
   LOCALE_KEY,
   defaultLocale,
   computeFallbackChain,

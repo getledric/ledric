@@ -1,6 +1,18 @@
 // SDK-side wire types. Independent of @ledric/core internals so the SDK
 // has zero monorepo coupling and can be published / consumed standalone.
 
+export interface ResolvedRef {
+  to: string;
+  found: boolean;
+  id?: string;
+  type?: string;
+  slug?: string;
+  display?: string;
+  url?: string;
+  locale?: string;
+  version?: number;
+}
+
 export interface Entry<F = Record<string, unknown>> {
   id: string;
   type: string;
@@ -9,6 +21,7 @@ export interface Entry<F = Record<string, unknown>> {
   locale?: string;
   fields: F;
   _redirect?: { from: string; to: string; locale?: string };
+  _refs?: ResolvedRef[];
 }
 
 export interface EntrySummary<F = Record<string, unknown>> {
@@ -18,6 +31,7 @@ export interface EntrySummary<F = Record<string, unknown>> {
   version: number;
   published_version: number | null;
   fields: F;
+  _refs?: ResolvedRef[];
 }
 
 export interface FindResult<F = Record<string, unknown>> {
@@ -99,6 +113,8 @@ export interface FindOptions {
   locale?: string;
   /** Resolve asset-typed fields. true expands all; string[] picks specific. */
   expandAssets?: boolean | string[];
+  /** Walk markdown fields for :::ref{} directives, attach _refs sidecar to each result. */
+  resolveRefs?: boolean;
 }
 
 export interface ListAssetsOptions {
@@ -112,4 +128,6 @@ export interface ReadOptions {
   locale?: string;
   /** Resolve asset-typed fields. true expands all; string[] picks specific. */
   expandAssets?: boolean | string[];
+  /** Walk markdown fields for :::ref{} directives, attach _refs sidecar. */
+  resolveRefs?: boolean;
 }

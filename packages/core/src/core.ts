@@ -22,6 +22,7 @@ import { classifyChange, deepEqual, type TypeDiff } from './classify.js';
 import { applyMergePatch } from './merge-patch.js';
 import { projectForLocale, extractLocaleSlugs } from './locale.js';
 import { resolveAssets } from './resolve-assets.js';
+import { resolveInlineRefs } from './resolve-refs.js';
 
 export interface Capabilities {
   vectorSearch: boolean;
@@ -87,6 +88,8 @@ export interface ReadInput {
    *   undefined  → leave as opaque ids (default)
    */
   expand_assets?: boolean | readonly string[];
+  /** Resolve inline :::ref{} directives in markdown fields into a _refs sidecar. */
+  resolve_refs?: boolean;
 }
 
 export interface PublishInput {
@@ -353,11 +356,23 @@ export class Core {
       this.storage,
       input.expand_assets
     );
-    return { ...entry, content: resolved };
+    const refs =
+      input.resolve_refs === true
+        ? await resolveInlineRefs(resolved, typeDetail.definition, this.storage)
+        : undefined;
+    return {
+      ...entry,
+      content: resolved,
+      ...(refs !== undefined ? { _refs: refs } : {})
+    };
   }
 
   async find(
-    input: FindEntriesInput & { locale?: string; expand_assets?: boolean | readonly string[] }
+    input: FindEntriesInput & {
+      locale?: string;
+      expand_assets?: boolean | readonly string[];
+      resolve_refs?: boolean;
+    }
   ): Promise<FindEntriesResult> {
     const result = await this.storage.findEntries(input);
     const typeDetail = await this.storage.getType(input.type);
@@ -375,7 +390,15 @@ export class Core {
         this.storage,
         input.expand_assets
       );
-      projected.push({ ...r, content: resolved });
+      const refs =
+        input.resolve_refs === true
+          ? await resolveInlineRefs(resolved, typeDetail.definition, this.storage)
+          : undefined;
+      projected.push({
+        ...r,
+        content: resolved,
+        ...(refs !== undefined ? { _refs: refs } : {})
+      });
     }
     return { ...result, results: projected };
   }

@@ -91,6 +91,17 @@ export interface EntryDetail {
   created_at: number;
   deleted_at: number | null;
   _redirect?: { from: string; to: string; locale?: string };
+  _refs?: ReadonlyArray<{
+    to: string;
+    found: boolean;
+    id?: string;
+    type?: string;
+    slug?: string;
+    display?: string;
+    url?: string;
+    locale?: string;
+    version?: number;
+  }>;
 }
 
 export interface RenameEntryInput {

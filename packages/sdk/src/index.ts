@@ -17,5 +17,6 @@ export type {
   AssetSummary,
   AssetMeta,
   ListAssetsResult,
-  ListAssetsOptions
+  ListAssetsOptions,
+  ResolvedRef
 } from './types.js';

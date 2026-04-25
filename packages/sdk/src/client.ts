@@ -72,6 +72,7 @@ export class LedricClient {
           : opts.expandAssets.join(',')
       );
     }
+    if (opts.resolveRefs === true) params.set('resolve_refs', '1');
     const qs = params.toString() ? `?${params.toString()}` : '';
     const url = `${this.baseUrl}/entries/${encodeURIComponent(type)}/${encodeURIComponent(slug)}${qs}`;
     const res = await this._fetch(url, { headers: this._headers });
@@ -97,6 +98,7 @@ export class LedricClient {
           : opts.expandAssets.join(',')
       );
     }
+    if (opts.resolveRefs === true) params.set('resolve_refs', '1');
     const qs = params.toString() ? `?${params.toString()}` : '';
     const url = `${this.baseUrl}/entries/${encodeURIComponent(type)}${qs}`;
     const res = await this._fetch(url, { headers: this._headers });

@@ -90,7 +90,8 @@ const ReadArgsSchema = z
     ref: EntryRefSchema,
     version: IntFromStringOrNumber.optional(),
     locale: z.string().optional(),
-    expand_assets: ExpandAssetsSchema
+    expand_assets: ExpandAssetsSchema,
+    resolve_refs: z.boolean().optional()
   })
   .strict();
 
@@ -110,7 +111,8 @@ const FindArgsSchema = z
       .optional(),
     includeDeleted: z.boolean().optional(),
     locale: z.string().optional(),
-    expand_assets: ExpandAssetsSchema
+    expand_assets: ExpandAssetsSchema,
+    resolve_refs: z.boolean().optional()
   })
   .strict();
 
@@ -295,6 +297,11 @@ export function createMcpServer(core: Core): Server {
                 { type: 'boolean' },
                 { type: 'array', items: { type: 'string' } }
               ]
+            },
+            resolve_refs: {
+              type: 'boolean',
+              description:
+                'Walk markdown fields for :::ref{to="type/slug"}::: directives, resolve each, and attach a _refs sidecar to the response.'
             }
           },
           required: ['ref'],
@@ -335,7 +342,8 @@ export function createMcpServer(core: Core): Server {
                 { type: 'boolean' },
                 { type: 'array', items: { type: 'string' } }
               ]
-            }
+            },
+            resolve_refs: { type: 'boolean' }
           },
           required: ['type'],
           additionalProperties: false
