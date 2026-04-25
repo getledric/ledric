@@ -35,5 +35,8 @@ dist/
 # Logs
 *.log
 
+# Local scratch dir for ad-hoc files (image sources, downloads, etc.)
+tmp/
+
 # Local-only MCP config (dev harness — not shipped with the repo)
 .mcp.json
