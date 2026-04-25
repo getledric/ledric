@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import cors from '@fastify/cors';
 import type { Core } from '@ledric/core';
 
 function toHex(bytes: Uint8Array): string {
@@ -19,10 +20,22 @@ function toJsonSafe(value: unknown): unknown {
 
 export interface HttpServerOptions {
   logger?: boolean;
+  /** CORS origin policy. Default: '*' (open). Set to false to disable CORS. */
+  cors?: string | string[] | boolean;
 }
 
 export function createHttpServer(core: Core, opts: HttpServerOptions = {}): FastifyInstance {
   const app = Fastify({ logger: opts.logger ?? false });
+
+  // Content-API ergonomics: CORS open by default so any frontend can read.
+  const corsOption = opts.cors ?? '*';
+  if (corsOption !== false) {
+    app.register(cors, {
+      origin: corsOption,
+      methods: ['GET', 'POST', 'OPTIONS'],
+      exposedHeaders: ['X-Ledric-Redirect']
+    });
+  }
 
   app.get('/', async () => ({
     name: 'ledric',

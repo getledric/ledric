@@ -359,6 +359,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@fastify/cors@npm:^11.1.0":
+  version: 11.2.0
+  resolution: "@fastify/cors@npm:11.2.0"
+  dependencies:
+    fastify-plugin: "npm:^5.0.0"
+    toad-cache: "npm:^3.7.0"
+  checksum: 10c0/a3c4f20041196fe6c1f807a4600e9a9842f6984dc7bf362e068048a40d643e106a5679a4f58ee2cf9afb9edddbfd546477f97ed3106ac188dc704fd975cea7f9
+  languageName: node
+  linkType: hard
+
 "@fastify/error@npm:^4.0.0":
   version: 4.2.0
   resolution: "@fastify/error@npm:4.2.0"
@@ -466,6 +476,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@ledric/http-server@workspace:packages/http-server"
   dependencies:
+    "@fastify/cors": "npm:^11.1.0"
     "@ledric/core": "workspace:*"
     "@ledric/storage": "workspace:*"
     fastify: "npm:^5.1.0"
@@ -503,6 +514,10 @@ __metadata:
 "@ledric/sdk@workspace:packages/sdk":
   version: 0.0.0-use.local
   resolution: "@ledric/sdk@workspace:packages/sdk"
+  dependencies:
+    "@ledric/core": "workspace:*"
+    "@ledric/http-server": "workspace:*"
+    "@ledric/storage": "workspace:*"
   languageName: unknown
   linkType: soft
 
@@ -1646,6 +1661,13 @@ __metadata:
   version: 3.1.0
   resolution: "fast-uri@npm:3.1.0"
   checksum: 10c0/44364adca566f70f40d1e9b772c923138d47efeac2ae9732a872baafd77061f26b097ba2f68f0892885ad177becd065520412b8ffeec34b16c99433c5b9e2de7
+  languageName: node
+  linkType: hard
+
+"fastify-plugin@npm:^5.0.0":
+  version: 5.1.0
+  resolution: "fastify-plugin@npm:5.1.0"
+  checksum: 10c0/61b330b8cb03a3581b796d745137499a782934abcf65dbf9a41d07248520cfd220b3ae8b16afeaf81af712e68e1ac24352895132cfeb2b372c66662c0170f365
   languageName: node
   linkType: hard
 

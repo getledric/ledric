@@ -18,5 +18,10 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@ledric/core": "workspace:*",
+    "@ledric/http-server": "workspace:*",
+    "@ledric/storage": "workspace:*"
   }
 }

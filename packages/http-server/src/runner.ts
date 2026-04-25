@@ -14,9 +14,11 @@ export async function runHttp(core: Core, opts: RunHttpOptions = {}): Promise<{
   const port = opts.port ?? 3000;
   const host = opts.host ?? '127.0.0.1';
   const app = createHttpServer(core, { logger: opts.logger ?? false });
-  await app.listen({ port, host });
+  // fastify.listen() returns the actual bound URL — important when port is 0
+  // (OS-assigned), which the SDK tests rely on.
+  const url = await app.listen({ port, host });
   return {
-    url: `http://${host}:${port}`,
+    url,
     close: async () => {
       await app.close();
     }

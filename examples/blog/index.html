@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ledric — sample blog</title>
+  <style>
+    :root {
+      --bg: #0e0f12;
+      --panel: #15171c;
+      --ink: #e8e6df;
+      --muted: #8a8b8e;
+      --accent: #f7b955;
+      --line: #24262d;
+      --max: 980px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.55 ui-sans-serif, -apple-system, "Inter", "Helvetica Neue", sans-serif;
+    }
+
+    header.site {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 56px 24px 32px;
+      border-bottom: 1px solid var(--line);
+    }
+    header.site .brand {
+      font-size: 14px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    header.site h1 {
+      margin: 8px 0 0;
+      font-size: 44px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    header.site .tag {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+    header.site .meta {
+      margin-top: 18px;
+      font-size: 13px;
+      color: var(--muted);
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    header.site code {
+      background: var(--panel);
+      padding: 2px 8px;
+      border-radius: 4px;
+      color: var(--ink);
+      font-size: 12px;
+    }
+
+    main {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+
+    .status {
+      padding: 18px 22px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 28px;
+    }
+    .status.error {
+      color: #ff8a8a;
+      border-color: #5a2a2a;
+    }
+    .status code {
+      color: var(--accent);
+      background: transparent;
+    }
+
+    article.post {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 28px;
+      padding: 28px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    article.post:last-child { border-bottom: none; }
+
+    article.post .hero {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: var(--panel);
+      border-radius: 6px;
+      object-fit: cover;
+      display: block;
+    }
+    article.post .hero.placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    article.post h2 {
+      margin: 0 0 6px;
+      font-size: 26px;
+      letter-spacing: -0.01em;
+      line-height: 1.2;
+    }
+    article.post .post-meta {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 14px;
+    }
+    article.post .summary {
+      color: var(--ink);
+      font-size: 16px;
+      margin: 0 0 14px;
+      line-height: 1.5;
+    }
+    article.post .tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    article.post .tags span {
+      font-size: 11px;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      padding: 3px 8px;
+      border-radius: 999px;
+    }
+
+    @media (max-width: 720px) {
+      article.post { grid-template-columns: 1fr; }
+    }
+
+    footer.site {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 0 24px 60px;
+      color: var(--muted);
+      font-size: 13px;
+      border-top: 1px solid var(--line);
+      padding-top: 24px;
+    }
+    footer.site code {
+      background: var(--panel);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header class="site">
+    <div class="brand">ledric · sample</div>
+    <h1>The latest from the team</h1>
+    <p class="tag">Live data, fetched from the local ledric HTTP server.</p>
+    <div class="meta">
+      <span>API <code id="api-base">…</code></span>
+      <span>Schema version <code id="schema-version">…</code></span>
+      <span><code id="post-count">…</code> published posts</span>
+    </div>
+  </header>
+
+  <main>
+    <div id="status" class="status">Connecting to ledric…</div>
+    <div id="posts"></div>
+  </main>
+
+  <footer class="site">
+    <p>
+      Each post above was fetched with one <code>GET /entries/blog_post</code>.
+      Hero images load directly from <code>GET /assets/&lt;id&gt;</code> with
+      immutable cache headers.
+      Schema, content, and binary bytes all come from the same SQLite file.
+    </p>
+  </footer>
+
+  <script type="module">
+    // Default to localhost:3000 (where `yarn cli http` listens). Override
+    // with ?api=http://other-host:port if you're running it elsewhere.
+    const params = new URLSearchParams(location.search);
+    const API = params.get('api') || 'http://localhost:3000';
+
+    const $ = (id) => document.getElementById(id);
+    document.getElementById('api-base').textContent = API;
+
+    function escape(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[c]);
+    }
+
+    function formatDate(s) {
+      if (!s) return '';
+      try {
+        return new Date(s).toLocaleDateString(undefined, {
+          year: 'numeric', month: 'short', day: 'numeric'
+        });
+      } catch { return s; }
+    }
+
+    function renderPost(entry) {
+      const f = entry.fields;
+      const heroId = typeof f.hero === 'string' ? f.hero : null;
+      // Asset id is 32 hex chars; placeholder strings (like "asset:foo") are skipped.
+      const heroLooksReal = heroId && /^[0-9a-f]{32}$/i.test(heroId);
+      const heroSrc = heroLooksReal ? `${API}/assets/${heroId}` : null;
+
+      const tags = Array.isArray(f.tags)
+        ? f.tags.map((t) => `<span>${escape(t)}</span>`).join('')
+        : '';
+
+      return `
+        <article class="post">
+          <div>
+            ${heroSrc
+              ? `<img class="hero" src="${heroSrc}" alt="${escape(f.title || '')}" loading="lazy" />`
+              : `<div class="hero placeholder">no hero</div>`}
+          </div>
+          <div>
+            <h2>${escape(f.title || '(untitled)')}</h2>
+            <div class="post-meta">
+              ${f.author ? escape(f.author) : 'unknown'} · ${formatDate(f.published_at)}
+            </div>
+            ${f.summary ? `<p class="summary">${escape(f.summary)}</p>` : ''}
+            <div class="tags">${tags}</div>
+          </div>
+        </article>
+      `;
+    }
+
+    async function load() {
+      try {
+        const [model, posts] = await Promise.all([
+          fetch(`${API}/types`).then((r) => r.json()),
+          fetch(`${API}/entries/blog_post?limit=20`).then((r) => r.json())
+        ]);
+
+        $('schema-version').textContent = model.schema_version;
+        $('post-count').textContent = posts.total;
+        $('status').remove();
+
+        $('posts').innerHTML = posts.results.map(renderPost).join('');
+      } catch (err) {
+        const status = $('status');
+        status.classList.add('error');
+        status.innerHTML = `
+          Could not reach <code>${escape(API)}</code>.<br>
+          Start ledric with <code>yarn cli http</code> from the repo root,
+          then refresh.<br>
+          <small>${escape(err && err.message ? err.message : String(err))}</small>
+        `;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

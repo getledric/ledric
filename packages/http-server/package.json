@@ -20,6 +20,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@fastify/cors": "^11.1.0",
     "@ledric/core": "workspace:*",
     "@ledric/storage": "workspace:*",
     "fastify": "^5.1.0"
