@@ -46,10 +46,14 @@ const CreateTypeArgsSchema = z
   })
   .strict();
 
+// MCP clients vary on how they serialise ints — some send as JSON numbers,
+// others as strings. Coerce to keep both happy.
+const IntFromStringOrNumber = z.coerce.number().int();
+
 const AlterTypeArgsSchema = z
   .object({
     name: z.string(),
-    parent_version: z.number().int(),
+    parent_version: IntFromStringOrNumber,
     merge_patch: ObjectOrJsonString,
     dry_run: z.boolean().optional(),
     author: z.string().optional()
@@ -72,7 +76,7 @@ const DraftArgsSchema = z
     type: z.string(),
     fields: ObjectOrJsonString,
     ref: EntryRefSchema.optional(),
-    parent_version: z.number().int().optional(),
+    parent_version: IntFromStringOrNumber.optional(),
     author: z.string().optional()
   })
   .strict();
@@ -80,7 +84,7 @@ const DraftArgsSchema = z
 const ReadArgsSchema = z
   .object({
     ref: EntryRefSchema,
-    version: z.number().int().optional(),
+    version: IntFromStringOrNumber.optional(),
     locale: z.string().optional()
   })
   .strict();
@@ -89,8 +93,8 @@ const FindArgsSchema = z
   .object({
     type: z.string(),
     where: ObjectOrJsonString.optional(),
-    limit: z.number().int().min(1).max(200).optional(),
-    offset: z.number().int().min(0).optional(),
+    limit: IntFromStringOrNumber.refine((n) => n >= 1 && n <= 200, 'limit must be 1-200').optional(),
+    offset: IntFromStringOrNumber.refine((n) => n >= 0, 'offset must be >= 0').optional(),
     order: z
       .array(
         z.object({
@@ -107,7 +111,7 @@ const FindArgsSchema = z
 const PublishArgsSchema = z
   .object({
     ref: EntryRefSchema,
-    version: z.number().int().optional()
+    version: IntFromStringOrNumber.optional()
   })
   .strict();
 
@@ -126,22 +130,22 @@ const MigrateEntriesArgsSchema = z
     filter: ObjectOrJsonString.optional(),
     dry_run: z.boolean().optional(),
     author: z.string().optional(),
-    limit: z.number().int().min(1).max(500).optional()
+    limit: IntFromStringOrNumber.refine((n) => n >= 1 && n <= 500, 'limit must be 1-500').optional()
   })
   .strict();
 
 const GetAssetArgsSchema = z
   .object({
     id: z.string().length(32),
-    version: z.number().int().optional()
+    version: IntFromStringOrNumber.optional()
   })
   .strict();
 
 const ListAssetsArgsSchema = z
   .object({
     kind: z.string().optional(),
-    limit: z.number().int().min(1).max(200).optional(),
-    offset: z.number().int().min(0).optional(),
+    limit: IntFromStringOrNumber.refine((n) => n >= 1 && n <= 200, 'limit must be 1-200').optional(),
+    offset: IntFromStringOrNumber.refine((n) => n >= 0, 'offset must be >= 0').optional(),
     includeDeleted: z.boolean().optional()
   })
   .strict();

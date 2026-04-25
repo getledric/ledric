@@ -215,7 +215,12 @@ export class Core {
       ...(merged.on_slug_change !== undefined
         ? { on_slug_change: merged.on_slug_change }
         : {}),
-      ...(merged.example !== undefined ? { example: merged.example } : {})
+      ...(merged.example !== undefined ? { example: merged.example } : {}),
+      ...(merged.locales !== undefined ? { locales: merged.locales } : {}),
+      ...(merged.default_locale !== undefined
+        ? { default_locale: merged.default_locale }
+        : {}),
+      ...(merged.fallback !== undefined ? { fallback: merged.fallback } : {})
     });
     const definition = normalizeTypeDef(validated);
 
