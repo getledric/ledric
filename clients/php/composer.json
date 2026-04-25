@@ -1,0 +1,31 @@
+{
+    "name": "ledric/sdk",
+    "description": "PHP read client for ledric — the MCP/LLM-native CMS.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["cms", "ledric", "headless", "api"],
+    "autoload": {
+        "psr-4": {
+            "Ledric\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Ledric\\Tests\\": "tests/"
+        }
+    },
+    "require": {
+        "php": "^7.4 || ^8.0",
+        "ext-curl": "*",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6"
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
