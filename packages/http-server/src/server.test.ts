@@ -272,4 +272,25 @@ describe('HTTP server with GUI mount', () => {
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).schema_version).toBeDefined();
   });
+
+  it('serves index.html for client-side routes (SPA fallback)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/admin/types/blog_post',
+      headers: { accept: 'text/html' }
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.body).toContain('admin');
+  });
+
+  it('JSON 404s do not get rewritten to index.html', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/types/nope',
+      headers: { accept: 'application/json' }
+    });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).error.code).toBe('NOT_FOUND');
+  });
 });

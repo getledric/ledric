@@ -3,6 +3,8 @@ import type { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
+import { promises as fs } from 'node:fs';
+import { join as pathJoin } from 'node:path';
 import type { Core } from '@ledric/core';
 
 function toHex(bytes: Uint8Array): string {
@@ -76,10 +78,36 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     if (!mountPath.startsWith('/')) {
       throw new Error(`gui.mountPath must start with '/', got "${mountPath}"`);
     }
+    const prefix = mountPath.endsWith('/') ? mountPath : `${mountPath}/`;
+    const indexPath = pathJoin(opts.gui.assetsPath, 'index.html');
+
     app.register(fastifyStatic, {
       root: opts.gui.assetsPath,
-      prefix: mountPath.endsWith('/') ? mountPath : `${mountPath}/`,
+      prefix,
       decorateReply: false
+    });
+
+    // SPA fallback: an HTML navigation under the mount path that doesn't
+    // hit a real file (e.g. /admin/types/blog_post — that's a React Router
+    // route, not a file) serves index.html. JSON/asset requests still 404
+    // normally so API errors stay surfaced.
+    app.setNotFoundHandler(async (req, reply) => {
+      const url = req.url.split('?', 1)[0] ?? req.url;
+      const inMount = url === mountPath || url.startsWith(prefix);
+      const accepts = String(req.headers.accept ?? '');
+      const wantsHtml = accepts.includes('text/html');
+      if (inMount && wantsHtml) {
+        try {
+          const html = await fs.readFile(indexPath, 'utf-8');
+          reply.code(200).type('text/html; charset=utf-8').send(html);
+          return;
+        } catch {
+          // fall through to default
+        }
+      }
+      reply
+        .code(404)
+        .send({ error: { code: 'NOT_FOUND', message: `route ${req.url}` } });
     });
   }
 

@@ -1,0 +1,24 @@
+{
+  "name": "@ledric/gui",
+  "version": "0.0.0",
+  "description": "ledric admin GUI — React via CDN, served by @ledric/http-server.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./web/*": "./web/*"
+  },
+  "files": [
+    "dist",
+    "web"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist"
+  }
+}

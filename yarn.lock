@@ -1093,6 +1093,12 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@ledric/gui@workspace:*, @ledric/gui@workspace:packages/gui":
+  version: 0.0.0-use.local
+  resolution: "@ledric/gui@workspace:packages/gui"
+  languageName: unknown
+  linkType: soft
+
 "@ledric/http-server@workspace:*, @ledric/http-server@workspace:packages/http-server":
   version: 0.0.0-use.local
   resolution: "@ledric/http-server@workspace:packages/http-server"
@@ -3742,6 +3748,7 @@ __metadata:
   resolution: "ledric@workspace:packages/cli"
   dependencies:
     "@ledric/core": "workspace:*"
+    "@ledric/gui": "workspace:*"
     "@ledric/http-server": "workspace:*"
     "@ledric/mcp-server": "workspace:*"
     "@ledric/storage": "workspace:*"

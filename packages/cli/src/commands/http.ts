@@ -3,6 +3,7 @@ import { Core } from '@ledric/core';
 import { SqliteStorage } from '@ledric/storage';
 import type { AssetsConfig } from '@ledric/storage';
 import { runHttp } from '@ledric/http-server';
+import { guiAssetsPath } from '@ledric/gui';
 
 function assetsConfigFromArgs(args: {
   'assets-backend'?: string;
@@ -42,6 +43,20 @@ export const httpCommand = defineCommand({
     'assets-root': {
       type: 'string',
       description: 'For the local backend: directory where bytes are served from.'
+    },
+    gui: {
+      type: 'boolean',
+      description: 'Mount the @ledric/gui admin UI at the gui-mount path.',
+      default: false
+    },
+    'gui-mount': {
+      type: 'string',
+      description: 'URL path the GUI is served from when --gui is set.',
+      default: '/admin'
+    },
+    'gui-path': {
+      type: 'string',
+      description: 'Override the GUI assets directory (advanced; defaults to @ledric/gui).'
     }
   },
   async run({ args }) {
@@ -55,12 +70,24 @@ export const httpCommand = defineCommand({
     });
     const core = new Core(storage);
 
+    const guiOpts =
+      args.gui === true
+        ? {
+            assetsPath: args['gui-path'] ?? guiAssetsPath,
+            mountPath: args['gui-mount'] ?? '/admin'
+          }
+        : undefined;
+
     const { url, close } = await runHttp(core, {
       port: parseInt(args.port, 10),
-      host: args.host
+      host: args.host,
+      ...(guiOpts !== undefined ? { gui: guiOpts } : {})
     });
 
     process.stderr.write(`ledric: opened ${args.db}; HTTP server listening at ${url}\n`);
+    if (guiOpts !== undefined) {
+      process.stderr.write(`       admin GUI at ${url}${guiOpts.mountPath}\n`);
+    }
 
     const shutdown = async (signal: string): Promise<void> => {
       process.stderr.write(`ledric: ${signal} received, shutting down\n`);

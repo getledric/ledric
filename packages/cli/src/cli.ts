@@ -15,7 +15,8 @@ USAGE
   ledric serve                       start the MCP server on stdio (uses ./ledric.db)
   ledric serve --db <path>           use a different SQLite file
   ledric http                        start the HTTP server (default :3000)
-  ledric http --port 8080            … on a different port
+  ledric http --port 8080             … on a different port
+  ledric http --gui                  … and mount the admin UI at /admin
   ledric get <type>/<slug>           read one entry (consumer-facing shape)
   ledric get <type>/<slug> --meta    include _meta (version, hash, timestamps)
   ledric ls                          list every type in the DB with entry counts
