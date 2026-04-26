@@ -161,10 +161,35 @@ const ListAssetsArgsSchema = z
 export const SERVER_NAME = 'ledric';
 export const SERVER_VERSION = '0.0.0';
 
+export const SERVER_INSTRUCTIONS = `ledric is a self-hosted, MCP-native CMS. You can fully define and evolve the content model AND author content through this MCP — schemas and entries are both first-class data here.
+
+Always start with describe_model. It returns every content type's fields, validation rules, summary_fields projection, runtime capabilities, and a hand-written \`example\` per type. The example is your template — imitate it when drafting and your content will validate cleanly.
+
+Core workflows:
+- Add a content type: create_type with a name, a fields map (each field has a type discriminator like {"type":"string","required":true,"max":200}), and ideally a hand-written example value.
+- Evolve a type: alter_type with parent_version (optimistic concurrency) and a JSON Merge Patch (RFC 7396) describing the change. The response includes a change_class — "safe" | "needs_backfill" | "destructive". Pass dry_run:true to preview without writing.
+- Author content: draft creates (omit ref) or updates (ref + parent_version) an entry. Slug auto-derives from the type's identifier_field if present.
+- Publish: publish moves the published_version pointer forward. Drafts stay invisible to the published-content read path until you publish them.
+- List + read: find returns paginated entries; read returns one. Both support locale projection, asset expansion, and inline-ref resolution.
+- Backfill after a schema change: migrate_entries walks every entry of a type, optionally applying a merge_patch, and re-stamps with the current schema_version.
+- Rename: rename_entry retires the old slug (which keeps redirecting forever) and assigns a new one.
+
+Conventions worth knowing:
+- Localization. A type with locales[] declared accepts a _locale sidecar in content: {..., "_locale": {"fr": {"title": "...", "body": "..."}}}. Pass locale on reads to project the entry into that locale (with the configured fallback chain). Fields opt in via "localized": true.
+- Asset fields hold 32-char hex ids. Pass expand_assets: true on read/find to inline {id, kind, meta, url} so SDK consumers don't round-trip per image.
+- Inline references in markdown bodies use the directive :::ref{to="type/slug"}:::. Pass resolve_refs: true on read/find to get a _refs sidecar listing the resolved targets (with display strings and URLs); danglers come back as {to, found:false}.
+- All top-level content keys starting with _ (like _locale, _redirect, _refs) are reserved for ledric system metadata. Field names cannot start with _.
+- Optimistic concurrency: alter_type and draft-on-update require parent_version. A stale parent_version returns VERSION_CONFLICT with the current version so you can re-read and retry.
+
+When in doubt, call describe_model. It's cheap, idempotent, and tells you everything you need to construct any other call.`;
+
 export function createMcpServer(core: Core): Server {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
-    { capabilities: { tools: {} } }
+    {
+      capabilities: { tools: {} },
+      instructions: SERVER_INSTRUCTIONS
+    }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({

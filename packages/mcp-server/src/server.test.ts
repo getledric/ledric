@@ -39,6 +39,15 @@ describe('MCP server (in-memory round trip)', () => {
     await storage.close();
   });
 
+  it('hands the server instructions to the client during initialize', async () => {
+    const instructions = client.getInstructions();
+    expect(instructions).toBeDefined();
+    expect(instructions).toContain('describe_model');
+    expect(instructions).toContain('alter_type');
+    expect(instructions).toContain('_locale');
+    expect(instructions).toContain(':::ref{');
+  });
+
   it('lists the full slice toolset', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
