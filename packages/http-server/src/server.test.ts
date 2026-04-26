@@ -240,7 +240,10 @@ describe('HTTP server with GUI mount', () => {
   beforeEach(async () => {
     storage = await SqliteStorage.open({ path: ':memory:' });
     guiDir = mkdtempSync(join(tmpdir(), 'ledric-gui-test-'));
-    writeFileSync(join(guiDir, 'index.html'), '<!doctype html><title>ledric</title><h1>admin</h1>');
+    writeFileSync(
+      join(guiDir, 'index.html'),
+      '<!doctype html><html><head><title>ledric</title></head><body><h1>admin</h1></body></html>'
+    );
     writeFileSync(join(guiDir, 'app.js'), 'console.log("admin")');
     app = createHttpServer(new Core(storage), {
       gui: { assetsPath: guiDir, mountPath: '/admin' }
@@ -282,6 +285,26 @@ describe('HTTP server with GUI mount', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toContain('text/html');
     expect(res.body).toContain('admin');
+  });
+
+  it('serves index.html at the mount root with <base href> injected', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/admin/',
+      headers: { accept: 'text/html' }
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('<base href="/admin/">');
+  });
+
+  it('deep refreshes get the same injected base href so relative imports keep working', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/admin/types/blog_post/something/nested',
+      headers: { accept: 'text/html' }
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('<base href="/admin/">');
   });
 
   it('JSON 404s do not get rewritten to index.html', async () => {

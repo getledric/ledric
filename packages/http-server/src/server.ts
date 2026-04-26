@@ -29,6 +29,14 @@ function parseExpandAssets(raw: string | undefined): boolean | string[] | undefi
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+function injectBaseHref(html: string, basePath: string): string {
+  const tag = `<base href="${basePath}">`;
+  if (/<base\s/i.test(html)) {
+    return html.replace(/<base\s[^>]*>/i, tag);
+  }
+  return html.replace(/<head[^>]*>/i, (m) => `${m}\n    ${tag}`);
+}
+
 function guessKindFromMime(mime: string | undefined): string {
   if (mime === undefined) return 'file';
   if (mime.startsWith('image/')) return 'image';
@@ -81,16 +89,39 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     const prefix = mountPath.endsWith('/') ? mountPath : `${mountPath}/`;
     const indexPath = pathJoin(opts.gui.assetsPath, 'index.html');
 
+    // Explicit routes for the mount roots so we control index.html serving
+    // and can inject <base href>. Without that, deep SPA paths like
+    // /admin/types/blog_post/foo break relative imports (./app.js resolves
+    // against the current URL, not the mount root).
+    const serveIndex = async (_req: unknown, reply: import('fastify').FastifyReply) => {
+      try {
+        const raw = await fs.readFile(indexPath, 'utf-8');
+        reply.code(200).type('text/html; charset=utf-8').send(injectBaseHref(raw, prefix));
+      } catch (err) {
+        reply.code(500).send({
+          error: {
+            code: 'INTERNAL',
+            message: err instanceof Error ? err.message : String(err)
+          }
+        });
+      }
+    };
+    app.get(mountPath, serveIndex);
+    if (prefix !== mountPath) app.get(prefix, serveIndex);
+
     app.register(fastifyStatic, {
       root: opts.gui.assetsPath,
       prefix,
-      decorateReply: false
+      decorateReply: false,
+      // index.html is served by the routes above; let fastify-static fall
+      // through (404) for directory roots so the SPA handler can pick up.
+      index: false
     });
 
-    // SPA fallback: an HTML navigation under the mount path that doesn't
-    // hit a real file (e.g. /admin/types/blog_post — that's a React Router
-    // route, not a file) serves index.html. JSON/asset requests still 404
-    // normally so API errors stay surfaced.
+    // SPA fallback: any HTML navigation under the mount path that didn't
+    // resolve to a real file (deep React Router route, nested refresh)
+    // serves the same injected-base index. JSON / asset requests still
+    // 404 normally so API errors stay surfaced.
     app.setNotFoundHandler(async (req, reply) => {
       const url = req.url.split('?', 1)[0] ?? req.url;
       const inMount = url === mountPath || url.startsWith(prefix);
@@ -98,8 +129,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       const wantsHtml = accepts.includes('text/html');
       if (inMount && wantsHtml) {
         try {
-          const html = await fs.readFile(indexPath, 'utf-8');
-          reply.code(200).type('text/html; charset=utf-8').send(html);
+          const raw = await fs.readFile(indexPath, 'utf-8');
+          reply.code(200).type('text/html; charset=utf-8').send(injectBaseHref(raw, prefix));
           return;
         } catch {
           // fall through to default
