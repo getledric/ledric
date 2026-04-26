@@ -12,11 +12,12 @@ const CONFIG_HELP = `
 ledric — MCP/LLM-native self-hosted CMS
 
 USAGE
-  ledric serve                       start the MCP server on stdio (uses ./ledric.db)
-  ledric serve --db <path>           use a different SQLite file
-  ledric http                        start the HTTP server (default :3000)
+  ledric serve                       MCP stdio (default; uses ./ledric.db)
+  ledric serve --http                 … plus the HTTP API on :3000
+  ledric serve --gui                 … plus HTTP and the admin GUI at /admin
+  ledric http                        HTTP-only (no MCP)
   ledric http --port 8080             … on a different port
-  ledric http --gui                  … and mount the admin UI at /admin
+  ledric http --gui                  … with the admin UI
   ledric get <type>/<slug>           read one entry (consumer-facing shape)
   ledric get <type>/<slug> --meta    include _meta (version, hash, timestamps)
   ledric ls                          list every type in the DB with entry counts

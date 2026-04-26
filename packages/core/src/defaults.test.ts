@@ -11,8 +11,8 @@ describe('field defaults', () => {
       expect(() =>
         defineType('t', {
           slug: field.string({ required: true }),
-          // @ts-expect-error — intentionally wrong type for test
-          n: field.string({ default: 42 })
+          // `default: unknown` widens enough that TS is happy; runtime rejects.
+          n: field.string({ default: 42 as unknown as string })
         })
       ).toThrow(/default value/);
     });
