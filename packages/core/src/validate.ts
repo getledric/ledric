@@ -177,9 +177,63 @@ function validateField(path: string, field: FieldDef, raw: unknown): ValidationE
               actual: raw
             }
           ];
-    default:
-      return [{ path, code: 'unknown_type', message: `Unknown field type` }];
+    case 'object':
+      return validateObject(path, field, raw);
+    default: {
+      const t = (field as { type?: unknown }).type;
+      return [
+        {
+          path,
+          code: 'unknown_type',
+          message: `Unknown field type "${String(t)}" — this usually means the type definition slipped past defineType validation.`,
+          actual: t
+        }
+      ];
+    }
   }
+}
+
+function validateObject(
+  path: string,
+  field: Extract<FieldDef, { type: 'object' }>,
+  raw: unknown
+): ValidationError[] {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return [typeErr(path, 'object', raw)];
+  }
+  const errors: ValidationError[] = [];
+  const obj = raw as Record<string, unknown>;
+  const strict = field.strict !== false;
+
+  if (strict) {
+    for (const key of Object.keys(obj)) {
+      if (!(key in field.fields)) {
+        errors.push({
+          path: `${path}/${key}`,
+          code: 'unknown_field',
+          message: `Field "${key}" is not in this object's schema.`
+        });
+      }
+    }
+  }
+
+  for (const [name, nested] of Object.entries(field.fields)) {
+    const value = obj[name];
+    const present = value !== undefined && value !== null;
+    if (!present) {
+      if (nested.required === true) {
+        errors.push({
+          path: `${path}/${name}`,
+          code: 'required',
+          message: `Field "${name}" is required.`
+        });
+      }
+      continue;
+    }
+    errors.push(...validateField(`${path}/${name}`, nested, value));
+  }
+
+  return errors;
 }
 
 function typeErr(path: string, expected: string, actual: unknown): ValidationError {

@@ -73,6 +73,14 @@ export interface FieldEnum extends FieldCommon {
   values: readonly string[];
 }
 
+export interface FieldObject extends FieldCommon {
+  type: 'object';
+  /** Nested fields with the same shape rules as the top level. */
+  fields: Record<string, FieldDef>;
+  /** When true, unknown nested keys raise a validation error. Default: true. */
+  strict?: boolean;
+}
+
 export type FieldDef =
   | FieldString
   | FieldNumber
@@ -84,7 +92,26 @@ export type FieldDef =
   | FieldReferences
   | FieldArray
   | FieldVector
-  | FieldEnum;
+  | FieldEnum
+  | FieldObject;
+
+/** The complete set of valid field type discriminators. Useful for validation. */
+export const FIELD_TYPES = [
+  'string',
+  'number',
+  'boolean',
+  'date',
+  'slug',
+  'markdown',
+  'asset',
+  'references',
+  'array',
+  'vector',
+  'enum',
+  'object'
+] as const;
+
+export type FieldType = (typeof FIELD_TYPES)[number];
 
 export interface TypeDefOptions {
   description?: string;

@@ -13,10 +13,13 @@ export type {
   FieldArray,
   FieldVector,
   FieldEnum,
+  FieldObject,
   FieldDef,
+  FieldType,
   TypeDef,
   TypeDefOptions
 } from './types.js';
+export { FIELD_TYPES } from './types.js';
 
 export { field } from './field.js';
 export { defineType } from './define-type.js';

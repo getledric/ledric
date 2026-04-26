@@ -1,6 +1,48 @@
 import type { FieldDef, TypeDef, TypeDefOptions } from './types.js';
+import { FIELD_TYPES } from './types.js';
 
 const SLUG_NAME_RE = /^[a-z][a-z0-9_]*$/;
+const VALID_TYPES = new Set<string>(FIELD_TYPES);
+
+function validateFieldDef(
+  pathLabel: string,
+  fieldName: string,
+  field: FieldDef
+): void {
+  if (!SLUG_NAME_RE.test(fieldName)) {
+    throw new Error(
+      `${pathLabel}: field name "${fieldName}" must match ${SLUG_NAME_RE.source}`
+    );
+  }
+  const t = (field as { type?: unknown }).type;
+  if (typeof t !== 'string' || !VALID_TYPES.has(t)) {
+    const known = [...VALID_TYPES].join(', ');
+    throw new Error(
+      `${pathLabel}: field "${fieldName}" has unknown type "${String(t)}" — valid types are: ${known}`
+    );
+  }
+  // Recurse into nested object/array fields so deep schemas validate too.
+  if (field.type === 'object') {
+    for (const [nestedName, nestedField] of Object.entries(field.fields)) {
+      validateFieldDef(`${pathLabel}/${fieldName}`, nestedName, nestedField);
+    }
+  } else if (field.type === 'array') {
+    // Inner field has no name; validate the discriminator only.
+    const innerType = (field.of as { type?: unknown }).type;
+    if (typeof innerType !== 'string' || !VALID_TYPES.has(innerType)) {
+      const known = [...VALID_TYPES].join(', ');
+      throw new Error(
+        `${pathLabel}: field "${fieldName}".of has unknown type "${String(innerType)}" — valid types are: ${known}`
+      );
+    }
+    // If the inner is itself an object, recurse into it.
+    if (field.of.type === 'object') {
+      for (const [nestedName, nestedField] of Object.entries(field.of.fields)) {
+        validateFieldDef(`${pathLabel}/${fieldName}[]`, nestedName, nestedField);
+      }
+    }
+  }
+}
 
 export function defineType(
   name: string,
@@ -17,12 +59,8 @@ export function defineType(
     throw new Error(`defineType("${name}"): at least one field is required`);
   }
 
-  for (const fieldName of Object.keys(fields)) {
-    if (!SLUG_NAME_RE.test(fieldName)) {
-      throw new Error(
-        `defineType("${name}"): field name "${fieldName}" must match ${SLUG_NAME_RE.source}`
-      );
-    }
+  for (const [fieldName, field] of Object.entries(fields)) {
+    validateFieldDef(`defineType("${name}")`, fieldName, field);
   }
 
   const refsKnown = (key: 'summary_fields' | 'identifier_field' | 'display_field', value: string) => {

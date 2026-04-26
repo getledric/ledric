@@ -76,6 +76,45 @@ describe('defineType', () => {
     ).toThrow(/identifier_field.+missing/);
   });
 
+  it('rejects an unknown field type discriminator', () => {
+    expect(() =>
+      defineType('cta_band', {
+        slug: field.string({ required: true }),
+        cta: { type: 'object_pretender' } as unknown as Parameters<typeof defineType>[1]['cta']
+      })
+    ).toThrow(/unknown type/);
+  });
+
+  it('rejects an unknown nested field type inside an object', () => {
+    expect(() =>
+      defineType('cta_band', {
+        slug: field.string({ required: true }),
+        cta: field.object({
+          fields: {
+            label: field.string({ required: true }),
+            mystery: { type: 'foo' } as unknown as Parameters<typeof defineType>[1]['mystery']
+          }
+        })
+      })
+    ).toThrow(/unknown type/);
+  });
+
+  it('accepts a fully-typed object field', () => {
+    const T = defineType('cta_band', {
+      slug: field.string({ required: true }),
+      headline: field.string({ required: true, max: 200 }),
+      cta: field.object({
+        fields: {
+          label: field.string({ required: true, max: 80 }),
+          url: field.string({ required: true, max: 500 }),
+          style: field.enum({ values: ['automatic', 'primary', 'secondary'] }),
+          new_tab: field.boolean()
+        }
+      })
+    }, { identifier_field: 'slug' });
+    expect(T.fields.cta?.type).toBe('object');
+  });
+
   it('throws when display_field references an unknown field', () => {
     expect(() =>
       defineType(

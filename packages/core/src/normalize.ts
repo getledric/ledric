@@ -16,6 +16,13 @@ export function normalizeField(f: FieldDef): FieldDef {
       return { pinning: 'auto', ...f };
     case 'array':
       return { ...f, of: normalizeField(f.of) };
+    case 'object': {
+      const fields: Record<string, FieldDef> = {};
+      for (const [name, nested] of Object.entries(f.fields)) {
+        fields[name] = normalizeField(nested);
+      }
+      return { ...f, fields };
+    }
     default:
       return f;
   }

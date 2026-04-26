@@ -9,7 +9,8 @@ import type {
   FieldReferences,
   FieldArray,
   FieldVector,
-  FieldEnum
+  FieldEnum,
+  FieldObject
 } from './types.js';
 
 type OptsFor<T extends { type: string }> = Omit<T, 'type'>;
@@ -69,6 +70,11 @@ export const field = {
 
   enum: (opts: OptsFor<FieldEnum>): FieldEnum => ({
     type: 'enum',
+    ...opts
+  }),
+
+  object: (opts: OptsFor<FieldObject>): FieldObject => ({
+    type: 'object',
     ...opts
   })
 } as const;
