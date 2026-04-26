@@ -219,6 +219,37 @@ describe('HTTP server', () => {
     expect(JSON.parse(res.body).error.code).toBe('INVALID_REQUEST');
   });
 
+  it('POST /rpc returns structured ValidationError details, not just a message', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      payload: {
+        tool: 'create_type',
+        args: {
+          name: 'cta',
+          fields: {
+            slug: { type: 'string', required: true },
+            label: { type: 'string', required: true, max: 5 }
+          }
+        }
+      }
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      payload: {
+        tool: 'draft',
+        args: { type: 'cta', fields: { slug: 'x', label: 'way too long' } }
+      }
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(Array.isArray(body.error.errors)).toBe(true);
+    expect(body.error.errors[0].path).toBe('/label');
+    expect(body.error.errors[0].code).toBe('max');
+  });
+
   it('POST /rpc surfaces unknown tool as 400 TOOL_ERROR', async () => {
     const res = await app.inject({
       method: 'POST',

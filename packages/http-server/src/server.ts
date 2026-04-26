@@ -250,7 +250,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       version: entry.version,
       ...(localeArg !== undefined ? { locale: localeArg } : {}),
       fields: entry.content,
-      ...(entry._refs !== undefined ? { _refs: entry._refs } : {})
+      ...(entry._refs !== undefined ? { _refs: entry._refs } : {}),
+      ...(entry._warnings !== undefined ? { _warnings: entry._warnings } : {})
     };
   });
 
@@ -397,13 +398,48 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       const result = await dispatchTool(core, tool, args);
       return { result: toJsonSafe(result) };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
       reply.code(400);
-      return { error: { code: 'TOOL_ERROR', tool, message } };
+      return { error: { tool, ...serializeToolError(err) } };
     }
   });
 
   return app;
+}
+
+/**
+ * Surface as much structured detail as the thrown Error carries — code,
+ * errors[], and any relevant fields on storage-layer errors — instead of
+ * collapsing everything to .message. Generic catches stay readable too.
+ */
+function serializeToolError(err: unknown): Record<string, unknown> {
+  if (!(err instanceof Error)) {
+    return { code: 'TOOL_ERROR', message: String(err) };
+  }
+  const out: Record<string, unknown> = {
+    code: 'TOOL_ERROR',
+    message: err.message
+  };
+  const e = err as Error & {
+    code?: unknown;
+    errors?: unknown;
+    current_version?: unknown;
+    your_parent_version?: unknown;
+    type?: unknown;
+    slug?: unknown;
+    kind?: unknown;
+    ref?: unknown;
+  };
+  if (typeof e.code === 'string') out.code = e.code;
+  if (Array.isArray(e.errors)) out.errors = e.errors;
+  if (typeof e.current_version === 'number') out.current_version = e.current_version;
+  if (typeof e.your_parent_version === 'number') {
+    out.your_parent_version = e.your_parent_version;
+  }
+  if (typeof e.type === 'string') out.type = e.type;
+  if (typeof e.slug === 'string') out.slug = e.slug;
+  if (typeof e.kind === 'string') out.kind = e.kind;
+  if (typeof e.ref === 'string') out.ref = e.ref;
+  return out;
 }
 
 async function dispatchTool(

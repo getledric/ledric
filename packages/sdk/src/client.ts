@@ -17,7 +17,25 @@ export interface LedricClientOptions {
   headers?: Record<string, string>;
 }
 
+export interface LedricApiError {
+  code?: string;
+  message?: string;
+  errors?: Array<{
+    path: string;
+    code: string;
+    message: string;
+    expected?: unknown;
+    actual?: unknown;
+  }>;
+  [k: string]: unknown;
+}
+
 export class LedricError extends Error {
+  /** Stable error code from the API (e.g. VALIDATION_FAILED, VERSION_CONFLICT). */
+  readonly code: string;
+  /** Per-field errors when the server returned them (validator failures). */
+  readonly errors: NonNullable<LedricApiError['errors']>;
+
   constructor(
     public readonly status: number,
     public readonly url: string,
@@ -26,6 +44,12 @@ export class LedricError extends Error {
   ) {
     super(message);
     this.name = 'LedricError';
+    const apiError =
+      body !== null && typeof body === 'object' && 'error' in body
+        ? ((body as { error?: LedricApiError }).error ?? {})
+        : (body as LedricApiError | null) ?? {};
+    this.code = typeof apiError.code === 'string' ? apiError.code : 'TOOL_ERROR';
+    this.errors = Array.isArray(apiError.errors) ? apiError.errors : [];
   }
 }
 

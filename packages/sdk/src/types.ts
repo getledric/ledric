@@ -13,6 +13,14 @@ export interface ResolvedRef {
   version?: number;
 }
 
+export interface ValidationWarning {
+  path: string;
+  code: string;
+  message: string;
+  expected?: unknown;
+  actual?: unknown;
+}
+
 export interface Entry<F = Record<string, unknown>> {
   id: string;
   type: string;
@@ -22,6 +30,7 @@ export interface Entry<F = Record<string, unknown>> {
   fields: F;
   _redirect?: { from: string; to: string; locale?: string };
   _refs?: ResolvedRef[];
+  _warnings?: ValidationWarning[];
 }
 
 export interface EntrySummary<F = Record<string, unknown>> {

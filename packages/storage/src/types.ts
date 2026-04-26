@@ -102,6 +102,13 @@ export interface EntryDetail {
     locale?: string;
     version?: number;
   }>;
+  _warnings?: ReadonlyArray<{
+    path: string;
+    code: string;
+    message: string;
+    expected?: unknown;
+    actual?: unknown;
+  }>;
 }
 
 export interface RenameEntryInput {

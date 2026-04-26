@@ -1,5 +1,6 @@
 import type { TypeDef } from '@ledric/schema';
 import type { Storage } from '@ledric/storage';
+import { parseRef } from './parse-ref.js';
 
 export interface InlineRefSource {
   /** Original `to` attribute, e.g. "blog_post/hello-world". */
@@ -45,7 +46,14 @@ export interface InlineRefAttrs {
   locale?: string;
 }
 
-/** Pull every :::ref{to="..."}::: directive out of a Markdown string. */
+/**
+ * Pull every :::ref{to="..."}::: directive out of a Markdown string.
+ *
+ * The `to` value may also encode a version inline as "type/slug@N" — in
+ * which case the parsed result picks that version up automatically and
+ * `to` keeps its original spelling so renderers can match on it.
+ * An explicit `version=N` attribute, if present, wins over the inline @.
+ */
 export function extractInlineRefs(md: string): InlineRefAttrs[] {
   if (typeof md !== 'string' || md.length === 0) return [];
   const out: InlineRefAttrs[] = [];
@@ -55,6 +63,8 @@ export function extractInlineRefs(md: string): InlineRefAttrs[] {
     const attrs = parseAttrs(m[1] as string);
     if (typeof attrs.to !== 'string' || attrs.to.length === 0) continue;
     const ref: InlineRefAttrs = { to: attrs.to };
+    const parsed = parseRef(attrs.to);
+    if (parsed?.version !== undefined) ref.version = parsed.version;
     if (attrs.version !== undefined) {
       const n = parseInt(attrs.version, 10);
       if (Number.isFinite(n)) ref.version = n;
@@ -103,13 +113,13 @@ export async function resolveInlineRefs(
     const key = `${src.to}|${src.locale ?? ''}|${src.version ?? ''}`;
     if (seen.has(key)) continue;
 
-    const slashAt = src.to.indexOf('/');
-    if (slashAt === -1) {
+    const parsed = parseRef(src.to);
+    if (parsed === null) {
       seen.set(key, { to: src.to, found: false });
       continue;
     }
-    const refType = src.to.slice(0, slashAt);
-    const refSlug = src.to.slice(slashAt + 1);
+    const refType = parsed.type;
+    const refSlug = parsed.slug;
 
     const opts: { version?: number; locale?: string } = {};
     if (src.version !== undefined) opts.version = src.version;

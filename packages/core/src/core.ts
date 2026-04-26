@@ -23,6 +23,7 @@ import { applyMergePatch } from './merge-patch.js';
 import { projectForLocale, extractLocaleSlugs } from './locale.js';
 import { resolveAssets } from './resolve-assets.js';
 import { resolveInlineRefs } from './resolve-refs.js';
+import { checkStructuralRefs } from './check-refs.js';
 
 export interface Capabilities {
   vectorSearch: boolean;
@@ -75,6 +76,12 @@ export interface DraftInput {
 export interface DraftResult extends EntryWrite {
   status: 'draft';
   content: Record<string, unknown>;
+  /**
+   * Soft issues with the draft — typically structural-ref problems
+   * (target missing, wrong type). The draft is accepted; the same
+   * issues become hard errors on publish.
+   */
+  warnings: ValidationError[];
 }
 
 export interface ReadInput {
@@ -291,6 +298,15 @@ export class Core {
     // always undefined — zero overhead at the storage layer.
     const localeSlugs = extractLocaleSlugs(typeDetail.definition, validated.value, slugField);
 
+    // Soft check: structural references. Targets that don't exist (yet)
+    // or point at a disallowed type surface as warnings on draft, errors
+    // on publish — this lets agents stage related entries in any order.
+    const warnings = await checkStructuralRefs(
+      validated.value,
+      typeDetail.definition,
+      this.storage
+    );
+
     if (input.ref !== undefined) {
       if (input.ref.slug !== slug) {
         throw new ValidationFailedError([
@@ -318,7 +334,7 @@ export class Core {
         ...(input.author !== undefined ? { author: input.author } : {}),
         ...(localeSlugs !== undefined ? { locale_slugs: localeSlugs } : {})
       });
-      return { ...write, status: 'draft', content: validated.value };
+      return { ...write, status: 'draft', content: validated.value, warnings };
     }
 
     const write = await this.storage.createEntry({
@@ -329,7 +345,7 @@ export class Core {
       ...(input.author !== undefined ? { author: input.author } : {}),
       ...(localeSlugs !== undefined ? { locale_slugs: localeSlugs } : {})
     });
-    return { ...write, status: 'draft', content: validated.value };
+    return { ...write, status: 'draft', content: validated.value, warnings };
   }
 
   async read(input: ReadInput): Promise<EntryDetail | null> {
@@ -360,10 +376,19 @@ export class Core {
       input.resolve_refs === true
         ? await resolveInlineRefs(resolved, typeDetail.definition, this.storage)
         : undefined;
+    // Surface structural-ref issues as a sidecar so consumers can show
+    // "this points at content that no longer exists" without re-running
+    // the check themselves.
+    const warnings = await checkStructuralRefs(
+      resolved,
+      typeDetail.definition,
+      this.storage
+    );
     return {
       ...entry,
       content: resolved,
-      ...(refs !== undefined ? { _refs: refs } : {})
+      ...(refs !== undefined ? { _refs: refs } : {}),
+      ...(warnings.length > 0 ? { _warnings: warnings } : {})
     };
   }
 
@@ -432,6 +457,26 @@ export class Core {
   }
 
   async publish(input: PublishInput): Promise<PublishResult> {
+    // Re-check structural refs and refuse to publish if any are dangling
+    // or wrong-typed. Warnings on draft become errors here — that's the
+    // moment integrity actually has to hold.
+    const opts =
+      input.version !== undefined ? { version: input.version } : undefined;
+    const entry = await this.storage.readEntry(input.ref, opts);
+    if (entry !== null) {
+      const typeDetail = await this.storage.getType(entry.type);
+      if (typeDetail !== null) {
+        const refIssues = await checkStructuralRefs(
+          entry.content,
+          typeDetail.definition,
+          this.storage
+        );
+        if (refIssues.length > 0) {
+          throw new ValidationFailedError(refIssues);
+        }
+      }
+    }
+
     const write = await this.storage.publishEntry({
       ref: input.ref,
       ...(input.version !== undefined ? { version: input.version } : {})

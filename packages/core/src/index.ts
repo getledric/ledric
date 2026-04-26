@@ -40,6 +40,9 @@ export type {
   InlineRefSource,
   ResolvedRef
 } from './resolve-refs.js';
+export { parseRef } from './parse-ref.js';
+export type { ParsedRef } from './parse-ref.js';
+export { checkStructuralRefs } from './check-refs.js';
 export {
   LOCALE_KEY,
   defaultLocale,

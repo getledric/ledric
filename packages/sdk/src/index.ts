@@ -1,7 +1,7 @@
 export const PACKAGE_NAME = '@ledric/sdk';
 
 export { LedricClient, createLedricClient, LedricError } from './client.js';
-export type { LedricClientOptions } from './client.js';
+export type { LedricClientOptions, LedricApiError } from './client.js';
 export type {
   Entry,
   EntrySummary,
@@ -18,5 +18,6 @@ export type {
   AssetMeta,
   ListAssetsResult,
   ListAssetsOptions,
-  ResolvedRef
+  ResolvedRef,
+  ValidationWarning
 } from './types.js';
