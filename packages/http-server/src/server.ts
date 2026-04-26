@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
 import type { Core } from '@ledric/core';
 
 function toHex(bytes: Uint8Array): string {
@@ -25,14 +27,35 @@ function parseExpandAssets(raw: string | undefined): boolean | string[] | undefi
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+function guessKindFromMime(mime: string | undefined): string {
+  if (mime === undefined) return 'file';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
 export interface HttpServerOptions {
   logger?: boolean;
   /** CORS origin policy. Default: '*' (open). Set to false to disable CORS. */
   cors?: string | string[] | boolean;
+  /**
+   * Mount a static-served GUI alongside the API.
+   * `assetsPath` is an absolute filesystem path to the directory of static
+   * files (typically `@ledric/gui`'s `web/`). `mountPath` defaults to
+   * `/admin` and must start with `/`.
+   */
+  gui?: { assetsPath: string; mountPath?: string };
+  /** Maximum upload size in bytes for POST /assets. Default 25 MiB. */
+  uploadLimitBytes?: number;
 }
 
 export function createHttpServer(core: Core, opts: HttpServerOptions = {}): FastifyInstance {
-  const app = Fastify({ logger: opts.logger ?? false });
+  const uploadLimit = opts.uploadLimitBytes ?? 25 * 1024 * 1024;
+  const app = Fastify({
+    logger: opts.logger ?? false,
+    bodyLimit: uploadLimit
+  });
 
   // Content-API ergonomics: CORS open by default so any frontend can read.
   const corsOption = opts.cors ?? '*';
@@ -41,6 +64,22 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       origin: corsOption,
       methods: ['GET', 'POST', 'OPTIONS'],
       exposedHeaders: ['X-Ledric-Redirect', 'X-Ledric-Redirect-Locale']
+    });
+  }
+
+  app.register(multipart, {
+    limits: { fileSize: uploadLimit, files: 1 }
+  });
+
+  if (opts.gui !== undefined) {
+    const mountPath = opts.gui.mountPath ?? '/admin';
+    if (!mountPath.startsWith('/')) {
+      throw new Error(`gui.mountPath must start with '/', got "${mountPath}"`);
+    }
+    app.register(fastifyStatic, {
+      root: opts.gui.assetsPath,
+      prefix: mountPath.endsWith('/') ? mountPath : `${mountPath}/`,
+      decorateReply: false
     });
   }
 
@@ -178,6 +217,65 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
         url: `/assets/${toHex(r.id)}`
       }))
     });
+  });
+
+  app.post('/assets', async (req, reply) => {
+    if (!req.isMultipart()) {
+      reply.code(400);
+      return { error: { code: 'INVALID_REQUEST', message: 'expected multipart/form-data' } };
+    }
+
+    let bytes: Buffer | null = null;
+    let mime: string | undefined;
+    let filename: string | undefined;
+    let kindOverride: string | undefined;
+    let altOverride: string | undefined;
+
+    for await (const part of req.parts()) {
+      if (part.type === 'file' && part.fieldname === 'file') {
+        bytes = await part.toBuffer();
+        mime = part.mimetype;
+        filename = part.filename;
+      } else if (part.type === 'field') {
+        const value = typeof part.value === 'string' ? part.value : String(part.value);
+        if (part.fieldname === 'kind') kindOverride = value;
+        else if (part.fieldname === 'alt') altOverride = value;
+        else if (part.fieldname === 'mime') mime = value;
+      }
+    }
+
+    if (bytes === null || bytes.byteLength === 0) {
+      reply.code(400);
+      return { error: { code: 'INVALID_REQUEST', message: 'missing "file" part' } };
+    }
+
+    const kind = kindOverride ?? guessKindFromMime(mime);
+
+    try {
+      const written = await core.uploadAsset({
+        kind,
+        bytes,
+        meta: {
+          ...(mime !== undefined ? { mime } : {}),
+          ...(filename !== undefined ? { filename } : {}),
+          ...(altOverride !== undefined ? { alt: altOverride } : {})
+        }
+      });
+      const idHex = Buffer.from(written.id).toString('hex');
+      reply.code(201);
+      return {
+        id: idHex,
+        version: written.version,
+        kind: written.kind,
+        storage_ref: written.storage_ref,
+        meta: written.meta,
+        url: `/assets/${idHex}`
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      reply.code(400);
+      return { error: { code: 'UPLOAD_FAILED', message } };
+    }
   });
 
   app.get<{

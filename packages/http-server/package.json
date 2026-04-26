@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
+    "@fastify/multipart": "^9.0.1",
+    "@fastify/static": "^8.0.4",
     "@ledric/core": "workspace:*",
     "@ledric/storage": "workspace:*",
     "fastify": "^5.1.0"
