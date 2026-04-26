@@ -21,6 +21,11 @@ function validateFieldDef(
       `${pathLabel}: field "${fieldName}" has unknown type "${String(t)}" — valid types are: ${known}`
     );
   }
+  if (field.default !== undefined && !defaultMatchesType(field)) {
+    throw new Error(
+      `${pathLabel}: field "${fieldName}" has a default value that doesn't match its declared type "${field.type}"`
+    );
+  }
   // Recurse into nested object/array fields so deep schemas validate too.
   if (field.type === 'object') {
     for (const [nestedName, nestedField] of Object.entries(field.fields)) {
@@ -41,6 +46,35 @@ function validateFieldDef(
         validateFieldDef(`${pathLabel}/${fieldName}[]`, nestedName, nestedField);
       }
     }
+  }
+}
+
+function defaultMatchesType(field: FieldDef): boolean {
+  const d = field.default;
+  if (d === undefined) return true;
+  switch (field.type) {
+    case 'string':
+    case 'date':
+    case 'slug':
+    case 'markdown':
+    case 'asset':
+      return typeof d === 'string';
+    case 'number':
+      return typeof d === 'number' && Number.isFinite(d);
+    case 'boolean':
+      return typeof d === 'boolean';
+    case 'enum':
+      return typeof d === 'string' && field.values.includes(d);
+    case 'references':
+      return Array.isArray(d) && d.every((v) => typeof v === 'string');
+    case 'array':
+      return Array.isArray(d);
+    case 'vector':
+      return Array.isArray(d) && d.length === field.dims && d.every((v) => typeof v === 'number');
+    case 'object':
+      return typeof d === 'object' && d !== null && !Array.isArray(d);
+    default:
+      return false;
   }
 }
 

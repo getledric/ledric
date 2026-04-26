@@ -5,6 +5,12 @@ export interface FieldCommon {
   indexed?: boolean;
   /** When true, the field accepts per-locale overrides via content._locale[locale][field]. */
   localized?: boolean;
+  /**
+   * Value to fill in when content omits this field (or sets it to null).
+   * Applied at write time, baked into stored content. The value's runtime
+   * type must match the field's `type` (validated at defineType).
+   */
+  default?: unknown;
 }
 
 export interface FieldString extends FieldCommon {

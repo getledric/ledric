@@ -115,6 +115,15 @@ describe('validateContent — object field', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('user repro case 3 — partial cta with no defaults — passes (style/new_tab not required)', () => {
+    const r = validateContent(CtaBand, {
+      slug: 'home-cta',
+      headline: 'Get started',
+      cta: { label: 'Sign up', url: 'https://example.com' }
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it('reports nested validation errors with full JSON-Pointer paths', () => {
     const r = validateContent(CtaBand, {
       slug: 'home-cta',
