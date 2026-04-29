@@ -132,6 +132,33 @@ export interface ListAssetsOptions {
   offset?: number;
 }
 
+/**
+ * imgix-style image transform parameters. The server applies them at
+ * request time against the source asset; nothing about the transform
+ * is persisted into entry content.
+ */
+export interface AssetTransformOptions {
+  /** Source-pixel width (multiplied by `dpr`). Capped server-side at 4096. */
+  w?: number;
+  /** Source-pixel height (multiplied by `dpr`). Capped server-side at 4096. */
+  h?: number;
+  /**
+   * `clip` (default) preserves aspect inside the box; `crop` fills the
+   * box and may crop. `cover` and `contain` are accepted aliases.
+   */
+  fit?: 'clip' | 'crop' | 'cover' | 'contain';
+  /** Output quality (1-100), used for jpg/webp/avif. Default 80. */
+  q?: number;
+  /** Force output format. */
+  fm?: 'jpg' | 'jpeg' | 'png' | 'webp' | 'avif';
+  /** `'format'` makes the server pick the best format from Accept. */
+  auto?: 'format';
+  /** Pixel-density multiplier applied to w/h. 1..4 server-side. */
+  dpr?: number;
+  /** Pin a specific asset version. */
+  version?: number;
+}
+
 export interface ReadOptions {
   version?: number;
   locale?: string;

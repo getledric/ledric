@@ -6,6 +6,7 @@ import fastifyStatic from '@fastify/static';
 import { promises as fs } from 'node:fs';
 import { join as pathJoin } from 'node:path';
 import type { Core } from '@ledric/core';
+import { parseTransformParams } from '@ledric/core';
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -365,9 +366,41 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
 
   app.get<{
     Params: { id: string };
-    Querystring: { version?: string };
+    Querystring: Record<string, string | undefined>;
   }>('/assets/:id', async (req, reply) => {
-    const versionNum = req.query.version ? parseInt(req.query.version, 10) : undefined;
+    const versionNum = req.query.version
+      ? parseInt(req.query.version, 10)
+      : undefined;
+
+    // imgix-style transforms (w, h, fit, q, fm, auto, dpr) — applied at
+    // request time, cached by Core if a TransformCache is configured.
+    const transform = parseTransformParams(
+      req.query as Record<string, string | undefined>
+    );
+    if (transform !== null) {
+      const result = await core.getTransformedAsset({
+        id: req.params.id,
+        ...(versionNum !== undefined ? { version: versionNum } : {}),
+        params: transform,
+        ...(typeof req.headers.accept === 'string'
+          ? { accept: req.headers.accept }
+          : {})
+      });
+      if (!result) {
+        reply.code(404);
+        return reply.send({
+          error: { code: 'NOT_FOUND', message: `asset ${req.params.id}` }
+        });
+      }
+      reply.header('Content-Type', result.mime);
+      reply.header('Content-Length', String(result.bytes.byteLength));
+      reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+      // auto=format negotiates on Accept — caches must split by it.
+      if (transform.auto === 'format') reply.header('Vary', 'Accept');
+      reply.header('X-Ledric-Transform', result.passthrough ? 'passthrough' : 'applied');
+      return reply.send(result.bytes);
+    }
+
     const asset = await core.getAsset({
       id: req.params.id,
       ...(versionNum !== undefined ? { version: versionNum } : {})

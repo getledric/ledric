@@ -1,5 +1,5 @@
 import { defineCommand } from 'citty';
-import { Core } from '@ledric/core';
+import { Core, FsTransformCache } from '@ledric/core';
 import { SqliteStorage } from '@ledric/storage';
 import type { AssetsConfig } from '@ledric/storage';
 import { runHttp } from '@ledric/http-server';
@@ -57,6 +57,16 @@ export const httpCommand = defineCommand({
     'gui-path': {
       type: 'string',
       description: 'Override the GUI assets directory (advanced; defaults to @ledric/gui).'
+    },
+    'transforms-cache': {
+      type: 'string',
+      description: 'Directory for cached on-the-fly image transforms.',
+      default: './ledric-transforms'
+    },
+    'no-transforms-cache': {
+      type: 'boolean',
+      description: 'Disable the transform cache (recompute every request).',
+      default: false
     }
   },
   async run({ args }) {
@@ -68,7 +78,15 @@ export const httpCommand = defineCommand({
       path: args.db,
       ...(assetsConfig !== undefined ? { assets: assetsConfig } : {})
     });
-    const core = new Core(storage);
+
+    const transformCache =
+      args['no-transforms-cache'] === true
+        ? undefined
+        : new FsTransformCache(args['transforms-cache']);
+    const core = new Core(
+      storage,
+      transformCache !== undefined ? { transformCache } : {}
+    );
 
     const guiOpts =
       args.gui === true
@@ -87,6 +105,9 @@ export const httpCommand = defineCommand({
     process.stderr.write(`ledric: opened ${args.db}; HTTP server listening at ${url}\n`);
     if (guiOpts !== undefined) {
       process.stderr.write(`       admin GUI at ${url}${guiOpts.mountPath}\n`);
+    }
+    if (transformCache !== undefined) {
+      process.stderr.write(`       transform cache at ${args['transforms-cache']}\n`);
     }
 
     const shutdown = async (signal: string): Promise<void> => {

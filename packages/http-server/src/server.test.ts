@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Core } from '@ledric/core';
+import sharp from 'sharp';
+import { Core, FsTransformCache } from '@ledric/core';
 import { SqliteStorage } from '@ledric/storage';
 import { createHttpServer } from './server.js';
 import type { FastifyInstance } from 'fastify';
@@ -127,6 +128,84 @@ describe('HTTP server', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('text/plain');
     expect(res.rawPayload.equals(bytes)).toBe(true);
+  });
+
+  it('GET /assets/:id with transform params resizes via sharp', async () => {
+    const png = await sharp({
+      create: { width: 200, height: 100, channels: 3, background: { r: 255, g: 0, b: 0 } }
+    })
+      .png()
+      .toBuffer();
+    const write = await storage.createAsset({
+      kind: 'image',
+      bytes: png,
+      meta: { mime: 'image/png' }
+    });
+    const id = Buffer.from(write.id).toString('hex');
+
+    const res = await app.inject({ method: 'GET', url: `/assets/${id}?w=80&fm=webp` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('image/webp');
+    expect(res.headers['x-ledric-transform']).toBe('applied');
+    const meta = await sharp(res.rawPayload).metadata();
+    expect(meta.width).toBe(80);
+    expect(meta.format).toBe('webp');
+  });
+
+  it('GET /assets/:id with auto=format adds Vary: Accept', async () => {
+    const png = await sharp({
+      create: { width: 100, height: 100, channels: 3, background: { r: 0, g: 255, b: 0 } }
+    })
+      .png()
+      .toBuffer();
+    const write = await storage.createAsset({
+      kind: 'image',
+      bytes: png,
+      meta: { mime: 'image/png' }
+    });
+    const id = Buffer.from(write.id).toString('hex');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/assets/${id}?w=50&auto=format`,
+      headers: { accept: 'image/avif,image/webp,*/*' }
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['vary']).toBe('Accept');
+    expect(res.headers['content-type']).toBe('image/avif');
+  });
+
+  it('GET /assets/:id passes non-image assets through untouched', async () => {
+    const bytes = Buffer.from('hello pdf');
+    const write = await storage.createAsset({
+      kind: 'file',
+      bytes,
+      meta: { mime: 'application/pdf' }
+    });
+    const id = Buffer.from(write.id).toString('hex');
+
+    // params present but source isn't transformable.
+    const res = await app.inject({ method: 'GET', url: `/assets/${id}?w=200&fm=webp` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('application/pdf');
+    expect(res.headers['x-ledric-transform']).toBe('passthrough');
+    expect(res.rawPayload.equals(bytes)).toBe(true);
+  });
+
+  it('GET /assets/:id without transform params still uses the fast non-transform path', async () => {
+    // Same shape as the original test — confirms we didn't regress when
+    // no transform params are present.
+    const bytes = Buffer.from('plain', 'utf8');
+    const write = await storage.createAsset({
+      kind: 'file',
+      bytes,
+      meta: { mime: 'text/plain' }
+    });
+    const id = Buffer.from(write.id).toString('hex');
+
+    const res = await app.inject({ method: 'GET', url: `/assets/${id}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-ledric-transform']).toBeUndefined();
   });
 
   it('GET /entries/:type/:slug returns a 301 when the slug was renamed', async () => {

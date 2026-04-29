@@ -1,5 +1,5 @@
 import { defineCommand } from 'citty';
-import { Core } from '@ledric/core';
+import { Core, FsTransformCache } from '@ledric/core';
 import { SqliteStorage } from '@ledric/storage';
 import type { AssetsConfig } from '@ledric/storage';
 import { runStdio } from '@ledric/mcp-server';
@@ -63,6 +63,16 @@ export const serveCommand = defineCommand({
     'assets-root': {
       type: 'string',
       description: 'For the local backend: directory where bytes live.'
+    },
+    'transforms-cache': {
+      type: 'string',
+      description: 'Directory for cached on-the-fly image transforms.',
+      default: './ledric-transforms'
+    },
+    'no-transforms-cache': {
+      type: 'boolean',
+      description: 'Disable the transform cache (recompute every request).',
+      default: false
     }
   },
   async run({ args }) {
@@ -76,7 +86,15 @@ export const serveCommand = defineCommand({
       path: args.db,
       ...(assetsConfig !== undefined ? { assets: assetsConfig } : {})
     });
-    const core = new Core(storage);
+
+    const transformCache =
+      args['no-transforms-cache'] === true
+        ? undefined
+        : new FsTransformCache(args['transforms-cache']);
+    const core = new Core(
+      storage,
+      transformCache !== undefined ? { transformCache } : {}
+    );
 
     let httpServer: { url: string; close: () => Promise<void> } | null = null;
     if (wantHttp) {
@@ -98,6 +116,12 @@ export const serveCommand = defineCommand({
           `       admin GUI at ${httpServer.url}${guiOpts.mountPath}\n`
         );
       }
+    }
+
+    if (transformCache !== undefined) {
+      process.stderr.write(
+        `       transform cache at ${args['transforms-cache']}\n`
+      );
     }
 
     process.stderr.write(`ledric: opened ${args.db}; MCP stdio server ready\n`);

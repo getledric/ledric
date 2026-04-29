@@ -8,7 +8,8 @@ import type {
   DescribeModel,
   Asset,
   ListAssetsResult,
-  ListAssetsOptions
+  ListAssetsOptions,
+  AssetTransformOptions
 } from './types.js';
 
 export interface LedricClientOptions {
@@ -66,6 +67,20 @@ function parseRef(ref: EntryRef): { type: string; slug: string } {
 
 function trimSlash(s: string): string {
   return s.endsWith('/') ? s.slice(0, -1) : s;
+}
+
+function buildAssetQueryString(opts: AssetTransformOptions): string {
+  const params = new URLSearchParams();
+  if (opts.version !== undefined) params.set('version', String(opts.version));
+  if (opts.w !== undefined) params.set('w', String(opts.w));
+  if (opts.h !== undefined) params.set('h', String(opts.h));
+  if (opts.fit !== undefined) params.set('fit', opts.fit);
+  if (opts.q !== undefined) params.set('q', String(opts.q));
+  if (opts.fm !== undefined) params.set('fm', opts.fm);
+  if (opts.auto !== undefined) params.set('auto', opts.auto);
+  if (opts.dpr !== undefined) params.set('dpr', String(opts.dpr));
+  const s = params.toString();
+  return s ? `?${s}` : '';
 }
 
 export class LedricClient {
@@ -169,14 +184,18 @@ export class LedricClient {
     return (await res.json()) as ListAssetsResult;
   }
 
-  /** Build an absolute asset URL. Pure helper — no fetch. */
-  assetUrl(id: string, opts: { version?: number } = {}): string {
-    const qs = opts.version !== undefined ? `?version=${encodeURIComponent(opts.version)}` : '';
+  /**
+   * Build an absolute asset URL with optional imgix-style transforms.
+   * Pure helper — never fetches. Same shape on both server (Astro/SSR)
+   * and browser; safe to render straight into `<img src>`.
+   */
+  assetUrl(id: string, opts: AssetTransformOptions = {}): string {
+    const qs = buildAssetQueryString(opts);
     return `${this.baseUrl}/assets/${encodeURIComponent(id)}${qs}`;
   }
 
   /** Fetch raw asset bytes as a Uint8Array. Returns null on 404. */
-  async assetBytes(id: string, opts: { version?: number } = {}): Promise<Uint8Array | null> {
+  async assetBytes(id: string, opts: AssetTransformOptions = {}): Promise<Uint8Array | null> {
     const url = this.assetUrl(id, opts);
     const res = await this._fetch(url, { headers: this._headers });
     if (res.status === 404) return null;

@@ -105,6 +105,33 @@ describe('LedricClient', () => {
     expect(url).toBe(`${server.url}/assets/019dc0b5deadbeef`);
   });
 
+  it('assetUrl encodes transform params for imgix-style requests', () => {
+    const url = client.assetUrl('019dc0b5deadbeef', {
+      w: 400,
+      h: 300,
+      fit: 'crop',
+      q: 80,
+      fm: 'webp',
+      dpr: 2
+    });
+    const u = new URL(url);
+    expect(u.pathname).toBe('/assets/019dc0b5deadbeef');
+    expect(u.searchParams.get('w')).toBe('400');
+    expect(u.searchParams.get('h')).toBe('300');
+    expect(u.searchParams.get('fit')).toBe('crop');
+    expect(u.searchParams.get('q')).toBe('80');
+    expect(u.searchParams.get('fm')).toBe('webp');
+    expect(u.searchParams.get('dpr')).toBe('2');
+  });
+
+  it('assetUrl includes auto=format when requested', () => {
+    const url = client.assetUrl('019dc0b5deadbeef', { auto: 'format', w: 800 });
+    const u = new URL(url);
+    expect(u.searchParams.get('auto')).toBe('format');
+    expect(u.searchParams.get('w')).toBe('800');
+  });
+
+
   it('assetBytes returns the raw bytes', async () => {
     const list = await client.assets();
     const id = list.results[0]!.id;

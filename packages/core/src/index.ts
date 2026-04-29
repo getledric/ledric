@@ -3,6 +3,7 @@ export const PACKAGE_NAME = '@ledric/core';
 export { Core, ValidationFailedError } from './core.js';
 export type {
   Capabilities,
+  CoreOptions,
   DescribeModelResult,
   TypeDescription,
   CreateTypeInput,
@@ -19,8 +20,24 @@ export type {
   MigrateEntriesResult,
   MigrateFailure,
   UploadAssetInput,
-  GetAssetInput
+  GetAssetInput,
+  GetTransformedAssetInput,
+  TransformedAsset
 } from './core.js';
+export {
+  parseTransformParams,
+  computeOutputFormat,
+  applyTransforms,
+  transformCacheKey,
+  FsTransformCache,
+  extForFormat,
+  MAX_OUTPUT_DIMENSION
+} from './transforms.js';
+export type {
+  TransformParams,
+  TransformContext,
+  TransformCache
+} from './transforms.js';
 export { normalizeTypeDef, normalizeField } from './normalize.js';
 export { validateContent } from './validate.js';
 export type { ValidationError, ValidationResult } from './validate.js';

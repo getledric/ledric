@@ -167,6 +167,40 @@ class LedricClientTest extends TestCase
         $this->assertSame('http://example.com', $client->getBaseUrl());
     }
 
+    public function testAssetUrlBuildsBareUrl(): void
+    {
+        $url = $this->client->assetUrl('019dc0b5deadbeef');
+        $this->assertSame('http://localhost:3000/assets/019dc0b5deadbeef', $url);
+    }
+
+    public function testAssetUrlEncodesTransformParams(): void
+    {
+        $url = $this->client->assetUrl('019dc0b5deadbeef', [
+            'w' => 400,
+            'h' => 300,
+            'fit' => 'crop',
+            'q' => 80,
+            'fm' => 'webp',
+            'dpr' => 2,
+        ]);
+        $parts = parse_url($url);
+        $this->assertSame('/assets/019dc0b5deadbeef', $parts['path']);
+        parse_str($parts['query'], $q);
+        $this->assertSame('400', $q['w']);
+        $this->assertSame('300', $q['h']);
+        $this->assertSame('crop', $q['fit']);
+        $this->assertSame('80', $q['q']);
+        $this->assertSame('webp', $q['fm']);
+        $this->assertSame('2', $q['dpr']);
+    }
+
+    public function testAssetUrlIncludesAutoFormat(): void
+    {
+        $url = $this->client->assetUrl('019dc0b5deadbeef', ['auto' => 'format', 'w' => 800]);
+        $this->assertStringContainsString('auto=format', $url);
+        $this->assertStringContainsString('w=800', $url);
+    }
+
     public function testRefAttrsBuildsDataAttributes(): void
     {
         $this->assertSame(

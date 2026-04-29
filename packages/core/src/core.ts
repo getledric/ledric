@@ -24,6 +24,14 @@ import { projectForLocale, extractLocaleSlugs } from './locale.js';
 import { resolveAssets } from './resolve-assets.js';
 import { resolveInlineRefs } from './resolve-refs.js';
 import { checkStructuralRefs } from './check-refs.js';
+import {
+  applyTransforms,
+  computeOutputFormat,
+  extForFormat,
+  transformCacheKey,
+  type TransformCache,
+  type TransformParams
+} from './transforms.js';
 
 export interface Capabilities {
   vectorSearch: boolean;
@@ -165,8 +173,39 @@ export class ValidationFailedError extends Error {
   }
 }
 
+export interface CoreOptions {
+  /**
+   * Cache for on-the-fly image transforms. When provided, transformed
+   * bytes are stored here keyed by (asset id, version, params) so repeat
+   * requests skip the libvips pass.
+   */
+  transformCache?: TransformCache;
+}
+
+export interface GetTransformedAssetInput {
+  id: string;
+  version?: number;
+  params: TransformParams;
+  /** Browser Accept header — used when `params.auto === 'format'`. */
+  accept?: string;
+}
+
+export interface TransformedAsset {
+  bytes: Buffer;
+  mime: string;
+  /** True when the bytes came from the transform cache. Mostly for tests. */
+  cached: boolean;
+  /** True when the source mime wasn't transformable so we returned bytes as-is. */
+  passthrough: boolean;
+  version: number;
+}
+
 export class Core {
-  constructor(private readonly storage: Storage) {}
+  private readonly transformCache: TransformCache | undefined;
+
+  constructor(private readonly storage: Storage, opts: CoreOptions = {}) {
+    this.transformCache = opts.transformCache;
+  }
 
   async describeModel(): Promise<DescribeModelResult> {
     const summaries = await this.storage.listTypes();
@@ -517,6 +556,74 @@ export class Core {
       new Uint8Array(id),
       ...(input.version !== undefined ? [{ version: input.version }] : [])
     );
+  }
+
+  /**
+   * Apply imgix-style URL transforms (resize, format, quality) to an
+   * asset's bytes. Returns null when the asset doesn't exist.
+   *
+   * Source mimes we can't transform (gif, svg, video, pdf, ...) come
+   * back as a passthrough — same bytes, same mime, params ignored.
+   */
+  async getTransformedAsset(
+    input: GetTransformedAssetInput
+  ): Promise<TransformedAsset | null> {
+    const idBuf = Buffer.from(input.id, 'hex');
+    if (idBuf.byteLength !== 16) {
+      throw new Error(`Invalid asset id "${input.id}" (expected 32-char hex)`);
+    }
+    const idBytes = new Uint8Array(idBuf);
+
+    const asset = await this.storage.getAsset(
+      idBytes,
+      ...(input.version !== undefined ? [{ version: input.version }] : [])
+    );
+    if (!asset) return null;
+
+    const sourceMime =
+      typeof asset.meta.mime === 'string' ? asset.meta.mime : 'application/octet-stream';
+
+    const fmt = computeOutputFormat(sourceMime, input.params, {
+      ...(input.accept !== undefined ? { accept: input.accept } : {})
+    });
+
+    // Source isn't transformable — pass through.
+    if (fmt === null) {
+      const bytes = await this.storage.readAssetBytes(
+        idBytes,
+        ...(input.version !== undefined ? [{ version: input.version }] : [])
+      );
+      return { bytes, mime: sourceMime, cached: false, passthrough: true, version: asset.version };
+    }
+
+    const key = transformCacheKey(input.params, fmt.fm);
+    const ext = extForFormat(fmt.fm);
+
+    if (this.transformCache) {
+      const hit = await this.transformCache.get(input.id, asset.version, key, ext);
+      if (hit !== null) {
+        return { bytes: hit, mime: fmt.mime, cached: true, passthrough: false, version: asset.version };
+      }
+    }
+
+    const sourceBytes = await this.storage.readAssetBytes(
+      idBytes,
+      ...(input.version !== undefined ? [{ version: input.version }] : [])
+    );
+    const out = await applyTransforms(sourceBytes, input.params, sourceMime, {
+      ...(input.accept !== undefined ? { accept: input.accept } : {})
+    });
+
+    if (this.transformCache) {
+      // Best-effort write — a failing cache must never break the response.
+      try {
+        await this.transformCache.put(input.id, asset.version, key, ext, out.bytes);
+      } catch {
+        /* swallow */
+      }
+    }
+
+    return { bytes: out.bytes, mime: out.mime, cached: false, passthrough: false, version: asset.version };
   }
 
   // No-op pass-through used by tests and future hooks.

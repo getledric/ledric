@@ -167,14 +167,49 @@ class LedricClient
     }
 
     /**
-     * Build an absolute asset URL — pure helper, no fetch.
+     * Build an absolute asset URL — pure helper, no fetch. Accepts the
+     * same imgix-style transform knobs as the TS SDK so consumer markup
+     * looks identical across languages.
      *
-     * @param array{version?: int} $opts
+     * @param array{
+     *     version?: int,
+     *     w?: int,
+     *     h?: int,
+     *     fit?: 'clip'|'crop'|'cover'|'contain',
+     *     q?: int,
+     *     fm?: 'jpg'|'jpeg'|'png'|'webp'|'avif',
+     *     auto?: 'format',
+     *     dpr?: int|float
+     * } $opts
      */
     public function assetUrl(string $id, array $opts = []): string
     {
-        $qs = isset($opts['version']) ? '?version=' . rawurlencode((string) $opts['version']) : '';
-        return $this->baseUrl . '/assets/' . rawurlencode($id) . $qs;
+        $params = [];
+        if (isset($opts['version'])) {
+            $params['version'] = (string) $opts['version'];
+        }
+        if (isset($opts['w'])) {
+            $params['w'] = (string) $opts['w'];
+        }
+        if (isset($opts['h'])) {
+            $params['h'] = (string) $opts['h'];
+        }
+        if (isset($opts['fit'])) {
+            $params['fit'] = (string) $opts['fit'];
+        }
+        if (isset($opts['q'])) {
+            $params['q'] = (string) $opts['q'];
+        }
+        if (isset($opts['fm'])) {
+            $params['fm'] = (string) $opts['fm'];
+        }
+        if (isset($opts['auto'])) {
+            $params['auto'] = (string) $opts['auto'];
+        }
+        if (isset($opts['dpr'])) {
+            $params['dpr'] = (string) $opts['dpr'];
+        }
+        return $this->baseUrl . '/assets/' . rawurlencode($id) . $this->qs($params);
     }
 
     /**
