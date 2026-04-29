@@ -12,6 +12,8 @@ import { TypeList } from './components/TypeList.js';
 import { EntryList } from './components/EntryList.js';
 import { EntryEditor } from './components/EntryEditor.js';
 import { InlineDrawer } from './components/InlineDrawer.js';
+import { AuthGate } from './components/AuthGate.js';
+import { auth } from './lib/api.js';
 
 // The HTTP server injects <base href="/admin/"> into every served HTML
 // response under the mount path, so the most reliable way to find our
@@ -38,16 +40,34 @@ function detectBasename() {
 }
 
 function Layout({ children }) {
+  function signOut() {
+    if (!confirm('Clear the stored admin key? You\'ll need to paste it again.')) return;
+    auth.clear();
+    window.location.reload();
+  }
+  const hasKey = Boolean(auth.key);
   return html`
     <div className="min-h-screen flex flex-col">
       <nav className="px-6 py-4 border-b border-zinc-800 flex items-baseline gap-6">
         <span className="font-semibold tracking-widest text-zinc-400">LEDRIC · ADMIN</span>
         <${Link} to="/types" className="text-sm text-zinc-400 hover:text-zinc-100 transition">Types</${Link}>
-        <span className="ml-auto text-xs text-zinc-600">connected to <code className="text-zinc-400">${window.location.host}</code></span>
+        <span className="ml-auto flex items-baseline gap-3 text-xs text-zinc-600">
+          <span>connected to <code className="text-zinc-400">${window.location.host}</code></span>
+          ${hasKey && html`
+            <button
+              type="button"
+              onClick=${signOut}
+              className="text-zinc-500 hover:text-amber-400 transition"
+              title="Clear stored admin key"
+            >sign out</button>
+          `}
+        </span>
       </nav>
       <main className="flex-1 px-6 py-8 max-w-6xl w-full mx-auto">${children}</main>
       <footer className="px-6 py-4 border-t border-zinc-800 text-xs text-zinc-600">
-        No auth yet — assumes a trusted local network. <a className="text-zinc-400 hover:text-amber-400" href="/" target="_blank">API root</a>
+        ${hasKey
+          ? html`Authenticated. Key stored in this browser. <a className="text-zinc-400 hover:text-amber-400" href="/" target="_blank">API root</a>`
+          : html`Auth-off mode (no admin key required). <a className="text-zinc-400 hover:text-amber-400" href="/" target="_blank">API root</a>`}
       </footer>
     </div>
   `;
@@ -70,12 +90,14 @@ function FullApp() {
 
 function App() {
   return html`
-    <${BrowserRouter} basename=${detectBasename()}>
-      <${Routes}>
-        <${Route} path="/inline/:type/:slug" element=${html`<${InlineDrawer} />`} />
-        <${Route} path="/*" element=${html`<${FullApp} />`} />
-      </${Routes}>
-    </${BrowserRouter}>
+    <${AuthGate}>
+      <${BrowserRouter} basename=${detectBasename()}>
+        <${Routes}>
+          <${Route} path="/inline/:type/:slug" element=${html`<${InlineDrawer} />`} />
+          <${Route} path="/*" element=${html`<${FullApp} />`} />
+        </${Routes}>
+      </${BrowserRouter}>
+    </${AuthGate}>
   `;
 }
 

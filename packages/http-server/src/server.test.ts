@@ -477,6 +477,14 @@ describe('HTTP server with auth (admin-protects-writes default)', () => {
     expect(res.statusCode).toBe(200);
   });
 
+  it('GET /auth/status reports required:true when keys exist', async () => {
+    const res = await app.inject({ method: 'GET', url: '/auth/status' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.required).toBe(true);
+    expect(body.reads_open).toBe(true);
+  });
+
   it('GET routes are open by default (no reader-key requirement)', async () => {
     const res = await app.inject({ method: 'GET', url: '/types' });
     expect(res.statusCode).toBe(200);
@@ -648,5 +656,34 @@ describe('HTTP server with auth-off (no keys exist)', () => {
       payload: { tool: 'describe_model' }
     });
     expect(res.statusCode).toBe(200);
+  });
+
+  it('GET /auth/status reports required:false when no keys exist', async () => {
+    const res = await app.inject({ method: 'GET', url: '/auth/status' });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ required: false, reads_open: true });
+  });
+});
+
+describe('HTTP server with no auth configured at all', () => {
+  let storage: SqliteStorage;
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    storage = await SqliteStorage.open({ path: ':memory:' });
+    const core = new Core(storage);
+    app = createHttpServer(core); // no auth opts
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await storage.close();
+  });
+
+  it('GET /auth/status still answers (default open) without auth opts', async () => {
+    const res = await app.inject({ method: 'GET', url: '/auth/status' });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ required: false, reads_open: true });
   });
 });

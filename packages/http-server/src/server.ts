@@ -175,6 +175,21 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     });
   }
 
+  app.get('/auth/status', async () => {
+    // Always public. The GUI hits this on load to decide whether to
+    // show a key prompt; SDK consumers can detect "do I need a key?"
+    // before issuing a real request that would 401.
+    if (opts.auth === undefined) {
+      return { required: false, reads_open: true };
+    }
+    const dbKeys = await opts.auth.storage.countActiveApiKeys();
+    const envConfigured = Boolean(opts.auth.envAdminKey || opts.auth.envReaderKey);
+    return {
+      required: dbKeys > 0 || envConfigured,
+      reads_open: opts.auth.requireReaderKey !== true
+    };
+  });
+
   app.get('/', async () => ({
     name: 'ledric',
     version: '0.0.0',
@@ -607,6 +622,7 @@ function attachAuth(
 
   function isPublicPath(urlPath: string): boolean {
     if (urlPath === '/' || urlPath === '') return true;
+    if (urlPath === '/auth/status') return true;
     if (guiMountPath !== null && urlPath === guiMountPath) return true;
     if (guiPrefix !== null && urlPath.startsWith(guiPrefix)) return true;
     return false;
