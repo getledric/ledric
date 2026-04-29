@@ -143,5 +143,25 @@ export const migrations: Migration[] = [
 
       CREATE INDEX idx_entries_slugs_entry ON entries_slugs (entry_id);
     `
+  },
+  {
+    id: 5,
+    name: '0005_api_keys',
+    sql: `
+      CREATE TABLE api_keys (
+        id           BLOB    PRIMARY KEY,
+        env_id       BLOB    NOT NULL REFERENCES envs(id),
+        role         TEXT    NOT NULL CHECK (role IN ('admin','reader')),
+        label        TEXT,
+        key_hash     BLOB    NOT NULL UNIQUE,
+        key_prefix   TEXT    NOT NULL,
+        created_at   INTEGER NOT NULL,
+        last_used_at INTEGER,
+        revoked_at   INTEGER
+      ) STRICT;
+
+      CREATE INDEX idx_api_keys_env_role ON api_keys (env_id, role);
+      CREATE INDEX idx_api_keys_hash ON api_keys (key_hash);
+    `
   }
 ];

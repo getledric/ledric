@@ -205,6 +205,34 @@ export interface ListAssetsResult {
   offset: number;
 }
 
+/** ---------- API keys ---------- */
+
+export type ApiKeyRole = 'admin' | 'reader';
+
+export interface CreateApiKeyInput {
+  role: ApiKeyRole;
+  label?: string;
+  key_hash: Uint8Array;
+  key_prefix: string;
+}
+
+export interface ApiKeyRow {
+  id: Uint8Array;
+  role: ApiKeyRole;
+  label: string | null;
+  key_prefix: string;
+  created_at: number;
+  last_used_at: number | null;
+  revoked_at: number | null;
+}
+
+export interface ApiKeyLookup {
+  id: Uint8Array;
+  role: ApiKeyRole;
+  label: string | null;
+  revoked_at: number | null;
+}
+
 export interface Storage {
   createType(input: CreateTypeInput): Promise<CreateTypeResult>;
   alterType(input: AlterTypeInput): Promise<AlterTypeResult>;
@@ -222,6 +250,19 @@ export interface Storage {
   findEntries(input: FindEntriesInput): Promise<FindEntriesResult>;
   publishEntry(input: PublishEntryInput): Promise<EntryWrite>;
   renameEntry(input: RenameEntryInput): Promise<RenameEntryResult>;
+
+  /** Create an API key row from a pre-hashed secret. Returns the assigned id + created_at. */
+  createApiKey(input: CreateApiKeyInput): Promise<{ id: Uint8Array; created_at: number }>;
+  /** Constant-time hash lookup. Returns null on miss. Revoked keys still return so the caller can distinguish "never existed" from "revoked". */
+  findApiKeyByHash(hash: Uint8Array): Promise<ApiKeyLookup | null>;
+  /** List keys (sorted newest-first). Excludes revoked keys unless `includeRevoked` is set. */
+  listApiKeys(opts?: { includeRevoked?: boolean }): Promise<ApiKeyRow[]>;
+  /** Mark a key as revoked. Idempotent — returns null if the id doesn't exist. */
+  revokeApiKey(id: Uint8Array): Promise<{ revoked_at: number } | null>;
+  /** Update last_used_at, debounced internally so we don't write on every request. */
+  markApiKeyUsed(id: Uint8Array, at: number): Promise<void>;
+  /** Number of non-revoked keys — used to detect "auth disabled" mode. */
+  countActiveApiKeys(): Promise<number>;
 
   close(): Promise<void>;
 }

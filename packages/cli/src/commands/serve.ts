@@ -5,6 +5,7 @@ import type { AssetsConfig } from '@ledric/storage';
 import { runStdio } from '@ledric/mcp-server';
 import { runHttp } from '@ledric/http-server';
 import { guiAssetsPath } from '@ledric/gui';
+import { bootstrapApiKeysIfEmpty, printFirstBootKeys } from './auth-bootstrap.js';
 
 function assetsConfigFromArgs(args: {
   'assets-backend'?: string;
@@ -73,6 +74,12 @@ export const serveCommand = defineCommand({
       type: 'boolean',
       description: 'Disable the transform cache (recompute every request).',
       default: false
+    },
+    'require-reader-key': {
+      type: 'boolean',
+      description:
+        'Require a reader key on every GET (closed-reads mode). Default: GETs are open and only writes need an admin key.',
+      default: false
     }
   },
   async run({ args }) {
@@ -87,17 +94,37 @@ export const serveCommand = defineCommand({
       ...(assetsConfig !== undefined ? { assets: assetsConfig } : {})
     });
 
-    const transformCache =
-      args['no-transforms-cache'] === true
-        ? undefined
-        : new FsTransformCache(args['transforms-cache']);
+    // citty's `--no-foo` magic flips `args['foo']` to `false` for any
+    // string flag. We accept either path: a plaintext "false" / "off",
+    // or an explicit --no-transforms-cache flag.
+    const cacheArg = args['transforms-cache'] as string | boolean;
+    const cacheDisabled =
+      args['no-transforms-cache'] === true ||
+      cacheArg === false ||
+      cacheArg === 'false' ||
+      cacheArg === 'off';
+    const transformCache = cacheDisabled
+      ? undefined
+      : new FsTransformCache(typeof cacheArg === 'string' ? cacheArg : './ledric-transforms');
     const core = new Core(
       storage,
       transformCache !== undefined ? { transformCache } : {}
     );
 
+    // First-boot key generation. Only relevant when HTTP is on (stdio
+    // MCP runs in-process and is implicitly trusted), but we mint keys
+    // before the server boots so the auth middleware sees them.
     let httpServer: { url: string; close: () => Promise<void> } | null = null;
     if (wantHttp) {
+      const envAdminKey = process.env.LEDRIC_ADMIN_KEY;
+      const envReaderKey = process.env.LEDRIC_READER_KEY;
+      const bootstrapped = await bootstrapApiKeysIfEmpty(
+        storage,
+        envAdminKey,
+        envReaderKey
+      );
+      if (bootstrapped !== null) printFirstBootKeys(bootstrapped);
+
       const guiOpts =
         args.gui === true
           ? {
@@ -108,7 +135,13 @@ export const serveCommand = defineCommand({
       httpServer = await runHttp(core, {
         port: parseInt(args['http-port'], 10),
         host: args['http-host'],
-        ...(guiOpts !== undefined ? { gui: guiOpts } : {})
+        ...(guiOpts !== undefined ? { gui: guiOpts } : {}),
+        auth: {
+          storage,
+          requireReaderKey: args['require-reader-key'] === true,
+          ...(envAdminKey !== undefined ? { envAdminKey } : {}),
+          ...(envReaderKey !== undefined ? { envReaderKey } : {})
+        }
       });
       process.stderr.write(`ledric: HTTP server at ${httpServer.url}\n`);
       if (guiOpts !== undefined) {
@@ -120,7 +153,7 @@ export const serveCommand = defineCommand({
 
     if (transformCache !== undefined) {
       process.stderr.write(
-        `       transform cache at ${args['transforms-cache']}\n`
+        `       transform cache at ${typeof cacheArg === 'string' ? cacheArg : './ledric-transforms'}\n`
       );
     }
 

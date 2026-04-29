@@ -1,5 +1,6 @@
 import type { Core } from '@ledric/core';
 import { createHttpServer } from './server.js';
+import type { HttpAuthOptions } from './server.js';
 
 export interface RunHttpOptions {
   port?: number;
@@ -7,6 +8,7 @@ export interface RunHttpOptions {
   logger?: boolean;
   gui?: { assetsPath: string; mountPath?: string };
   uploadLimitBytes?: number;
+  auth?: HttpAuthOptions;
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
@@ -39,6 +41,7 @@ export async function runHttp(core: Core, opts: RunHttpOptions = {}): Promise<{
   };
   if (opts.gui !== undefined) serverOpts.gui = opts.gui;
   if (opts.uploadLimitBytes !== undefined) serverOpts.uploadLimitBytes = opts.uploadLimitBytes;
+  if (opts.auth !== undefined) serverOpts.auth = opts.auth;
   const app = createHttpServer(core, serverOpts);
 
   // fastify.listen() returns the actual bound URL — important when port is 0

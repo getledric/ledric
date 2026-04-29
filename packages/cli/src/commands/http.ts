@@ -4,6 +4,7 @@ import { SqliteStorage } from '@ledric/storage';
 import type { AssetsConfig } from '@ledric/storage';
 import { runHttp } from '@ledric/http-server';
 import { guiAssetsPath } from '@ledric/gui';
+import { bootstrapApiKeysIfEmpty, printFirstBootKeys } from './auth-bootstrap.js';
 
 function assetsConfigFromArgs(args: {
   'assets-backend'?: string;
@@ -67,6 +68,12 @@ export const httpCommand = defineCommand({
       type: 'boolean',
       description: 'Disable the transform cache (recompute every request).',
       default: false
+    },
+    'require-reader-key': {
+      type: 'boolean',
+      description:
+        'Require a reader key on every GET (closed-reads mode). Default: GETs are open and only writes need an admin key.',
+      default: false
     }
   },
   async run({ args }) {
@@ -79,14 +86,29 @@ export const httpCommand = defineCommand({
       ...(assetsConfig !== undefined ? { assets: assetsConfig } : {})
     });
 
-    const transformCache =
-      args['no-transforms-cache'] === true
-        ? undefined
-        : new FsTransformCache(args['transforms-cache']);
+    // See note in serve.ts — citty's `--no-X` magic.
+    const cacheArg = args['transforms-cache'] as string | boolean;
+    const cacheDisabled =
+      args['no-transforms-cache'] === true ||
+      cacheArg === false ||
+      cacheArg === 'false' ||
+      cacheArg === 'off';
+    const transformCache = cacheDisabled
+      ? undefined
+      : new FsTransformCache(typeof cacheArg === 'string' ? cacheArg : './ledric-transforms');
     const core = new Core(
       storage,
       transformCache !== undefined ? { transformCache } : {}
     );
+
+    const envAdminKey = process.env.LEDRIC_ADMIN_KEY;
+    const envReaderKey = process.env.LEDRIC_READER_KEY;
+    const bootstrapped = await bootstrapApiKeysIfEmpty(
+      storage,
+      envAdminKey,
+      envReaderKey
+    );
+    if (bootstrapped !== null) printFirstBootKeys(bootstrapped);
 
     const guiOpts =
       args.gui === true
@@ -99,7 +121,13 @@ export const httpCommand = defineCommand({
     const { url, close } = await runHttp(core, {
       port: parseInt(args.port, 10),
       host: args.host,
-      ...(guiOpts !== undefined ? { gui: guiOpts } : {})
+      ...(guiOpts !== undefined ? { gui: guiOpts } : {}),
+      auth: {
+        storage,
+        requireReaderKey: args['require-reader-key'] === true,
+        ...(envAdminKey !== undefined ? { envAdminKey } : {}),
+        ...(envReaderKey !== undefined ? { envReaderKey } : {})
+      }
     });
 
     process.stderr.write(`ledric: opened ${args.db}; HTTP server listening at ${url}\n`);
@@ -107,7 +135,9 @@ export const httpCommand = defineCommand({
       process.stderr.write(`       admin GUI at ${url}${guiOpts.mountPath}\n`);
     }
     if (transformCache !== undefined) {
-      process.stderr.write(`       transform cache at ${args['transforms-cache']}\n`);
+      process.stderr.write(
+        `       transform cache at ${typeof cacheArg === 'string' ? cacheArg : './ledric-transforms'}\n`
+      );
     }
 
     const shutdown = async (signal: string): Promise<void> => {

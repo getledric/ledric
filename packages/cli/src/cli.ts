@@ -7,6 +7,7 @@ import { lsCommand } from './commands/ls.js';
 import { assetCommand } from './commands/asset.js';
 import { renameCommand } from './commands/rename.js';
 import { refsCommand } from './commands/refs.js';
+import { keysCommand } from './commands/keys.js';
 
 const CONFIG_HELP = `
 ledric — MCP/LLM-native self-hosted CMS
@@ -31,6 +32,9 @@ USAGE
   ledric asset bytes <id>            write asset bytes to stdout
   ledric rename <type>/<old> <new>   rename an entry (old slug keeps redirecting)
   ledric refs check                  lint all entries for dangling :::ref{} directives
+  ledric keys list                   show issued API keys (prefix only)
+  ledric keys create --role admin    mint a new admin or reader key (prints once)
+  ledric keys revoke <id-prefix>     revoke a key
 
 HOOK IT UP TO YOUR MCP CLIENT
 
@@ -67,7 +71,8 @@ const main = defineCommand({
     ls: lsCommand,
     asset: assetCommand,
     rename: renameCommand,
-    refs: refsCommand
+    refs: refsCommand,
+    keys: keysCommand
   },
   run() {
     // Citty invokes the parent's `run` even when a subcommand matches; only

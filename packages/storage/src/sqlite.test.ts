@@ -133,6 +133,87 @@ describe('SqliteStorage', () => {
     expect(all.total).toBe(3);
   });
 
+  describe('api_keys', () => {
+    it('starts with no active keys (auth-off mode)', async () => {
+      expect(await storage.countActiveApiKeys()).toBe(0);
+    });
+
+    it('round-trips an admin key by hash lookup', async () => {
+      const { generateApiKey } = await import('./keys.js');
+      const k = generateApiKey('admin');
+      const written = await storage.createApiKey({
+        role: 'admin',
+        label: 'first',
+        key_hash: k.hash,
+        key_prefix: k.prefix
+      });
+      expect(written.id.byteLength).toBe(16);
+
+      const found = await storage.findApiKeyByHash(k.hash);
+      expect(found).not.toBeNull();
+      expect(found!.role).toBe('admin');
+      expect(found!.label).toBe('first');
+      expect(found!.revoked_at).toBeNull();
+
+      expect(await storage.countActiveApiKeys()).toBe(1);
+    });
+
+    it('returns null for an unknown hash', async () => {
+      const wrong = new Uint8Array(32);
+      expect(await storage.findApiKeyByHash(wrong)).toBeNull();
+    });
+
+    it('lists keys newest-first and excludes revoked by default', async () => {
+      const { generateApiKey } = await import('./keys.js');
+      const a = generateApiKey('admin');
+      const b = generateApiKey('reader');
+      const c = generateApiKey('admin');
+      const wA = await storage.createApiKey({ role: 'admin', label: 'a', key_hash: a.hash, key_prefix: a.prefix });
+      await new Promise((r) => setTimeout(r, 2));
+      await storage.createApiKey({ role: 'reader', label: 'b', key_hash: b.hash, key_prefix: b.prefix });
+      await new Promise((r) => setTimeout(r, 2));
+      await storage.createApiKey({ role: 'admin', label: 'c', key_hash: c.hash, key_prefix: c.prefix });
+
+      await storage.revokeApiKey(wA.id);
+
+      const active = await storage.listApiKeys();
+      expect(active.map((r) => r.label)).toEqual(['c', 'b']);
+
+      const all = await storage.listApiKeys({ includeRevoked: true });
+      expect(all.map((r) => r.label)).toEqual(['c', 'b', 'a']);
+      expect(all[2]?.revoked_at).not.toBeNull();
+      expect(await storage.countActiveApiKeys()).toBe(2);
+    });
+
+    it('revokeApiKey is idempotent and returns null for unknown ids', async () => {
+      const { generateApiKey } = await import('./keys.js');
+      const k = generateApiKey('admin');
+      const w = await storage.createApiKey({ role: 'admin', key_hash: k.hash, key_prefix: k.prefix });
+      const r1 = await storage.revokeApiKey(w.id);
+      expect(r1).not.toBeNull();
+      const r2 = await storage.revokeApiKey(w.id);
+      expect(r2).not.toBeNull();
+      const wrongId = new Uint8Array(16);
+      expect(await storage.revokeApiKey(wrongId)).toBeNull();
+    });
+
+    it('markApiKeyUsed debounces writes within 60s', async () => {
+      const { generateApiKey } = await import('./keys.js');
+      const k = generateApiKey('admin');
+      const w = await storage.createApiKey({ role: 'admin', key_hash: k.hash, key_prefix: k.prefix });
+
+      const t0 = 1_000_000_000_000;
+      await storage.markApiKeyUsed(w.id, t0);
+      await storage.markApiKeyUsed(w.id, t0 + 30_000);
+      const after1 = (await storage.listApiKeys())[0]!;
+      expect(after1.last_used_at).toBe(t0);
+
+      await storage.markApiKeyUsed(w.id, t0 + 70_000);
+      const after2 = (await storage.listApiKeys())[0]!;
+      expect(after2.last_used_at).toBe(t0 + 70_000);
+    });
+  });
+
   it('is idempotent on migrations (re-opening the same file is fine)', async () => {
     const { mkdtempSync, rmSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');

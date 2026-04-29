@@ -961,6 +961,108 @@ export class SqliteStorage implements Storage {
     return bytes;
   }
 
+  // -------------------- API keys --------------------
+
+  async createApiKey(input: import('./types.js').CreateApiKeyInput): Promise<{ id: Uint8Array; created_at: number }> {
+    const id = uuidv7Bytes();
+    const created_at = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO api_keys (id, env_id, role, label, key_hash, key_prefix, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        Buffer.from(id),
+        Buffer.from(this.mainEnvId),
+        input.role,
+        input.label ?? null,
+        Buffer.from(input.key_hash),
+        input.key_prefix,
+        created_at
+      );
+    return { id, created_at };
+  }
+
+  async findApiKeyByHash(hash: Uint8Array): Promise<import('./types.js').ApiKeyLookup | null> {
+    const row = this.db
+      .prepare<[Buffer], { id: Buffer; role: 'admin' | 'reader'; label: string | null; revoked_at: number | null }>(
+        `SELECT id, role, label, revoked_at FROM api_keys WHERE key_hash = ?`
+      )
+      .get(Buffer.from(hash));
+    if (!row) return null;
+    return {
+      id: new Uint8Array(row.id),
+      role: row.role,
+      label: row.label,
+      revoked_at: row.revoked_at
+    };
+  }
+
+  async listApiKeys(opts?: { includeRevoked?: boolean }): Promise<import('./types.js').ApiKeyRow[]> {
+    const stmt = opts?.includeRevoked === true
+      ? `SELECT id, role, label, key_prefix, created_at, last_used_at, revoked_at
+         FROM api_keys WHERE env_id = ? ORDER BY created_at DESC`
+      : `SELECT id, role, label, key_prefix, created_at, last_used_at, revoked_at
+         FROM api_keys WHERE env_id = ? AND revoked_at IS NULL ORDER BY created_at DESC`;
+    const rows = this.db
+      .prepare<[Buffer], { id: Buffer; role: 'admin' | 'reader'; label: string | null; key_prefix: string; created_at: number; last_used_at: number | null; revoked_at: number | null }>(
+        stmt
+      )
+      .all(Buffer.from(this.mainEnvId));
+    return rows.map((r) => ({
+      id: new Uint8Array(r.id),
+      role: r.role,
+      label: r.label,
+      key_prefix: r.key_prefix,
+      created_at: r.created_at,
+      last_used_at: r.last_used_at,
+      revoked_at: r.revoked_at
+    }));
+  }
+
+  async revokeApiKey(id: Uint8Array): Promise<{ revoked_at: number } | null> {
+    const revoked_at = Date.now();
+    const info = this.db
+      .prepare(
+        `UPDATE api_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`
+      )
+      .run(revoked_at, Buffer.from(id));
+    if (info.changes === 0) {
+      // Either no such id, or already revoked. Distinguish.
+      const exists = this.db
+        .prepare<[Buffer], { revoked_at: number | null }>(
+          `SELECT revoked_at FROM api_keys WHERE id = ?`
+        )
+        .get(Buffer.from(id));
+      if (!exists) return null;
+      return { revoked_at: exists.revoked_at ?? revoked_at };
+    }
+    return { revoked_at };
+  }
+
+  /**
+   * Update last_used_at. Debounced — we only write when the previous
+   * touch is more than 60s old, so a busy server isn't doing one DB
+   * write per authenticated request.
+   */
+  async markApiKeyUsed(id: Uint8Array, at: number): Promise<void> {
+    this.db
+      .prepare(
+        `UPDATE api_keys SET last_used_at = ?
+         WHERE id = ? AND (last_used_at IS NULL OR last_used_at < ?)`
+      )
+      .run(at, Buffer.from(id), at - 60_000);
+  }
+
+  async countActiveApiKeys(): Promise<number> {
+    const row = this.db
+      .prepare<[Buffer], { n: number }>(
+        `SELECT COUNT(*) AS n FROM api_keys WHERE env_id = ? AND revoked_at IS NULL`
+      )
+      .get(Buffer.from(this.mainEnvId));
+    return row?.n ?? 0;
+  }
+
   async close(): Promise<void> {
     this.db.close();
   }

@@ -26,8 +26,21 @@ export type {
   AssetSummary,
   AssetDetail,
   ListAssetsInput,
-  ListAssetsResult
+  ListAssetsResult,
+  ApiKeyRole,
+  CreateApiKeyInput,
+  ApiKeyRow,
+  ApiKeyLookup
 } from './types.js';
+
+export {
+  generateApiKey,
+  hashApiKey,
+  parseApiKeyRole,
+  looksLikeApiKey,
+  ROLE_PREFIX
+} from './keys.js';
+export type { GeneratedApiKey } from './keys.js';
 
 export { SqliteStorage, VersionConflictError, NotFoundError } from './sqlite.js';
 export type { OpenOptions, AssetsConfig } from './sqlite.js';

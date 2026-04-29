@@ -7,6 +7,8 @@ import { promises as fs } from 'node:fs';
 import { join as pathJoin } from 'node:path';
 import type { Core } from '@ledric/core';
 import { parseTransformParams } from '@ledric/core';
+import type { Storage, ApiKeyRole } from '@ledric/storage';
+import { hashApiKey, parseApiKeyRole, looksLikeApiKey } from '@ledric/storage';
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -46,6 +48,25 @@ function guessKindFromMime(mime: string | undefined): string {
   return 'file';
 }
 
+export interface HttpAuthOptions {
+  /** Storage handle for API-key lookups. Required when auth is wired. */
+  storage: Storage;
+  /**
+   * When true, GET routes also require at least a reader key. Default
+   * behavior is admin-protects-writes only — GETs stay open so single-
+   * site setups don't have to ship a reader key to their renderer.
+   */
+  requireReaderKey?: boolean;
+  /**
+   * Optional plaintext admin key from an env var. Matched alongside
+   * the DB-issued keys; useful for ops scenarios where you don't want
+   * the secret living in the SQLite file.
+   */
+  envAdminKey?: string;
+  /** Same idea, but for the reader role. */
+  envReaderKey?: string;
+}
+
 export interface HttpServerOptions {
   logger?: boolean;
   /** CORS origin policy. Default: '*' (open). Set to false to disable CORS. */
@@ -59,6 +80,13 @@ export interface HttpServerOptions {
   gui?: { assetsPath: string; mountPath?: string };
   /** Maximum upload size in bytes for POST /assets. Default 25 MiB. */
   uploadLimitBytes?: number;
+  /**
+   * API-key auth configuration. When omitted, ALL routes are open.
+   * When present, auth is enforced — but only once at least one
+   * non-revoked DB key OR an env var key exists; until then the
+   * middleware treats requests as anonymous (auth-off mode).
+   */
+  auth?: HttpAuthOptions;
 }
 
 export function createHttpServer(core: Core, opts: HttpServerOptions = {}): FastifyInstance {
@@ -81,6 +109,10 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
   app.register(multipart, {
     limits: { fileSize: uploadLimit, files: 1 }
   });
+
+  if (opts.auth !== undefined) {
+    attachAuth(app, opts.auth, opts.gui?.mountPath ?? null);
+  }
 
   if (opts.gui !== undefined) {
     const mountPath = opts.gui.mountPath ?? '/admin';
@@ -544,4 +576,110 @@ async function dispatchTool(
     default:
       throw new Error(`Unknown tool "${tool}"`);
   }
+}
+
+/**
+ * Attach the API-key auth preHandler. Runs before every route. The
+ * policy:
+ *   - Public routes (GET / and the GUI mount) skip auth entirely.
+ *   - If no active keys exist (DB + env), every request is anonymous —
+ *     this preserves the day-zero "no auth configured" UX.
+ *   - Otherwise: POSTs require admin; GETs are open by default but
+ *     require reader when `requireReaderKey` is set.
+ *
+ * Env-var keys (LEDRIC_ADMIN_KEY / LEDRIC_READER_KEY) are checked
+ * alongside DB-issued keys so ops scenarios that don't want secrets in
+ * SQLite still work.
+ */
+function attachAuth(
+  app: FastifyInstance,
+  auth: HttpAuthOptions,
+  guiMountPath: string | null
+): void {
+  const requireReaderKey = auth.requireReaderKey === true;
+  const envKeys = new Map<string, ApiKeyRole>();
+  if (auth.envAdminKey) envKeys.set(auth.envAdminKey, 'admin');
+  if (auth.envReaderKey) envKeys.set(auth.envReaderKey, 'reader');
+
+  const guiPrefix = guiMountPath
+    ? guiMountPath.endsWith('/') ? guiMountPath : `${guiMountPath}/`
+    : null;
+
+  function isPublicPath(urlPath: string): boolean {
+    if (urlPath === '/' || urlPath === '') return true;
+    if (guiMountPath !== null && urlPath === guiMountPath) return true;
+    if (guiPrefix !== null && urlPath.startsWith(guiPrefix)) return true;
+    return false;
+  }
+
+  app.addHook('onRequest', async (req, reply) => {
+    const path = (req.url.split('?', 1)[0] ?? req.url);
+    if (isPublicPath(path)) return;
+
+    // Auth-off when nothing is configured. Cheap path — count is a
+    // single COUNT(*) on a tiny table.
+    const dbKeys = await auth.storage.countActiveApiKeys();
+    if (dbKeys === 0 && envKeys.size === 0) return;
+
+    // Required role for this request.
+    let required: ApiKeyRole | null = null;
+    if (req.method === 'POST') required = 'admin';
+    else if (requireReaderKey) required = 'reader';
+    if (required === null) return;
+
+    // Extract presented secret.
+    const authz = req.headers.authorization;
+    const xKey = req.headers['x-ledric-key'];
+    let presented: string | undefined;
+    if (typeof authz === 'string' && authz.toLowerCase().startsWith('bearer ')) {
+      presented = authz.slice(7).trim();
+    } else if (typeof xKey === 'string') {
+      presented = xKey.trim();
+    }
+    if (!presented || !looksLikeApiKey(presented)) {
+      reply.code(401).send({
+        error: { code: 'UNAUTHORIZED', message: 'Missing or malformed API key' }
+      });
+      return reply;
+    }
+
+    // Resolve to a role.
+    let role: ApiKeyRole | null = envKeys.get(presented) ?? null;
+    let keyId: Uint8Array | null = null;
+
+    if (role === null) {
+      const found = await auth.storage.findApiKeyByHash(hashApiKey(presented));
+      if (found && found.revoked_at === null) {
+        role = found.role;
+        keyId = found.id;
+      }
+    }
+
+    if (role === null) {
+      // Soft hint when the prefix is recognizable — helps debugging
+      // without leaking which exact key would have matched.
+      const hinted = parseApiKeyRole(presented);
+      reply.code(401).send({
+        error: {
+          code: 'UNAUTHORIZED',
+          message: hinted
+            ? 'API key is unknown or revoked'
+            : 'Invalid API key'
+        }
+      });
+      return reply;
+    }
+
+    if (required === 'admin' && role !== 'admin') {
+      reply.code(403).send({
+        error: { code: 'FORBIDDEN', message: 'Admin role required for this endpoint' }
+      });
+      return reply;
+    }
+
+    // Touch last_used_at — debounced inside storage so this is cheap.
+    if (keyId !== null) {
+      void auth.storage.markApiKeyUsed(keyId, Date.now()).catch(() => {});
+    }
+  });
 }

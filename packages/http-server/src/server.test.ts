@@ -433,3 +433,220 @@ describe('HTTP server with GUI mount', () => {
     expect(JSON.parse(res.body).error.code).toBe('NOT_FOUND');
   });
 });
+
+describe('HTTP server with auth (admin-protects-writes default)', () => {
+  let storage: SqliteStorage;
+  let app: FastifyInstance;
+  let adminSecret: string;
+  let readerSecret: string;
+
+  beforeEach(async () => {
+    storage = await SqliteStorage.open({ path: ':memory:' });
+    const core = new Core(storage);
+
+    // Seed one type so reads have something to find later.
+    await core.createType({
+      name: 'note',
+      fields: {
+        title: { type: 'string', required: true },
+        slug: { type: 'slug', from: 'title' }
+      },
+      opts: { identifier_field: 'slug' }
+    });
+
+    // Mint keys via storage (mirrors what the CLI does on first boot).
+    const { generateApiKey } = await import('@ledric/storage');
+    const admin = generateApiKey('admin');
+    const reader = generateApiKey('reader');
+    await storage.createApiKey({ role: 'admin', label: 'admin', key_hash: admin.hash, key_prefix: admin.prefix });
+    await storage.createApiKey({ role: 'reader', label: 'reader', key_hash: reader.hash, key_prefix: reader.prefix });
+    adminSecret = admin.secret;
+    readerSecret = reader.secret;
+
+    app = createHttpServer(core, { auth: { storage } });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await storage.close();
+  });
+
+  it('GET / stays public — no key required', async () => {
+    const res = await app.inject({ method: 'GET', url: '/' });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('GET routes are open by default (no reader-key requirement)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/types' });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('POST /rpc requires an admin key', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      payload: { tool: 'describe_model' }
+    });
+    expect(res.statusCode).toBe(401);
+    expect(JSON.parse(res.body).error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('POST /rpc with a malformed token returns 401', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      headers: { authorization: 'Bearer not-a-key' },
+      payload: { tool: 'describe_model' }
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('POST /rpc with a reader key returns 403 (forbidden, not unauthorized)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      headers: { authorization: `Bearer ${readerSecret}` },
+      payload: { tool: 'describe_model' }
+    });
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body).error.code).toBe('FORBIDDEN');
+  });
+
+  it('POST /rpc with an admin Bearer key passes', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      headers: { authorization: `Bearer ${adminSecret}` },
+      payload: { tool: 'describe_model' }
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('X-Ledric-Key header works as an Authorization alternative', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      headers: { 'x-ledric-key': adminSecret },
+      payload: { tool: 'describe_model' }
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('revoked keys stop working immediately', async () => {
+    const all = await storage.listApiKeys();
+    const adminRow = all.find((r) => r.label === 'admin')!;
+    await storage.revokeApiKey(adminRow.id);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      headers: { authorization: `Bearer ${adminSecret}` },
+      payload: { tool: 'describe_model' }
+    });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('HTTP server with auth (--require-reader-key mode)', () => {
+  let storage: SqliteStorage;
+  let app: FastifyInstance;
+  let readerSecret: string;
+
+  beforeEach(async () => {
+    storage = await SqliteStorage.open({ path: ':memory:' });
+    const core = new Core(storage);
+
+    const { generateApiKey } = await import('@ledric/storage');
+    const reader = generateApiKey('reader');
+    await storage.createApiKey({ role: 'reader', label: 'reader', key_hash: reader.hash, key_prefix: reader.prefix });
+    readerSecret = reader.secret;
+
+    app = createHttpServer(core, { auth: { storage, requireReaderKey: true } });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await storage.close();
+  });
+
+  it('GET /types now requires a reader key', async () => {
+    const blocked = await app.inject({ method: 'GET', url: '/types' });
+    expect(blocked.statusCode).toBe(401);
+
+    const ok = await app.inject({
+      method: 'GET',
+      url: '/types',
+      headers: { authorization: `Bearer ${readerSecret}` }
+    });
+    expect(ok.statusCode).toBe(200);
+  });
+
+  it('GET / still public even in strict mode', async () => {
+    const res = await app.inject({ method: 'GET', url: '/' });
+    expect(res.statusCode).toBe(200);
+  });
+});
+
+describe('HTTP server with auth + env-var keys', () => {
+  let storage: SqliteStorage;
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    storage = await SqliteStorage.open({ path: ':memory:' });
+    const core = new Core(storage);
+
+    // Pretend an operator set LEDRIC_ADMIN_KEY in the environment. The
+    // value just has to look like a real key (right prefix shape).
+    app = createHttpServer(core, {
+      auth: {
+        storage,
+        envAdminKey: 'lka_envprovidedadminkey00000000000000000000000'
+      }
+    });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await storage.close();
+  });
+
+  it('env-supplied admin key authorizes writes even without DB-issued keys', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      headers: { authorization: 'Bearer lka_envprovidedadminkey00000000000000000000000' },
+      payload: { tool: 'describe_model' }
+    });
+    expect(res.statusCode).toBe(200);
+  });
+});
+
+describe('HTTP server with auth-off (no keys exist)', () => {
+  let storage: SqliteStorage;
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    storage = await SqliteStorage.open({ path: ':memory:' });
+    const core = new Core(storage);
+    // Auth wired but DB has zero active keys — should pass through.
+    app = createHttpServer(core, { auth: { storage } });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    await storage.close();
+  });
+
+  it('POST /rpc passes without a key when no keys are configured', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      payload: { tool: 'describe_model' }
+    });
+    expect(res.statusCode).toBe(200);
+  });
+});
