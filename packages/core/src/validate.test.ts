@@ -137,3 +137,77 @@ describe('validateContent — object field', () => {
     expect(enumErr?.path).toBe('/cta/style');
   });
 });
+
+describe('validateContent — jss + css fields', () => {
+  const Block = defineType(
+    'block',
+    {
+      slug: field.string({ required: true }),
+      style: field.jss(),
+      raw_css: field.css({ max: 100 })
+    },
+    { identifier_field: 'slug' }
+  );
+
+  it('accepts a multi-selector JSS object with @apply and nested rules', () => {
+    const r = validateContent(Block, {
+      slug: 'b',
+      style: {
+        '.hero': {
+          '@apply': 'text-2xl font-bold hover:text-3xl',
+          color: 'var(--brand)',
+          '&:hover': { color: 'var(--brand-hover)' }
+        },
+        '.hero h1': { lineHeight: 1.2 }
+      }
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('rejects JSS that is not an object at the top level', () => {
+    const r = validateContent(Block, { slug: 'b', style: 'oops' });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors[0]?.path).toBe('/style');
+    expect(r.errors[0]?.code).toBe('type');
+  });
+
+  it('rejects a JSS rule whose value is an array', () => {
+    const r = validateContent(Block, {
+      slug: 'b',
+      style: { '.hero': { color: ['red', 'blue'] } }
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    const err = r.errors.find((e) => e.path === '/style/.hero/color');
+    expect(err).toBeDefined();
+    expect(err?.actual).toBe('array');
+  });
+
+  it('rejects deeply-nested JSS past the depth limit', () => {
+    // Build nested rules { a: { a: { a: ... } } } 10 deep.
+    let inner: Record<string, unknown> = { color: 'red' };
+    for (let i = 0; i < 10; i++) inner = { '&:hover': inner };
+    const r = validateContent(Block, { slug: 'b', style: { '.x': inner } });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.some((e) => e.code === 'too_deep')).toBe(true);
+  });
+
+  it('accepts a CSS string and enforces max length', () => {
+    const ok = validateContent(Block, { slug: 'b', raw_css: '.hero { color: red; }' });
+    expect(ok.ok).toBe(true);
+
+    const tooLong = validateContent(Block, { slug: 'b', raw_css: 'a'.repeat(200) });
+    expect(tooLong.ok).toBe(false);
+    if (tooLong.ok) return;
+    expect(tooLong.errors[0]?.code).toBe('max');
+  });
+
+  it('rejects a CSS value that is not a string', () => {
+    const r = validateContent(Block, { slug: 'b', raw_css: 42 });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors[0]?.code).toBe('type');
+  });
+});

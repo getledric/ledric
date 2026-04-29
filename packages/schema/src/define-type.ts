@@ -58,6 +58,7 @@ function defaultMatchesType(field: FieldDef): boolean {
     case 'slug':
     case 'markdown':
     case 'asset':
+    case 'css':
       return typeof d === 'string';
     case 'number':
       return typeof d === 'number' && Number.isFinite(d);
@@ -72,6 +73,7 @@ function defaultMatchesType(field: FieldDef): boolean {
     case 'vector':
       return Array.isArray(d) && d.length === field.dims && d.every((v) => typeof v === 'number');
     case 'object':
+    case 'jss':
       return typeof d === 'object' && d !== null && !Array.isArray(d);
     default:
       return false;

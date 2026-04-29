@@ -124,4 +124,32 @@ describe('defineType', () => {
       )
     ).toThrow(/display_field.+missing/);
   });
+
+  it('accepts jss and css fields with sensible defaults', () => {
+    const T = defineType('block', {
+      slug: field.string({ required: true }),
+      style: field.jss({ default: { '.root': { color: 'red' } } }),
+      raw_css: field.css({ max: 5000, default: '' })
+    }, { identifier_field: 'slug' });
+    expect(T.fields.style?.type).toBe('jss');
+    expect(T.fields.raw_css?.type).toBe('css');
+  });
+
+  it('rejects a jss default that is not an object', () => {
+    expect(() =>
+      defineType('block', {
+        slug: field.string({ required: true }),
+        style: field.jss({ default: 'not an object' as unknown as Record<string, unknown> })
+      })
+    ).toThrow(/default value that doesn't match/);
+  });
+
+  it('rejects a css default that is not a string', () => {
+    expect(() =>
+      defineType('block', {
+        slug: field.string({ required: true }),
+        raw_css: field.css({ default: 42 as unknown as string })
+      })
+    ).toThrow(/default value that doesn't match/);
+  });
 });

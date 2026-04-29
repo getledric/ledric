@@ -10,7 +10,9 @@ import type {
   FieldArray,
   FieldVector,
   FieldEnum,
-  FieldObject
+  FieldObject,
+  FieldJss,
+  FieldCss
 } from './types.js';
 
 type OptsFor<T extends { type: string }> = Omit<T, 'type'>;
@@ -75,6 +77,16 @@ export const field = {
 
   object: (opts: OptsFor<FieldObject>): FieldObject => ({
     type: 'object',
+    ...opts
+  }),
+
+  jss: (opts: OptsFor<FieldJss> = {}): FieldJss => ({
+    type: 'jss',
+    ...opts
+  }),
+
+  css: (opts: OptsFor<FieldCss> = {}): FieldCss => ({
+    type: 'css',
     ...opts
   })
 } as const;

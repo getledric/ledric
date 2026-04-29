@@ -87,6 +87,32 @@ export interface FieldObject extends FieldCommon {
   strict?: boolean;
 }
 
+/**
+ * JSS — CSS-in-JS object stored as JSON. Top-level keys are CSS selectors
+ * (`.hero`, `.hero h1`), values are rule objects whose entries are either
+ * CSS properties (string/number values) or nested at-rules / pseudo-state
+ * blocks (object values: `&:hover`, `@media (min-width: 768px)`).
+ *
+ * `@apply: "text-2xl hover:text-3xl"` is permitted as a string property
+ * value — Tailwind utility composition is the consumer renderer's job;
+ * the CMS stores the string as-is.
+ *
+ * Shape-only validation: ledric does not know which CSS properties,
+ * Tailwind utilities, or design-token vars the consumer has registered.
+ */
+export interface FieldJss extends FieldCommon {
+  type: 'jss';
+}
+
+/**
+ * Raw CSS source. Stored as a string. Consumer scopes/applies it at
+ * render time (e.g. via a `<style>` block on the rendered block).
+ */
+export interface FieldCss extends FieldCommon {
+  type: 'css';
+  max?: number;
+}
+
 export type FieldDef =
   | FieldString
   | FieldNumber
@@ -99,7 +125,9 @@ export type FieldDef =
   | FieldArray
   | FieldVector
   | FieldEnum
-  | FieldObject;
+  | FieldObject
+  | FieldJss
+  | FieldCss;
 
 /** The complete set of valid field type discriminators. Useful for validation. */
 export const FIELD_TYPES = [
@@ -114,7 +142,9 @@ export const FIELD_TYPES = [
   'array',
   'vector',
   'enum',
-  'object'
+  'object',
+  'jss',
+  'css'
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];

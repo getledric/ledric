@@ -447,6 +447,128 @@ function FallbackField({ name, def, value }) {
   `;
 }
 
+// JSS — JSON-aware textarea. Stored value is the parsed object; the
+// editor surface is a string buffer so the user can have transient
+// invalid JSON while typing without us throwing the input away.
+function JssField({ name, def, value, onChange }) {
+  const initial = useMemo(() => {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'string') return value;
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return '';
+    }
+  }, []); // run once — we control draft state from here on
+  const [draft, setDraft] = useState(initial);
+  const [parseError, setParseError] = useState(null);
+
+  function commit(text) {
+    setDraft(text);
+    if (text.trim() === '') {
+      setParseError(null);
+      onChange(undefined);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        setParseError('JSS must be a JSON object (selector → rules)');
+        return;
+      }
+      setParseError(null);
+      onChange(parsed);
+    } catch (e) {
+      setParseError(e.message);
+    }
+  }
+
+  function format() {
+    if (draft.trim() === '') return;
+    try {
+      const parsed = JSON.parse(draft);
+      const formatted = JSON.stringify(parsed, null, 2);
+      setDraft(formatted);
+      setParseError(null);
+      onChange(parsed);
+    } catch (e) {
+      setParseError(e.message);
+    }
+  }
+
+  function minify() {
+    if (draft.trim() === '') return;
+    try {
+      const parsed = JSON.parse(draft);
+      const minified = JSON.stringify(parsed);
+      setDraft(minified);
+      setParseError(null);
+      onChange(parsed);
+    } catch (e) {
+      setParseError(e.message);
+    }
+  }
+
+  return html`
+    <${FieldShell} name=${name} def=${def} hint="CSS-in-JS object. @apply: \"...\" composes Tailwind utilities at the consumer.">
+      <div className="border border-zinc-800 rounded overflow-hidden bg-zinc-900">
+        <div className="flex items-center gap-2 px-2 py-1 border-b border-zinc-800 bg-zinc-950/50">
+          <span className=${`text-xs ${parseError ? 'text-red-400' : 'text-green-500'}`}>
+            ${draft.trim() === '' ? 'empty' : parseError ? 'invalid JSON' : 'valid JSON'}
+          </span>
+          <div className="flex-1"></div>
+          <button
+            type="button"
+            onClick=${format}
+            disabled=${draft.trim() === ''}
+            className="text-xs px-2 py-0.5 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+            title="Pretty-print"
+          >format</button>
+          <button
+            type="button"
+            onClick=${minify}
+            disabled=${draft.trim() === ''}
+            className="text-xs px-2 py-0.5 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+            title="Minify"
+          >minify</button>
+        </div>
+        <textarea
+          className="w-full bg-zinc-900 outline-none px-3 py-2 text-xs font-mono leading-relaxed resize-y"
+          rows=${10}
+          spellCheck=${false}
+          value=${draft}
+          onChange=${(e) => commit(e.target.value)}
+          placeholder=${'{\n  ".hero": {\n    "@apply": "text-2xl font-bold",\n    "color": "var(--brand)"\n  }\n}'}
+        />
+      </div>
+      ${parseError && html`<p className="text-xs text-red-400 mt-1 font-mono">${parseError}</p>`}
+    </${FieldShell}>
+  `;
+}
+
+function CssField({ name, def, value, onChange }) {
+  const v = value ?? '';
+  const overLimit = def.max !== undefined && v.length > def.max;
+  return html`
+    <${FieldShell} name=${name} def=${def} hint="Raw CSS source. The consumer scopes/applies it at render time.">
+      <textarea
+        className=${`${inputClass} font-mono text-xs leading-relaxed resize-y`}
+        rows=${10}
+        spellCheck=${false}
+        value=${v}
+        onChange=${(e) => onChange(e.target.value === '' ? undefined : e.target.value)}
+        placeholder=${'.hero { color: var(--brand); }'}
+        maxLength=${def.max}
+      />
+      ${def.max !== undefined && html`
+        <div className=${`text-xs mt-1 text-right ${overLimit ? 'text-red-400' : 'text-zinc-600'}`}>
+          ${v.length} / ${def.max}
+        </div>
+      `}
+    </${FieldShell}>
+  `;
+}
+
 export function FieldRenderer(props) {
   const { def } = props;
   switch (def.type) {
@@ -459,6 +581,8 @@ export function FieldRenderer(props) {
     case 'enum':   return html`<${EnumField} ...${props} />`;
     case 'asset':  return html`<${AssetField} ...${props} />`;
     case 'references': return html`<${ReferencesField} ...${props} />`;
+    case 'jss':    return html`<${JssField} ...${props} />`;
+    case 'css':    return html`<${CssField} ...${props} />`;
     case 'array':
       if (def.of && def.of.type === 'string') return html`<${ArrayOfStringField} ...${props} />`;
       return html`<${FallbackField} ...${props} />`;

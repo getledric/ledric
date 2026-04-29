@@ -179,6 +179,10 @@ function validateField(path: string, field: FieldDef, raw: unknown): ValidationE
           ];
     case 'object':
       return validateObject(path, field, raw);
+    case 'jss':
+      return validateJss(path, raw);
+    case 'css':
+      return validateCss(path, field, raw);
     default: {
       const t = (field as { type?: unknown }).type;
       return [
@@ -191,6 +195,78 @@ function validateField(path: string, field: FieldDef, raw: unknown): ValidationE
       ];
     }
   }
+}
+
+// Maximum recursion depth for nested rules (`&:hover`, `@media (...)`).
+// Eight is generous — real JSS authoring rarely goes past three.
+const JSS_MAX_DEPTH = 8;
+
+function validateJss(path: string, raw: unknown): ValidationError[] {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return [typeErr(path, 'JSS object (selector → rules)', raw)];
+  }
+  const errors: ValidationError[] = [];
+  for (const [selector, rules] of Object.entries(raw as Record<string, unknown>)) {
+    errors.push(...validateJssRules(`${path}/${selector}`, rules, 1));
+  }
+  return errors;
+}
+
+function validateJssRules(
+  path: string,
+  raw: unknown,
+  depth: number
+): ValidationError[] {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return [typeErr(path, 'JSS rule object', raw)];
+  }
+  if (depth > JSS_MAX_DEPTH) {
+    return [
+      {
+        path,
+        code: 'too_deep',
+        message: `JSS nesting deeper than ${JSS_MAX_DEPTH} levels`,
+        expected: JSS_MAX_DEPTH,
+        actual: depth
+      }
+    ];
+  }
+  const errors: ValidationError[] = [];
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'string' || typeof value === 'number') continue;
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      // Nested rule (`&:hover`, `@media (...)`, etc.) — recurse.
+      errors.push(...validateJssRules(`${path}/${key}`, value, depth + 1));
+      continue;
+    }
+    errors.push({
+      path: `${path}/${key}`,
+      code: 'type',
+      message: 'JSS rule values must be strings, numbers, or nested rule objects',
+      actual: Array.isArray(value) ? 'array' : typeof value
+    });
+  }
+  return errors;
+}
+
+function validateCss(
+  path: string,
+  field: Extract<FieldDef, { type: 'css' }>,
+  raw: unknown
+): ValidationError[] {
+  if (typeof raw !== 'string') return [typeErr(path, 'CSS source (string)', raw)];
+  if (field.max !== undefined && raw.length > field.max) {
+    return [
+      {
+        path,
+        code: 'max',
+        message: `CSS longer than ${field.max} chars`,
+        expected: field.max,
+        actual: raw.length
+      }
+    ];
+  }
+  return [];
 }
 
 function validateObject(
