@@ -1,4 +1,4 @@
-import { defineType } from '@ledric/schema';
+import { defineType, FIELD_TYPES } from '@ledric/schema';
 import type { FieldDef, TypeDef, TypeDefOptions } from '@ledric/schema';
 import type {
   Storage,
@@ -37,6 +37,22 @@ export interface Capabilities {
   vectorSearch: boolean;
   nativePubSub: boolean;
   fts: 'fts5' | 'tsvector';
+  /**
+   * Asset URLs accept imgix-style query params (w/h/fit/q/fm/auto/dpr).
+   * Always true on this implementation — Core ships with sharp/libvips.
+   */
+  imageTransforms: boolean;
+  /**
+   * Structural ref validation: dangling or wrong-typed refs surface as
+   * warnings on draft and as errors on publish. Always true.
+   */
+  refValidation: boolean;
+  /**
+   * The complete set of valid field type discriminators on this server.
+   * Lets agents avoid hardcoding the list and degrade gracefully when
+   * older servers don't ship newer types.
+   */
+  fieldTypes: readonly string[];
 }
 
 export interface DescribeModelResult {
@@ -225,7 +241,10 @@ export class Core {
       capabilities: {
         vectorSearch: false,
         nativePubSub: false,
-        fts: 'fts5'
+        fts: 'fts5',
+        imageTransforms: true,
+        refValidation: true,
+        fieldTypes: FIELD_TYPES
       }
     };
   }

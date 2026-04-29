@@ -174,12 +174,26 @@ Core workflows:
 - Backfill after a schema change: migrate_entries walks every entry of a type, optionally applying a merge_patch, and re-stamps with the current schema_version.
 - Rename: rename_entry retires the old slug (which keeps redirecting forever) and assigns a new one.
 
+Field types — use these as the "type" discriminator on each field def:
+  string, number, boolean, date, slug, enum, asset, references, array, object, vector, markdown, jss, css.
+  - object: nested {fields: {...}}; defaults to strict (rejects unknown keys) — set strict:false to allow extras.
+  - array: item shape via {of: <FieldDef>}; min/max for length.
+  - markdown: optional html policy ('allow' | 'sanitize' | 'forbid', default 'sanitize').
+  - references: {to: ["type", ...]} declares which entry types are valid targets. Pinning ('auto' | 'manual' | 'forbidden') controls @version semantics; default 'auto'.
+  - jss: CSS-in-JS object stored as JSON. Top-level keys are CSS selectors, values are rule objects whose entries are CSS properties (string/number) or nested rule objects (for &:hover, @media, ...). The string "@apply": "tailwind utilities" is permitted as a property value — utility resolution happens at the consumer renderer; ledric only validates shape.
+  - css: raw CSS source string with optional max length.
+  Any field may declare "default": <value> — applied at write time when the field is omitted/null. The default's runtime type must match the field's discriminator (validated at create_type / alter_type).
+
 Conventions worth knowing:
 - Localization. A type with locales[] declared accepts a _locale sidecar in content: {..., "_locale": {"fr": {"title": "...", "body": "..."}}}. Pass locale on reads to project the entry into that locale (with the configured fallback chain). Fields opt in via "localized": true.
 - Asset fields hold 32-char hex ids. Pass expand_assets: true on read/find to inline {id, kind, meta, url} so SDK consumers don't round-trip per image.
+- Image transforms (consumer-side URL concern). Asset URLs accept imgix-style query params for resize / format / quality: w, h, fit (clip|crop, with cover/contain aliases), q (1-100), fm (jpg|png|webp|avif), auto=format (server picks best from Accept), dpr (1-4 multiplier on w/h). Example: /assets/<id>?w=400&fm=webp. Source bytes never change; transformed bytes are computed at request time and cached. Don't store transform params in entry content — that's a renderer-side decision per page/breakpoint.
+- Structural references (the references field type and inline :::ref{to="type/slug"}::: directives) accept an optional @version suffix to pin: "blog_post/hello@3". On draft, dangling or wrong-typed refs come back as warnings (the draft still saves). On publish, the same issues become errors — VALIDATION_FAILED with a structured errors[] payload. read of an entry whose stored content has unresolved refs attaches a _warnings sidecar so callers can flag stale targets without re-running the check.
 - Inline references in markdown bodies use the directive :::ref{to="type/slug"}:::. Pass resolve_refs: true on read/find to get a _refs sidecar listing the resolved targets (with display strings and URLs); danglers come back as {to, found:false}.
-- All top-level content keys starting with _ (like _locale, _redirect, _refs) are reserved for ledric system metadata. Field names cannot start with _.
+- All top-level content keys starting with _ (like _locale, _redirect, _refs, _warnings) are reserved for ledric system metadata. Field names cannot start with _.
 - Optimistic concurrency: alter_type and draft-on-update require parent_version. A stale parent_version returns VERSION_CONFLICT with the current version so you can re-read and retry.
+
+Errors carry structured detail. VALIDATION_FAILED responses include errors[] with {path, code, message, expected, actual} per failure — path is a JSON Pointer ("/cta/style", "/sections/0") so you can point users at the exact field. VERSION_CONFLICT responses include current_version and your_parent_version so a retry can re-read and recompute.
 
 When in doubt, call describe_model. It's cheap, idempotent, and tells you everything you need to construct any other call.`;
 

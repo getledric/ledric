@@ -154,8 +154,42 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       'GET  /assets',
       'GET  /assets/:id',
       'GET  /assets/:id/meta',
-      'POST /rpc   { tool, args }'
-    ]
+      'POST /assets        multipart upload',
+      'POST /rpc           { tool, args }'
+    ],
+    /**
+     * Tool names accepted by POST /rpc — same surface as the MCP server
+     * exposes over stdio. Inputs documented at GET /types and via the
+     * MCP server's instructions string.
+     */
+    rpc_tools: [
+      'describe_model',
+      'create_type',
+      'alter_type',
+      'draft',
+      'read',
+      'find',
+      'publish',
+      'rename_entry',
+      'migrate_entries',
+      'get_asset',
+      'list_assets'
+    ],
+    /**
+     * Quick pointers the consumer SDK / agent can use without round-
+     * tripping describe_model. See SERVER_INSTRUCTIONS in the MCP
+     * server for the full picture.
+     */
+    notes: {
+      asset_transforms:
+        'Asset URLs accept imgix-style params: w, h, fit (clip|crop), q, fm (jpg|png|webp|avif), auto=format, dpr. e.g. /assets/<id>?w=400&fm=webp.',
+      ref_validation:
+        'references field strings and :::ref{to=...}::: directives accept @version pinning ("type/slug@N"). Dangling refs surface as warnings on draft, errors on publish. read attaches a _warnings sidecar when stored content has unresolved refs.',
+      sidecars:
+        '_locale (localized values), _redirect (slug renames), _refs (resolved inline refs when resolve_refs=true), _warnings (validation issues on stored content). All keys starting with _ are reserved.',
+      errors:
+        'Failure responses use { error: { code, message, errors? } }. VALIDATION_FAILED carries errors[] with JSON-Pointer paths; VERSION_CONFLICT carries current_version + your_parent_version.'
+    }
   }));
 
   app.get('/types', async () => toJsonSafe(await core.describeModel()));

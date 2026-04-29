@@ -30,6 +30,12 @@ describe('HTTP server', () => {
     const body = JSON.parse(res.body);
     expect(body.name).toBe('ledric');
     expect(Array.isArray(body.endpoints)).toBe(true);
+    expect(Array.isArray(body.rpc_tools)).toBe(true);
+    // Includes recent tools so agents discovering the surface see them.
+    expect(body.rpc_tools).toContain('describe_model');
+    expect(body.rpc_tools).toContain('migrate_entries');
+    expect(body.notes.asset_transforms).toMatch(/imgix/i);
+    expect(body.notes.ref_validation).toMatch(/@version/);
   });
 
   it('POST /rpc drives create_type → describe_model roundtrip', async () => {

@@ -28,6 +28,16 @@ describe('Core', () => {
     expect(result.capabilities.fts).toBe('fts5');
   });
 
+  it('describeModel surfaces feature capabilities and the field-type catalogue', async () => {
+    const result = await core.describeModel();
+    expect(result.capabilities.imageTransforms).toBe(true);
+    expect(result.capabilities.refValidation).toBe(true);
+    expect(result.capabilities.fieldTypes).toContain('jss');
+    expect(result.capabilities.fieldTypes).toContain('css');
+    expect(result.capabilities.fieldTypes).toContain('object');
+    expect(result.capabilities.fieldTypes).toContain('markdown');
+  });
+
   it('createType validates via defineType and persists', async () => {
     const result = await core.createType({
       name: 'product',

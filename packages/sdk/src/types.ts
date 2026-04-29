@@ -72,6 +72,12 @@ export interface Capabilities {
   vectorSearch: boolean;
   nativePubSub: boolean;
   fts: 'fts5' | 'tsvector';
+  /** Server supports imgix-style URL transforms on /assets/<id>?w=...&fm=... */
+  imageTransforms?: boolean;
+  /** Server enforces structural ref validation (warn on draft, error on publish). */
+  refValidation?: boolean;
+  /** Field type discriminators understood by this server. */
+  fieldTypes?: readonly string[];
 }
 
 export interface DescribeModel {

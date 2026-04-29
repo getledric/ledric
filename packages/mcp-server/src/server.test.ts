@@ -46,6 +46,19 @@ describe('MCP server (in-memory round trip)', () => {
     expect(instructions).toContain('alter_type');
     expect(instructions).toContain('_locale');
     expect(instructions).toContain(':::ref{');
+    // Recent functionality must be discoverable from the instructions
+    // string alone — agents shouldn't have to guess that these features
+    // exist.
+    expect(instructions).toContain('jss');
+    expect(instructions).toContain('css');
+    expect(instructions).toContain('object');
+    expect(instructions).toMatch(/imgix/i);
+    expect(instructions).toMatch(/auto=format/);
+    expect(instructions).toMatch(/@version/);
+    expect(instructions).toMatch(/_warnings/);
+    expect(instructions).toMatch(/VALIDATION_FAILED/);
+    expect(instructions).toMatch(/VERSION_CONFLICT/);
+    expect(instructions).toMatch(/default/i);
   });
 
   it('lists the full slice toolset', async () => {
