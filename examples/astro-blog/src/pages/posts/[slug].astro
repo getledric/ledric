@@ -1,6 +1,6 @@
 ---
 import Base from '../../layouts/Base.astro';
-import { client, isAssetId, formatDate } from '../../lib/ledric';
+import { client, isAssetId, formatDate, refAttrs } from '../../lib/ledric';
 import { marked } from 'marked';
 
 const { slug } = Astro.params;
@@ -29,6 +29,12 @@ const tags: string[] = Array.isArray(f.tags) ? (f.tags as string[]) : [];
 const redirect = post._redirect;
 ---
 <Base title={title}>
+  {/*
+    Tag the post root with the ledric ref so the inline editor knows what
+    to open. Field-scoped attrs on h1/lede/article scroll-focus the right
+    field when the pencil is clicked.
+  */}
+  <div {...refAttrs(post)}>
   {redirect && (
     <p class="redirect-note">
       Came from the old slug <code>{redirect.from}</code> — this post is now at <code>{redirect.to}</code>.
@@ -53,23 +59,24 @@ const redirect = post._redirect;
     </div>
   )}
 
-  {heroId && <img class="hero hero-top" src={client.assetUrl(heroId)} alt={title} />}
+  {heroId && <img class="hero hero-top" src={client.assetUrl(heroId)} alt={title} {...refAttrs(post, 'hero')} />}
 
-  <div class="meta-row meta-spaced">
+  <div class="meta-row meta-spaced" {...refAttrs(post, 'author')}>
     {author} · {publishedAt} · v{post.version}
   </div>
 
-  {summary && <p class="lede">{summary}</p>}
+  {summary && <p class="lede" {...refAttrs(post, 'summary')}>{summary}</p>}
 
-  <article class="prose" set:html={bodyHtml} />
+  <article class="prose" set:html={bodyHtml} {...refAttrs(post, 'body')} />
 
   {tags.length > 0 && (
-    <div class="tags tag-footer">
+    <div class="tags tag-footer" {...refAttrs(post, 'tags')}>
       {tags.map((t) => <span>{t}</span>)}
     </div>
   )}
 
   <p class="back"><a href="/">← back</a></p>
+  </div>
 </Base>
 
 <style>

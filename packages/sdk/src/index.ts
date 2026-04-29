@@ -2,6 +2,8 @@ export const PACKAGE_NAME = '@ledric/sdk';
 
 export { LedricClient, createLedricClient, LedricError } from './client.js';
 export type { LedricClientOptions, LedricApiError } from './client.js';
+export { refAttrs, refAttrsHtml } from './refs.js';
+export type { RefSource } from './refs.js';
 export type {
   Entry,
   EntrySummary,

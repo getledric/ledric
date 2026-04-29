@@ -1,6 +1,13 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { html } from 'htm/react';
+import { marked } from 'marked';
 import { api } from '../lib/api.js';
+import {
+  wrapInValue,
+  linePrefixInValue,
+  insertAt,
+  assetSnippet
+} from '../lib/markdown-edit.js';
 
 function slugify(s) {
   return String(s)
@@ -118,16 +125,180 @@ function DateField({ name, def, value, onChange }) {
   `;
 }
 
+function ToolbarButton({ onClick, title, children, disabled, bold, italic, mono }) {
+  const cls = [
+    'text-xs px-2 py-1 rounded transition select-none',
+    'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800',
+    'disabled:opacity-40 disabled:hover:bg-transparent',
+    bold ? 'font-bold' : '',
+    italic ? 'italic' : '',
+    mono ? 'font-mono' : ''
+  ].filter(Boolean).join(' ');
+  return html`
+    <button type="button" onClick=${onClick} title=${title} disabled=${disabled} className=${cls}>
+      ${children}
+    </button>
+  `;
+}
+
 function MarkdownField({ name, def, value, onChange }) {
+  const textareaRef = useRef(null);
+  const fileRef = useRef(null);
+  const [tab, setTab] = useState('edit');
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+
+  function applyResult(r) {
+    onChange(r.value);
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(r.selectionStart, r.selectionEnd);
+    });
+  }
+
+  function withSelection(fn) {
+    const ta = textareaRef.current;
+    if (!ta) return null;
+    return fn(value ?? '', ta.selectionStart, ta.selectionEnd);
+  }
+
+  function wrap(before, after) {
+    const r = withSelection((v, s, e) => wrapInValue(v, s, e, before, after));
+    if (r) applyResult(r);
+  }
+
+  function linePrefix(prefix) {
+    const r = withSelection((v, s, e) => linePrefixInValue(v, s, e, prefix));
+    if (r) applyResult(r);
+  }
+
+  function onLink() {
+    const url = window.prompt('Link URL?');
+    if (!url) return;
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const v = value ?? '';
+    const s = ta.selectionStart;
+    const e = ta.selectionEnd;
+    const sel = v.slice(s, e) || 'link text';
+    const next = v.slice(0, s) + `[${sel}](${url})` + v.slice(e);
+    onChange(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const labelStart = s + 1;
+      ta.setSelectionRange(labelStart, labelStart + sel.length);
+    });
+  }
+
+  async function onAssetFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const result = await api.uploadAsset(file);
+      const isImage = (file.type ?? '').startsWith('image/');
+      const snippet = assetSnippet(
+        isImage ? 'image' : 'file',
+        file.name,
+        api.assetUrl(result.id)
+      );
+      const ta = textareaRef.current;
+      const v = value ?? '';
+      const pos = ta ? ta.selectionStart : v.length;
+      applyResult(insertAt(v, pos, snippet));
+    } catch (err) {
+      setUploadError(err.message ?? 'upload failed');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
+  function onKeyDown(e) {
+    if (!(e.metaKey || e.ctrlKey)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'b') { e.preventDefault(); wrap('**'); }
+    else if (k === 'i') { e.preventDefault(); wrap('_'); }
+    else if (k === 'k') { e.preventDefault(); onLink(); }
+  }
+
+  const previewHtml = useMemo(() => {
+    if (tab !== 'preview') return '';
+    try {
+      return marked.parse(value ?? '', { async: false, breaks: true, gfm: true });
+    } catch (err) {
+      return `<p style="color:#f87171">preview error: ${err.message}</p>`;
+    }
+  }, [tab, value]);
+
+  const tabBtnClass = (active) =>
+    `text-xs px-2 py-0.5 rounded transition ${
+      active
+        ? 'bg-zinc-800 text-zinc-100'
+        : 'text-zinc-500 hover:text-zinc-200'
+    }`;
+
   return html`
     <${FieldShell} name=${name} def=${def} hint=${def.html ? `HTML policy: ${def.html}` : null}>
-      <textarea
-        className=${`${inputClass} font-mono text-xs`}
-        rows=${10}
-        value=${value ?? ''}
-        onChange=${(e) => onChange(e.target.value)}
-        maxLength=${def.max}
-      />
+      <div className="border border-zinc-800 rounded overflow-hidden bg-zinc-900">
+        <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-zinc-800 bg-zinc-950/50 flex-wrap">
+          <${ToolbarButton} onClick=${() => wrap('**')} title="Bold (⌘B)" bold>B</${ToolbarButton}>
+          <${ToolbarButton} onClick=${() => wrap('_')} title="Italic (⌘I)" italic>I</${ToolbarButton}>
+          <span className="w-px h-4 bg-zinc-800 mx-1"></span>
+          <${ToolbarButton} onClick=${() => linePrefix('## ')} title="Heading 2">H2</${ToolbarButton}>
+          <${ToolbarButton} onClick=${() => linePrefix('### ')} title="Heading 3">H3</${ToolbarButton}>
+          <span className="w-px h-4 bg-zinc-800 mx-1"></span>
+          <${ToolbarButton} onClick=${onLink} title="Link (⌘K)">link</${ToolbarButton}>
+          <${ToolbarButton} onClick=${() => wrap('\`')} title="Inline code" mono>code</${ToolbarButton}>
+          <${ToolbarButton} onClick=${() => linePrefix('> ')} title="Quote">quote</${ToolbarButton}>
+          <${ToolbarButton} onClick=${() => linePrefix('- ')} title="Bulleted list">list</${ToolbarButton}>
+          <span className="w-px h-4 bg-zinc-800 mx-1"></span>
+          <input
+            ref=${fileRef}
+            type="file"
+            onChange=${onAssetFile}
+            style=${{ display: 'none' }}
+          />
+          <${ToolbarButton}
+            onClick=${() => fileRef.current?.click()}
+            title="Upload and insert an asset"
+            disabled=${uploading}
+          >${uploading ? '…' : 'asset'}</${ToolbarButton}>
+          <div className="flex-1"></div>
+          <button
+            type="button"
+            onClick=${() => setTab('edit')}
+            className=${tabBtnClass(tab === 'edit')}
+          >edit</button>
+          <button
+            type="button"
+            onClick=${() => setTab('preview')}
+            className=${tabBtnClass(tab === 'preview')}
+          >preview</button>
+        </div>
+        ${tab === 'edit' && html`
+          <textarea
+            ref=${textareaRef}
+            className="w-full bg-zinc-900 outline-none px-3 py-2 text-sm font-mono leading-relaxed resize-y"
+            rows=${12}
+            value=${value ?? ''}
+            onChange=${(e) => onChange(e.target.value)}
+            onKeyDown=${onKeyDown}
+            maxLength=${def.max}
+            spellCheck=${false}
+          />
+        `}
+        ${tab === 'preview' && html`
+          <div
+            className="prose prose-invert prose-sm max-w-none px-4 py-3 min-h-[12rem] bg-zinc-950"
+            dangerouslySetInnerHTML=${{ __html: previewHtml || '<p class="text-zinc-600">empty</p>' }}
+          />
+        `}
+      </div>
+      ${uploadError && html`<p className="text-xs text-red-400 mt-1">${uploadError}</p>`}
     </${FieldShell}>
   `;
 }

@@ -1,9 +1,11 @@
 ---
+import { ledricApiBase } from '../lib/ledric';
 interface Props {
   title: string;
   subtitle?: string;
 }
 const { title, subtitle } = Astro.props;
+const inlineEditorSrc = `${ledricApiBase}/admin/inline.js`;
 ---
 <!doctype html>
 <html lang="en">
@@ -152,5 +154,13 @@ const { title, subtitle } = Astro.props;
     <footer class="page">
       Rendered server-side from <code>@ledric/sdk</code>. Hero bytes streamed from the same SQLite file via <code>GET /assets/&lt;id&gt;</code>.
     </footer>
+
+    <!--
+      Inline editor: looks for [data-ledric-ref] in the rendered DOM and
+      attaches a floating "edit" pencil. Drawer opens on click. Only useful
+      when the ledric server is reachable from the browser — the script
+      no-ops if it can't load.
+    -->
+    <script src={inlineEditorSrc} defer></script>
   </body>
 </html>

@@ -221,6 +221,50 @@ class LedricClient
         return $body['result'] ?? null;
     }
 
+    /**
+     * Build the data-attribute array for tagging rendered HTML elements
+     * with a ledric ref. The /admin/inline.js loader walks the DOM for
+     * these and attaches floating "edit" affordances.
+     *
+     * @param array<string, mixed>|null $entry  Anything with type/slug keys.
+     * @return array<string, string>
+     */
+    public static function refAttrs($entry, ?string $field = null): array
+    {
+        if (!is_array($entry)) {
+            return [];
+        }
+        $type = $entry['type'] ?? null;
+        $slug = $entry['slug'] ?? null;
+        if (!is_string($type) || !is_string($slug)) {
+            return [];
+        }
+        $out = ['data-ledric-ref' => $type . '/' . $slug];
+        if (is_string($field) && $field !== '') {
+            $out['data-ledric-field'] = $field;
+        }
+        return $out;
+    }
+
+    /**
+     * Same as refAttrs(), but pre-rendered as a single string for direct
+     * interpolation into HTML templates: `<h1 <?= LedricClient::refAttrsHtml($post, 'title') ?>>`.
+     *
+     * @param array<string, mixed>|null $entry
+     */
+    public static function refAttrsHtml($entry, ?string $field = null): string
+    {
+        $attrs = self::refAttrs($entry, $field);
+        if (empty($attrs)) {
+            return '';
+        }
+        $parts = [];
+        foreach ($attrs as $k => $v) {
+            $parts[] = $k . '="' . htmlspecialchars($v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '"';
+        }
+        return implode(' ', $parts);
+    }
+
     // ---- internals -------------------------------------------------------
 
     /**

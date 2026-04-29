@@ -11,14 +11,28 @@ import { html } from 'htm/react';
 import { TypeList } from './components/TypeList.js';
 import { EntryList } from './components/EntryList.js';
 import { EntryEditor } from './components/EntryEditor.js';
+import { InlineDrawer } from './components/InlineDrawer.js';
 
-// Pull the basename from where index.html was loaded — usually /admin, but
-// supports custom mount paths configured on the HTTP server.
+// The HTTP server injects <base href="/admin/"> into every served HTML
+// response under the mount path, so the most reliable way to find our
+// basename is to read it. Fall back to a path heuristic for the rare
+// case where the base tag isn't present.
 function detectBasename() {
+  const baseEl = document.querySelector('base[href]');
+  if (baseEl && baseEl.href) {
+    try {
+      const url = new URL(baseEl.href, window.location.origin);
+      const trimmed = url.pathname.replace(/\/$/, '');
+      return trimmed.length > 0 ? trimmed : '/';
+    } catch {
+      /* fall through */
+    }
+  }
   const p = window.location.pathname;
-  const ix = p.indexOf('/types');
-  if (ix > 0) return p.slice(0, ix);
-  // strip a trailing index.html if present
+  for (const marker of ['/types', '/inline']) {
+    const ix = p.indexOf(marker);
+    if (ix > 0) return p.slice(0, ix);
+  }
   const trimmed = p.replace(/\/index\.html$/, '');
   return trimmed.length > 0 && trimmed !== '/' ? trimmed : '/admin';
 }
@@ -39,19 +53,28 @@ function Layout({ children }) {
   `;
 }
 
+function FullApp() {
+  return html`
+    <${Layout}>
+      <${Routes}>
+        <${Route} path="/" element=${html`<${Navigate} to="/types" replace />`} />
+        <${Route} path="/types" element=${html`<${TypeList} />`} />
+        <${Route} path="/types/:type" element=${html`<${EntryList} />`} />
+        <${Route} path="/types/:type/new" element=${html`<${EntryEditor} mode="new" />`} />
+        <${Route} path="/types/:type/:slug" element=${html`<${EntryEditor} mode="edit" />`} />
+        <${Route} path="*" element=${html`<div className="text-zinc-500">Not found.</div>`} />
+      </${Routes}>
+    </${Layout}>
+  `;
+}
+
 function App() {
   return html`
     <${BrowserRouter} basename=${detectBasename()}>
-      <${Layout}>
-        <${Routes}>
-          <${Route} path="/" element=${html`<${Navigate} to="/types" replace />`} />
-          <${Route} path="/types" element=${html`<${TypeList} />`} />
-          <${Route} path="/types/:type" element=${html`<${EntryList} />`} />
-          <${Route} path="/types/:type/new" element=${html`<${EntryEditor} mode="new" />`} />
-          <${Route} path="/types/:type/:slug" element=${html`<${EntryEditor} mode="edit" />`} />
-          <${Route} path="*" element=${html`<div className="text-zinc-500">Not found.</div>`} />
-        </${Routes}>
-      </${Layout}>
+      <${Routes}>
+        <${Route} path="/inline/:type/:slug" element=${html`<${InlineDrawer} />`} />
+        <${Route} path="/*" element=${html`<${FullApp} />`} />
+      </${Routes}>
     </${BrowserRouter}>
   `;
 }

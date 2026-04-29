@@ -3,6 +3,8 @@ import { createLedricClient } from '@ledric/sdk';
 const baseUrl = process.env.LEDRIC_API ?? 'http://localhost:3000';
 
 export const client = createLedricClient({ baseUrl });
+export { baseUrl as ledricApiBase };
+export { refAttrs, refAttrsHtml } from '@ledric/sdk';
 
 /** Returns true if the value looks like a real ledric asset id (32 hex chars). */
 export function isAssetId(v: unknown): v is string {

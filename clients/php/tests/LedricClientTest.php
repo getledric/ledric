@@ -166,4 +166,40 @@ class LedricClientTest extends TestCase
         $client = new LedricClient('http://example.com/', ['http' => $this->http]);
         $this->assertSame('http://example.com', $client->getBaseUrl());
     }
+
+    public function testRefAttrsBuildsDataAttributes(): void
+    {
+        $this->assertSame(
+            ['data-ledric-ref' => 'blog_post/hello'],
+            LedricClient::refAttrs(['type' => 'blog_post', 'slug' => 'hello'])
+        );
+        $this->assertSame(
+            ['data-ledric-ref' => 'note/a', 'data-ledric-field' => 'title'],
+            LedricClient::refAttrs(['type' => 'note', 'slug' => 'a'], 'title')
+        );
+    }
+
+    public function testRefAttrsReturnsEmptyForBadInput(): void
+    {
+        $this->assertSame([], LedricClient::refAttrs(null));
+        $this->assertSame([], LedricClient::refAttrs(['type' => 'note']));
+        $this->assertSame([], LedricClient::refAttrs(['slug' => 'a']));
+    }
+
+    public function testRefAttrsHtmlEscapesValues(): void
+    {
+        $this->assertSame(
+            'data-ledric-ref="note/a"',
+            LedricClient::refAttrsHtml(['type' => 'note', 'slug' => 'a'])
+        );
+        $this->assertSame(
+            'data-ledric-ref="note/a" data-ledric-field="title"',
+            LedricClient::refAttrsHtml(['type' => 'note', 'slug' => 'a'], 'title')
+        );
+        $this->assertSame(
+            'data-ledric-ref="t/a&quot;b"',
+            LedricClient::refAttrsHtml(['type' => 't', 'slug' => 'a"b'])
+        );
+        $this->assertSame('', LedricClient::refAttrsHtml(null));
+    }
 }
