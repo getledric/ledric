@@ -14,6 +14,11 @@ function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
 }
 
+function parseRefKeyHex(s: string): Buffer | null {
+  if (typeof s !== 'string' || !/^[0-9a-f]{32}$/i.test(s)) return null;
+  return Buffer.from(s, 'hex');
+}
+
 function toJsonSafe(value: unknown): unknown {
   if (value instanceof Uint8Array) return Buffer.from(value).toString('hex');
   if (Array.isArray(value)) return value.map(toJsonSafe);
@@ -213,14 +218,17 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       'describe_model',
       'create_type',
       'alter_type',
+      'delete_type',
       'draft',
       'read',
       'find',
       'publish',
       'rename_entry',
+      'delete_entry',
       'migrate_entries',
       'get_asset',
-      'list_assets'
+      'list_assets',
+      'update_asset'
     ],
     /**
      * Quick pointers the consumer SDK / agent can use without round-
@@ -350,14 +358,18 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     return toJsonSafe({
       total: result.total,
       offset: result.offset,
-      results: result.results.map((r) => ({
-        id: toHex(r.id),
-        kind: r.kind,
-        version: r.current_version,
-        storage_ref: r.storage_ref,
-        meta: r.meta,
-        url: `/assets/${toHex(r.id)}`
-      }))
+      results: result.results.map((r) => {
+        const refKeyHex = toHex(r.ref_key);
+        return {
+          id: toHex(r.id),
+          ref_key: refKeyHex,
+          kind: r.kind,
+          version: r.current_version,
+          storage_ref: r.storage_ref,
+          meta: r.meta,
+          url: `/assets/${refKeyHex}`
+        };
+      })
     });
   });
 
@@ -404,6 +416,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
         }
       });
       const idHex = Buffer.from(written.id).toString('hex');
+      const refKeyHex = Buffer.from(written.ref_key).toString('hex');
       reply.code(201);
       return {
         id: idHex,
@@ -411,7 +424,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
         kind: written.kind,
         storage_ref: written.storage_ref,
         meta: written.meta,
-        url: `/assets/${idHex}`
+        ref_key: refKeyHex,
+        url: `/assets/${refKeyHex}`
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -420,38 +434,62 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     }
   });
 
-  app.get<{
-    Params: { id: string };
-    Querystring: { version?: string };
-  }>('/assets/:id/meta', async (req, reply) => {
-    const versionNum = req.query.version ? parseInt(req.query.version, 10) : undefined;
-    const asset = await core.getAsset({
-      id: req.params.id,
-      ...(versionNum !== undefined ? { version: versionNum } : {})
-    });
-    if (!asset) {
-      reply.code(404);
-      return { error: { code: 'NOT_FOUND', message: `asset ${req.params.id}` } };
+  // Canonical asset URLs are keyed by ref_key — a per-version opaque id
+  // minted at upload/replace time. The asset id (UUIDv7) lives in entry
+  // content as a stable handle; the ref_key lives in the URL so bytes
+  // are version-pinned and `Cache-Control: immutable` is always sound.
+
+  // The `/meta` lookup accepts either a ref_key (per-version URL key)
+  // or an asset id (stable handle in entry content). Convenient for
+  // admin tools that have one or the other. The bytes route below
+  // stays strict — ref_key only — so URLs are always version-pinned.
+  app.get<{ Params: { key: string } }>(
+    '/assets/:key/meta',
+    async (req, reply) => {
+      if (parseRefKeyHex(req.params.key) === null) {
+        reply.code(400);
+        return { error: { code: 'INVALID_REQUEST', message: 'expected 32-char hex key' } };
+      }
+      let asset = await core.findAssetByRefKey(req.params.key);
+      if (!asset) {
+        // Fall back to id-keyed lookup so consumers holding the stable
+        // asset id (from entry content) can still hit this endpoint.
+        try {
+          asset = await core.getAsset({ id: req.params.key });
+        } catch {
+          asset = null;
+        }
+      }
+      if (!asset) {
+        reply.code(404);
+        return { error: { code: 'NOT_FOUND', message: `asset ${req.params.key}` } };
+      }
+      const refKeyHex = toHex(asset.ref_key);
+      return {
+        id: toHex(asset.id),
+        ref_key: refKeyHex,
+        kind: asset.kind,
+        version: asset.version,
+        current_version: asset.current_version,
+        published_version: asset.published_version,
+        storage_ref: asset.storage_ref,
+        meta: asset.meta,
+        url: `/assets/${refKeyHex}`
+      };
     }
-    return {
-      id: req.params.id,
-      kind: asset.kind,
-      version: asset.version,
-      current_version: asset.current_version,
-      published_version: asset.published_version,
-      storage_ref: asset.storage_ref,
-      meta: asset.meta,
-      url: `/assets/${req.params.id}`
-    };
-  });
+  );
 
   app.get<{
-    Params: { id: string };
+    Params: { ref_key: string };
     Querystring: Record<string, string | undefined>;
-  }>('/assets/:id', async (req, reply) => {
-    const versionNum = req.query.version
-      ? parseInt(req.query.version, 10)
-      : undefined;
+  }>('/assets/:ref_key', async (req, reply) => {
+    const refKeyBuf = parseRefKeyHex(req.params.ref_key);
+    if (refKeyBuf === null) {
+      reply.code(400);
+      return reply.send({
+        error: { code: 'INVALID_REQUEST', message: 'expected 32-char hex ref_key' }
+      });
+    }
 
     // imgix-style transforms (w, h, fit, q, fm, auto, dpr) — applied at
     // request time, cached by Core if a TransformCache is configured.
@@ -460,8 +498,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     );
     if (transform !== null) {
       const result = await core.getTransformedAsset({
-        id: req.params.id,
-        ...(versionNum !== undefined ? { version: versionNum } : {}),
+        ref_key: req.params.ref_key,
         params: transform,
         ...(typeof req.headers.accept === 'string'
           ? { accept: req.headers.accept }
@@ -470,7 +507,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       if (!result) {
         reply.code(404);
         return reply.send({
-          error: { code: 'NOT_FOUND', message: `asset ${req.params.id}` }
+          error: { code: 'NOT_FOUND', message: `asset ${req.params.ref_key}` }
         });
       }
       reply.header('Content-Type', result.mime);
@@ -482,17 +519,16 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       return reply.send(result.bytes);
     }
 
-    const asset = await core.getAsset({
-      id: req.params.id,
-      ...(versionNum !== undefined ? { version: versionNum } : {})
-    });
+    const asset = await core.findAssetByRefKey(req.params.ref_key);
     if (!asset) {
       reply.code(404);
-      return reply.send({ error: { code: 'NOT_FOUND', message: `asset ${req.params.id}` } });
+      return reply.send({
+        error: { code: 'NOT_FOUND', message: `asset ${req.params.ref_key}` }
+      });
     }
     const bytes = await core.readAssetBytes({
-      id: req.params.id,
-      ...(versionNum !== undefined ? { version: versionNum } : {})
+      id: toHex(asset.id),
+      version: asset.version
     });
     const mime = typeof asset.meta.mime === 'string' ? asset.meta.mime : 'application/octet-stream';
     reply.header('Content-Type', mime);
@@ -542,6 +578,7 @@ function serializeToolError(err: unknown): Record<string, unknown> {
     slug?: unknown;
     kind?: unknown;
     ref?: unknown;
+    entry_count?: unknown;
   };
   if (typeof e.code === 'string') out.code = e.code;
   if (Array.isArray(e.errors)) out.errors = e.errors;
@@ -553,6 +590,7 @@ function serializeToolError(err: unknown): Record<string, unknown> {
   if (typeof e.slug === 'string') out.slug = e.slug;
   if (typeof e.kind === 'string') out.kind = e.kind;
   if (typeof e.ref === 'string') out.ref = e.ref;
+  if (typeof e.entry_count === 'number') out.entry_count = e.entry_count;
   return out;
 }
 
@@ -582,12 +620,31 @@ async function dispatchTool(
       return core.publish(a as Parameters<Core['publish']>[0]);
     case 'rename_entry':
       return core.rename(a as Parameters<Core['rename']>[0]);
+    case 'delete_type':
+      return core.deleteType(a as Parameters<Core['deleteType']>[0]);
+    case 'delete_entry':
+      return core.deleteEntry(a as Parameters<Core['deleteEntry']>[0]);
     case 'migrate_entries':
       return core.migrateEntries(a as Parameters<Core['migrateEntries']>[0]);
     case 'get_asset':
       return core.getAsset(a as Parameters<Core['getAsset']>[0]);
     case 'list_assets':
       return core.listAssets(a as Parameters<Core['listAssets']>[0]);
+    case 'update_asset': {
+      // Bytes come over the wire as base64. Other fields are JSON-shaped.
+      const raw = a as { id?: unknown; parent_version?: unknown; bytes_b64?: unknown; meta?: unknown; author?: unknown };
+      if (typeof raw.bytes_b64 !== 'string') {
+        throw new Error('update_asset: bytes_b64 (base64-encoded string) is required');
+      }
+      const bytes = new Uint8Array(Buffer.from(raw.bytes_b64, 'base64'));
+      return core.updateAsset({
+        id: String(raw.id),
+        parent_version: Number(raw.parent_version),
+        bytes,
+        ...(raw.meta !== undefined ? { meta: raw.meta as Record<string, unknown> } : {}),
+        ...(raw.author !== undefined ? { author: String(raw.author) } : {})
+      });
+    }
     default:
       throw new Error(`Unknown tool "${tool}"`);
   }

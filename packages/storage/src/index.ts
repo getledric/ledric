@@ -21,12 +21,17 @@ export type {
   RenameEntryInput,
   RenameEntryResult,
   CreateAssetInput,
+  UpdateAssetInput,
   AssetMeta,
   AssetWrite,
   AssetSummary,
   AssetDetail,
   ListAssetsInput,
   ListAssetsResult,
+  DeleteTypeInput,
+  DeleteTypeResult,
+  DeleteEntryInput,
+  DeleteEntryResult,
   ApiKeyRole,
   CreateApiKeyInput,
   ApiKeyRow,
@@ -42,7 +47,12 @@ export {
 } from './keys.js';
 export type { GeneratedApiKey } from './keys.js';
 
-export { SqliteStorage, VersionConflictError, NotFoundError } from './sqlite.js';
+export {
+  SqliteStorage,
+  VersionConflictError,
+  NotFoundError,
+  TypeNotEmptyError
+} from './sqlite.js';
 export type { OpenOptions, AssetsConfig } from './sqlite.js';
 
 export type {

@@ -147,6 +147,32 @@ export interface RenameResult {
   retired_at: number;
 }
 
+export interface DeleteTypeInput {
+  name: string;
+  parent_version: number;
+  cascade?: boolean;
+  author?: string;
+}
+
+export interface DeleteTypeResult {
+  name: string;
+  deleted_at: number;
+  entries_deleted: number;
+}
+
+export interface DeleteEntryInput {
+  ref: EntryRef;
+  parent_version: number;
+  author?: string;
+}
+
+export interface DeleteEntryResult {
+  id: string;
+  type: string;
+  slug: string;
+  deleted_at: number;
+}
+
 export interface MigrateEntriesInput {
   type: string;
   merge_patch?: Record<string, unknown>;
@@ -198,9 +224,13 @@ export interface CoreOptions {
   transformCache?: TransformCache;
 }
 
+/**
+ * Look up a transformed asset by its per-version ref_key. The ref_key
+ * is what consumer URLs carry (`/assets/<ref_key>`) — opaque, immutable,
+ * and uniquely identifies a (asset_id, version) pair.
+ */
 export interface GetTransformedAssetInput {
-  id: string;
-  version?: number;
+  ref_key: string;
   params: TransformParams;
   /** Browser Accept header — used when `params.auto === 'format'`. */
   accept?: string;
@@ -214,6 +244,25 @@ export interface TransformedAsset {
   /** True when the source mime wasn't transformable so we returned bytes as-is. */
   passthrough: boolean;
   version: number;
+  /** The asset id this ref_key resolved to (hex). */
+  asset_id: string;
+}
+
+export interface UpdateAssetInput {
+  id: string;
+  parent_version: number;
+  bytes: Uint8Array;
+  meta?: Record<string, unknown>;
+  author?: string;
+}
+
+export interface UpdateAssetResult {
+  id: string;
+  version: number;
+  kind: string;
+  storage_ref: string;
+  meta: Record<string, unknown>;
+  ref_key: string;
 }
 
 export class Core {
@@ -514,6 +563,27 @@ export class Core {
     };
   }
 
+  async deleteType(input: DeleteTypeInput): Promise<DeleteTypeResult> {
+    return this.storage.deleteType({
+      name: input.name,
+      parent_version: input.parent_version,
+      ...(input.cascade !== undefined ? { cascade: input.cascade } : {})
+    });
+  }
+
+  async deleteEntry(input: DeleteEntryInput): Promise<DeleteEntryResult> {
+    const result = await this.storage.deleteEntry({
+      ref: input.ref,
+      parent_version: input.parent_version
+    });
+    return {
+      id: Buffer.from(result.id).toString('hex'),
+      type: result.type,
+      slug: result.slug,
+      deleted_at: result.deleted_at
+    };
+  }
+
   async publish(input: PublishInput): Promise<PublishResult> {
     // Re-check structural refs and refuse to publish if any are dangling
     // or wrong-typed. Warnings on draft become errors here — that's the
@@ -562,6 +632,14 @@ export class Core {
     );
   }
 
+  async findAssetByRefKey(refKeyHex: string): Promise<AssetDetail | null> {
+    const buf = Buffer.from(refKeyHex, 'hex');
+    if (buf.byteLength !== 16) {
+      throw new Error(`Invalid ref_key "${refKeyHex}" (expected 32-char hex)`);
+    }
+    return this.storage.findAssetByRefKey(new Uint8Array(buf));
+  }
+
   async listAssets(input?: ListAssetsInput): Promise<ListAssetsResult> {
     return this.storage.listAssets(input);
   }
@@ -587,20 +665,18 @@ export class Core {
   async getTransformedAsset(
     input: GetTransformedAssetInput
   ): Promise<TransformedAsset | null> {
-    const idBuf = Buffer.from(input.id, 'hex');
-    if (idBuf.byteLength !== 16) {
-      throw new Error(`Invalid asset id "${input.id}" (expected 32-char hex)`);
+    const refKeyBuf = Buffer.from(input.ref_key, 'hex');
+    if (refKeyBuf.byteLength !== 16) {
+      throw new Error(`Invalid ref_key "${input.ref_key}" (expected 32-char hex)`);
     }
-    const idBytes = new Uint8Array(idBuf);
+    const refKeyBytes = new Uint8Array(refKeyBuf);
 
-    const asset = await this.storage.getAsset(
-      idBytes,
-      ...(input.version !== undefined ? [{ version: input.version }] : [])
-    );
+    const asset = await this.storage.findAssetByRefKey(refKeyBytes);
     if (!asset) return null;
 
     const sourceMime =
       typeof asset.meta.mime === 'string' ? asset.meta.mime : 'application/octet-stream';
+    const assetIdHex = Buffer.from(asset.id).toString('hex');
 
     const fmt = computeOutputFormat(sourceMime, input.params, {
       ...(input.accept !== undefined ? { accept: input.accept } : {})
@@ -608,27 +684,35 @@ export class Core {
 
     // Source isn't transformable — pass through.
     if (fmt === null) {
-      const bytes = await this.storage.readAssetBytes(
-        idBytes,
-        ...(input.version !== undefined ? [{ version: input.version }] : [])
-      );
-      return { bytes, mime: sourceMime, cached: false, passthrough: true, version: asset.version };
+      const bytes = await this.storage.readAssetBytes(asset.id, { version: asset.version });
+      return {
+        bytes,
+        mime: sourceMime,
+        cached: false,
+        passthrough: true,
+        version: asset.version,
+        asset_id: assetIdHex
+      };
     }
 
     const key = transformCacheKey(input.params, fmt.fm);
     const ext = extForFormat(fmt.fm);
 
     if (this.transformCache) {
-      const hit = await this.transformCache.get(input.id, asset.version, key, ext);
+      const hit = await this.transformCache.get(input.ref_key, key, ext);
       if (hit !== null) {
-        return { bytes: hit, mime: fmt.mime, cached: true, passthrough: false, version: asset.version };
+        return {
+          bytes: hit,
+          mime: fmt.mime,
+          cached: true,
+          passthrough: false,
+          version: asset.version,
+          asset_id: assetIdHex
+        };
       }
     }
 
-    const sourceBytes = await this.storage.readAssetBytes(
-      idBytes,
-      ...(input.version !== undefined ? [{ version: input.version }] : [])
-    );
+    const sourceBytes = await this.storage.readAssetBytes(asset.id, { version: asset.version });
     const out = await applyTransforms(sourceBytes, input.params, sourceMime, {
       ...(input.accept !== undefined ? { accept: input.accept } : {})
     });
@@ -636,13 +720,47 @@ export class Core {
     if (this.transformCache) {
       // Best-effort write — a failing cache must never break the response.
       try {
-        await this.transformCache.put(input.id, asset.version, key, ext, out.bytes);
+        await this.transformCache.put(input.ref_key, key, ext, out.bytes);
       } catch {
         /* swallow */
       }
     }
 
-    return { bytes: out.bytes, mime: out.mime, cached: false, passthrough: false, version: asset.version };
+    return {
+      bytes: out.bytes,
+      mime: out.mime,
+      cached: false,
+      passthrough: false,
+      version: asset.version,
+      asset_id: assetIdHex
+    };
+  }
+
+  async updateAsset(input: UpdateAssetInput): Promise<UpdateAssetResult> {
+    const idBuf = Buffer.from(input.id, 'hex');
+    if (idBuf.byteLength !== 16) {
+      throw new Error(`Invalid asset id "${input.id}" (expected 32-char hex)`);
+    }
+    const written = await this.storage.updateAsset({
+      id: new Uint8Array(idBuf),
+      parent_version: input.parent_version,
+      bytes: input.bytes,
+      ...(input.meta !== undefined ? { meta: input.meta } : {}),
+      ...(input.author !== undefined ? { author: input.author } : {})
+    });
+    return {
+      id: Buffer.from(written.id).toString('hex'),
+      version: written.version,
+      kind: written.kind,
+      storage_ref: written.storage_ref,
+      meta: written.meta,
+      ref_key: Buffer.from(written.ref_key).toString('hex')
+    };
+  }
+
+  async clearAssetTransformCache(refKeyHex: string): Promise<void> {
+    if (!this.transformCache) return;
+    await this.transformCache.clear(refKeyHex);
   }
 
   // No-op pass-through used by tests and future hooks.

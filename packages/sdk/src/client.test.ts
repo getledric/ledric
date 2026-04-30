@@ -90,23 +90,37 @@ describe('LedricClient', () => {
     expect(await client.type('nope')).toBeNull();
   });
 
-  it('asset(id) returns metadata + url', async () => {
+  it('asset(idOrRefKey) returns metadata + url for both lookup forms', async () => {
     const list = await client.assets();
     expect(list.total).toBe(1);
-    const id = list.results[0]!.id;
-    const asset = await client.asset(id);
-    expect(asset?.kind).toBe('image');
-    expect(asset?.meta.mime).toBe('image/png');
-    expect(asset?.url).toContain(`/assets/${id}`);
+    const summary = list.results[0]!;
+    expect(summary.ref_key).toMatch(/^[0-9a-f]{32}$/);
+
+    // Look up by ref_key (preferred for URL-bearing things).
+    const byRef = await client.asset(summary.ref_key);
+    expect(byRef?.kind).toBe('image');
+    expect(byRef?.url).toBe(`/assets/${summary.ref_key}`);
+
+    // Look up by id (stable handle in entry content).
+    const byId = await client.asset(summary.id);
+    expect(byId?.kind).toBe('image');
+    expect(byId?.ref_key).toBe(summary.ref_key);
   });
 
-  it('assetUrl builds a deterministic URL without fetching', () => {
-    const url = client.assetUrl('019dc0b5deadbeef');
-    expect(url).toBe(`${server.url}/assets/019dc0b5deadbeef`);
+  it('assetUrl(asset) uses the asset object\'s ref_key', async () => {
+    const list = await client.assets();
+    const asset = list.results[0]!;
+    const url = client.assetUrl(asset);
+    expect(url).toBe(`${server.url}/assets/${asset.ref_key}`);
+  });
+
+  it('assetUrl(refKeyString) accepts a bare ref_key', () => {
+    const url = client.assetUrl('019dc0b5deadbeefcafebabe00000000');
+    expect(url).toBe(`${server.url}/assets/019dc0b5deadbeefcafebabe00000000`);
   });
 
   it('assetUrl encodes transform params for imgix-style requests', () => {
-    const url = client.assetUrl('019dc0b5deadbeef', {
+    const url = client.assetUrl('019dc0b5deadbeefcafebabe00000000', {
       w: 400,
       h: 300,
       fit: 'crop',
@@ -115,7 +129,7 @@ describe('LedricClient', () => {
       dpr: 2
     });
     const u = new URL(url);
-    expect(u.pathname).toBe('/assets/019dc0b5deadbeef');
+    expect(u.pathname).toBe('/assets/019dc0b5deadbeefcafebabe00000000');
     expect(u.searchParams.get('w')).toBe('400');
     expect(u.searchParams.get('h')).toBe('300');
     expect(u.searchParams.get('fit')).toBe('crop');
@@ -125,17 +139,16 @@ describe('LedricClient', () => {
   });
 
   it('assetUrl includes auto=format when requested', () => {
-    const url = client.assetUrl('019dc0b5deadbeef', { auto: 'format', w: 800 });
+    const url = client.assetUrl('019dc0b5deadbeefcafebabe00000000', { auto: 'format', w: 800 });
     const u = new URL(url);
     expect(u.searchParams.get('auto')).toBe('format');
     expect(u.searchParams.get('w')).toBe('800');
   });
 
-
-  it('assetBytes returns the raw bytes', async () => {
+  it('assetBytes(asset) returns the raw bytes', async () => {
     const list = await client.assets();
-    const id = list.results[0]!.id;
-    const bytes = await client.assetBytes(id);
+    const asset = list.results[0]!;
+    const bytes = await client.assetBytes(asset);
     expect(bytes).not.toBeNull();
     expect(new TextDecoder().decode(bytes!)).toBe('PNGFAKEBYTES');
   });

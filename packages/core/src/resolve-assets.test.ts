@@ -43,7 +43,7 @@ describe('resolveAssets', () => {
     expect(r?.content.hero).toBe(assetId);
   });
 
-  it('expands a single asset field to { id, kind, meta, url } when expand_assets=true', async () => {
+  it('expands a single asset field to { id, ref_key, kind, meta, url } when expand_assets=true', async () => {
     await core.draft({
       type: 'product',
       fields: { title: 'Widget', hero: assetId }
@@ -55,7 +55,8 @@ describe('resolveAssets', () => {
     const hero = r?.content.hero as Record<string, unknown>;
     expect(hero.id).toBe(assetId);
     expect(hero.kind).toBe('image');
-    expect(hero.url).toBe(`/assets/${assetId}`);
+    expect(hero.ref_key).toMatch(/^[0-9a-f]{32}$/);
+    expect(hero.url).toBe(`/assets/${hero.ref_key}`);
     expect((hero.meta as Record<string, unknown>).alt).toBe('hero shot');
   });
 
@@ -115,7 +116,9 @@ describe('resolveAssets', () => {
     const list = await core.find({ type: 'product', expand_assets: true });
     expect(list.results.length).toBe(2);
     for (const r of list.results) {
-      expect((r.content.hero as Record<string, unknown>).url).toBe(`/assets/${assetId}`);
+      const hero = r.content.hero as Record<string, unknown>;
+      expect(hero.id).toBe(assetId);
+      expect(hero.url).toBe(`/assets/${hero.ref_key}`);
     }
   });
 });

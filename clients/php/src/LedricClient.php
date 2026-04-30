@@ -167,12 +167,13 @@ class LedricClient
     }
 
     /**
-     * Build an absolute asset URL — pure helper, no fetch. Accepts the
-     * same imgix-style transform knobs as the TS SDK so consumer markup
-     * looks identical across languages.
+     * Build an absolute asset URL with optional imgix-style transforms.
+     * Accepts either a resolved asset array (preferred — uses `ref_key`)
+     * or a bare ref_key string. Asset ids are NOT URL-bearing; resolve
+     * via expand_assets or `client.asset()` first.
      *
+     * @param string|array{ref_key: string} $refKeyOrAsset
      * @param array{
-     *     version?: int,
      *     w?: int,
      *     h?: int,
      *     fit?: 'clip'|'crop'|'cover'|'contain',
@@ -182,12 +183,15 @@ class LedricClient
      *     dpr?: int|float
      * } $opts
      */
-    public function assetUrl(string $id, array $opts = []): string
+    public function assetUrl($refKeyOrAsset, array $opts = []): string
     {
-        $params = [];
-        if (isset($opts['version'])) {
-            $params['version'] = (string) $opts['version'];
+        $refKey = is_array($refKeyOrAsset)
+            ? (string) ($refKeyOrAsset['ref_key'] ?? '')
+            : (string) $refKeyOrAsset;
+        if ($refKey === '') {
+            throw new \InvalidArgumentException('assetUrl: missing ref_key');
         }
+        $params = [];
         if (isset($opts['w'])) {
             $params['w'] = (string) $opts['w'];
         }
@@ -209,17 +213,19 @@ class LedricClient
         if (isset($opts['dpr'])) {
             $params['dpr'] = (string) $opts['dpr'];
         }
-        return $this->baseUrl . '/assets/' . rawurlencode($id) . $this->qs($params);
+        return $this->baseUrl . '/assets/' . rawurlencode($refKey) . $this->qs($params);
     }
 
     /**
-     * GET /assets/:id — raw bytes. Returns null on 404.
+     * GET /assets/:ref_key — raw bytes. Returns null on 404. Accepts
+     * either a ref_key string or a resolved asset array.
      *
-     * @param array{version?: int} $opts
+     * @param string|array{ref_key: string} $refKeyOrAsset
+     * @param array<string, mixed> $opts
      */
-    public function assetBytes(string $id, array $opts = []): ?string
+    public function assetBytes($refKeyOrAsset, array $opts = []): ?string
     {
-        $url = $this->assetUrl($id, $opts);
+        $url = $this->assetUrl($refKeyOrAsset, $opts);
         $res = $this->http->send('GET', $url, $this->headers);
         if ($res['status'] === 404) {
             return null;

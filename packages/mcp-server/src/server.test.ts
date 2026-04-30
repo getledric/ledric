@@ -67,6 +67,8 @@ describe('MCP server (in-memory round trip)', () => {
     expect(names).toEqual([
       'alter_type',
       'create_type',
+      'delete_entry',
+      'delete_type',
       'describe_model',
       'draft',
       'find',
@@ -75,7 +77,8 @@ describe('MCP server (in-memory round trip)', () => {
       'migrate_entries',
       'publish',
       'read',
-      'rename_entry'
+      'rename_entry',
+      'update_asset'
     ]);
   });
 
@@ -842,5 +845,99 @@ describe('MCP server (in-memory round trip)', () => {
     });
     expect(result.isError).toBe(true);
     expect(firstText(result.content)).toMatch(/type name/);
+  });
+
+  it('delete_entry soft-deletes; reads stop seeing it', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true },
+          slug: { type: 'slug', from: 'title' }
+        },
+        opts: { identifier_field: 'slug' }
+      }
+    });
+    await client.callTool({
+      name: 'draft',
+      arguments: { type: 'note', fields: { title: 'Hello' } }
+    });
+
+    const del = await client.callTool({
+      name: 'delete_entry',
+      arguments: { ref: { type: 'note', slug: 'hello' }, parent_version: 1 }
+    });
+    const delParsed = JSON.parse(firstText(del.content));
+    expect(delParsed.slug).toBe('hello');
+    expect(delParsed.deleted_at).toBeGreaterThan(0);
+
+    const read = await client.callTool({
+      name: 'read',
+      arguments: { ref: { type: 'note', slug: 'hello' } }
+    });
+    expect(firstText(read.content)).toMatch(/null|not_found/i);
+  });
+
+  it('delete_type with live entries fails with TYPE_NOT_EMPTY unless cascade', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'note',
+        fields: {
+          title: { type: 'string', required: true },
+          slug: { type: 'slug', from: 'title' }
+        },
+        opts: { identifier_field: 'slug' }
+      }
+    });
+    await client.callTool({
+      name: 'draft',
+      arguments: { type: 'note', fields: { title: 'Stays' } }
+    });
+
+    const blocked = await client.callTool({
+      name: 'delete_type',
+      arguments: { name: 'note', parent_version: 1 }
+    });
+    expect(blocked.isError).toBe(true);
+    const blockedJson = JSON.parse(firstText(blocked.content));
+    expect(blockedJson.code).toBe('TYPE_NOT_EMPTY');
+    expect(blockedJson.entry_count).toBe(1);
+
+    const ok = await client.callTool({
+      name: 'delete_type',
+      arguments: { name: 'note', parent_version: 1, cascade: true }
+    });
+    const okJson = JSON.parse(firstText(ok.content));
+    expect(okJson.entries_deleted).toBe(1);
+    expect(okJson.deleted_at).toBeGreaterThan(0);
+  });
+
+  it('update_asset bumps version, mints fresh ref_key, asset id stays put', async () => {
+    // Seed an asset directly through storage — the MCP surface doesn't
+    // expose upload (binary uploads go through HTTP multipart instead).
+    const seeded = await storage.createAsset({
+      kind: 'file',
+      bytes: Buffer.from('original'),
+      meta: { mime: 'text/plain' }
+    });
+    const id = Buffer.from(seeded.id).toString('hex');
+    const refKeyBefore = Buffer.from(seeded.ref_key).toString('hex');
+
+    const res = await client.callTool({
+      name: 'update_asset',
+      arguments: {
+        id,
+        parent_version: 1,
+        bytes_b64: Buffer.from('replacement-bytes').toString('base64')
+      }
+    });
+    const json = JSON.parse(firstText(res.content));
+    expect(json.id).toBe(id);
+    expect(json.version).toBe(2);
+    expect(json.ref_key).not.toBe(refKeyBefore);
+    expect(json.ref_key).toMatch(/^[0-9a-f]{32}$/);
+    expect(json.meta.size).toBe('replacement-bytes'.length);
   });
 });

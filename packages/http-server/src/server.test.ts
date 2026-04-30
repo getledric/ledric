@@ -121,22 +121,22 @@ describe('HTTP server', () => {
     expect(body.error.code).toBe('NOT_FOUND');
   });
 
-  it('GET /assets/:id streams bytes with the right Content-Type', async () => {
+  it('GET /assets/:ref_key streams bytes with the right Content-Type', async () => {
     const bytes = Buffer.from('greetings', 'utf8');
     const write = await storage.createAsset({
       kind: 'file',
       bytes,
       meta: { mime: 'text/plain' }
     });
-    const id = Buffer.from(write.id).toString('hex');
+    const refKey = Buffer.from(write.ref_key).toString('hex');
 
-    const res = await app.inject({ method: 'GET', url: `/assets/${id}` });
+    const res = await app.inject({ method: 'GET', url: `/assets/${refKey}` });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('text/plain');
     expect(res.rawPayload.equals(bytes)).toBe(true);
   });
 
-  it('GET /assets/:id with transform params resizes via sharp', async () => {
+  it('GET /assets/:ref_key with transform params resizes via sharp', async () => {
     const png = await sharp({
       create: { width: 200, height: 100, channels: 3, background: { r: 255, g: 0, b: 0 } }
     })
@@ -147,9 +147,9 @@ describe('HTTP server', () => {
       bytes: png,
       meta: { mime: 'image/png' }
     });
-    const id = Buffer.from(write.id).toString('hex');
+    const refKey = Buffer.from(write.ref_key).toString('hex');
 
-    const res = await app.inject({ method: 'GET', url: `/assets/${id}?w=80&fm=webp` });
+    const res = await app.inject({ method: 'GET', url: `/assets/${refKey}?w=80&fm=webp` });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('image/webp');
     expect(res.headers['x-ledric-transform']).toBe('applied');
@@ -158,7 +158,7 @@ describe('HTTP server', () => {
     expect(meta.format).toBe('webp');
   });
 
-  it('GET /assets/:id with auto=format adds Vary: Accept', async () => {
+  it('GET /assets/:ref_key with auto=format adds Vary: Accept', async () => {
     const png = await sharp({
       create: { width: 100, height: 100, channels: 3, background: { r: 0, g: 255, b: 0 } }
     })
@@ -169,11 +169,11 @@ describe('HTTP server', () => {
       bytes: png,
       meta: { mime: 'image/png' }
     });
-    const id = Buffer.from(write.id).toString('hex');
+    const refKey = Buffer.from(write.ref_key).toString('hex');
 
     const res = await app.inject({
       method: 'GET',
-      url: `/assets/${id}?w=50&auto=format`,
+      url: `/assets/${refKey}?w=50&auto=format`,
       headers: { accept: 'image/avif,image/webp,*/*' }
     });
     expect(res.statusCode).toBe(200);
@@ -181,37 +181,52 @@ describe('HTTP server', () => {
     expect(res.headers['content-type']).toBe('image/avif');
   });
 
-  it('GET /assets/:id passes non-image assets through untouched', async () => {
+  it('GET /assets/:ref_key passes non-image assets through untouched', async () => {
     const bytes = Buffer.from('hello pdf');
     const write = await storage.createAsset({
       kind: 'file',
       bytes,
       meta: { mime: 'application/pdf' }
     });
-    const id = Buffer.from(write.id).toString('hex');
+    const refKey = Buffer.from(write.ref_key).toString('hex');
 
-    // params present but source isn't transformable.
-    const res = await app.inject({ method: 'GET', url: `/assets/${id}?w=200&fm=webp` });
+    const res = await app.inject({ method: 'GET', url: `/assets/${refKey}?w=200&fm=webp` });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('application/pdf');
     expect(res.headers['x-ledric-transform']).toBe('passthrough');
     expect(res.rawPayload.equals(bytes)).toBe(true);
   });
 
-  it('GET /assets/:id without transform params still uses the fast non-transform path', async () => {
-    // Same shape as the original test — confirms we didn't regress when
-    // no transform params are present.
+  it('GET /assets/:ref_key without transform params hits the fast bytes path', async () => {
     const bytes = Buffer.from('plain', 'utf8');
     const write = await storage.createAsset({
       kind: 'file',
       bytes,
       meta: { mime: 'text/plain' }
     });
-    const id = Buffer.from(write.id).toString('hex');
+    const refKey = Buffer.from(write.ref_key).toString('hex');
 
-    const res = await app.inject({ method: 'GET', url: `/assets/${id}` });
+    const res = await app.inject({ method: 'GET', url: `/assets/${refKey}` });
     expect(res.statusCode).toBe(200);
     expect(res.headers['x-ledric-transform']).toBeUndefined();
+  });
+
+  it('GET /assets/:key/meta accepts either a ref_key or an asset id', async () => {
+    const write = await storage.createAsset({
+      kind: 'file',
+      bytes: Buffer.from('m'),
+      meta: { mime: 'text/plain' }
+    });
+    const id = Buffer.from(write.id).toString('hex');
+    const refKey = Buffer.from(write.ref_key).toString('hex');
+
+    const byRef = await app.inject({ method: 'GET', url: `/assets/${refKey}/meta` });
+    expect(byRef.statusCode).toBe(200);
+    expect(JSON.parse(byRef.body).id).toBe(id);
+
+    const byId = await app.inject({ method: 'GET', url: `/assets/${id}/meta` });
+    expect(byId.statusCode).toBe(200);
+    expect(JSON.parse(byId.body).ref_key).toBe(refKey);
   });
 
   it('GET /entries/:type/:slug returns a 301 when the slug was renamed', async () => {
@@ -281,12 +296,13 @@ describe('HTTP server', () => {
     expect(res.statusCode).toBe(201);
     const json = JSON.parse(res.body);
     expect(json.id).toMatch(/^[0-9a-f]{32}$/);
+    expect(json.ref_key).toMatch(/^[0-9a-f]{32}$/);
     expect(json.kind).toBe('image');
     expect(json.meta.mime).toBe('image/png');
     expect(json.meta.alt).toBe('a hero shot');
-    expect(json.url).toBe(`/assets/${json.id}`);
+    expect(json.url).toBe(`/assets/${json.ref_key}`);
 
-    // Round-trip: bytes are fetchable and identical.
+    // Round-trip: bytes are fetchable and identical via the ref_key URL.
     const bytesRes = await app.inject({ method: 'GET', url: json.url });
     expect(bytesRes.statusCode).toBe(200);
     expect(bytesRes.headers['content-type']).toBe('image/png');

@@ -114,9 +114,9 @@ describe('Core.getTransformedAsset', () => {
     rmSync(cacheDir, { recursive: true, force: true });
   });
 
-  it('returns null for an unknown asset id', async () => {
+  it('returns null for an unknown ref_key', async () => {
     const r = await core.getTransformedAsset({
-      id: '00000000000000000000000000000000',
+      ref_key: '00000000000000000000000000000000',
       params: { w: 100 }
     });
     expect(r).toBeNull();
@@ -129,10 +129,10 @@ describe('Core.getTransformedAsset', () => {
       bytes: png,
       meta: { mime: 'image/png' }
     });
-    const id = Buffer.from(written.id).toString('hex');
+    const refKey = Buffer.from(written.ref_key).toString('hex');
 
     const out = await core.getTransformedAsset({
-      id,
+      ref_key: refKey,
       params: { w: 80, fm: 'webp' }
     });
     expect(out).not.toBeNull();
@@ -152,10 +152,10 @@ describe('Core.getTransformedAsset', () => {
       bytes: png,
       meta: { mime: 'image/png' }
     });
-    const id = Buffer.from(written.id).toString('hex');
+    const refKey = Buffer.from(written.ref_key).toString('hex');
 
-    const first = await core.getTransformedAsset({ id, params: { w: 80, fm: 'webp' } });
-    const second = await core.getTransformedAsset({ id, params: { w: 80, fm: 'webp' } });
+    const first = await core.getTransformedAsset({ ref_key: refKey, params: { w: 80, fm: 'webp' } });
+    const second = await core.getTransformedAsset({ ref_key: refKey, params: { w: 80, fm: 'webp' } });
     expect(first?.cached).toBe(false);
     expect(second?.cached).toBe(true);
     expect(first?.bytes.equals(second!.bytes)).toBe(true);
@@ -167,9 +167,9 @@ describe('Core.getTransformedAsset', () => {
       bytes: Buffer.from('hello pdf'),
       meta: { mime: 'application/pdf' }
     });
-    const id = Buffer.from(written.id).toString('hex');
+    const refKey = Buffer.from(written.ref_key).toString('hex');
 
-    const out = await core.getTransformedAsset({ id, params: { w: 100, fm: 'webp' } });
+    const out = await core.getTransformedAsset({ ref_key: refKey, params: { w: 100, fm: 'webp' } });
     expect(out?.passthrough).toBe(true);
     expect(out?.mime).toBe('application/pdf');
     expect(out?.bytes.toString()).toBe('hello pdf');
@@ -182,31 +182,84 @@ describe('Core.getTransformedAsset', () => {
       bytes: png,
       meta: { mime: 'image/png' }
     });
-    const id = Buffer.from(written.id).toString('hex');
+    const refKey = Buffer.from(written.ref_key).toString('hex');
 
     const webpFromAccept = await core.getTransformedAsset({
-      id,
+      ref_key: refKey,
       params: { w: 80, auto: 'format' },
       accept: 'image/webp,image/*,*/*'
     });
     const pngDefault = await core.getTransformedAsset({
-      id,
+      ref_key: refKey,
       params: { w: 80, auto: 'format' },
       accept: 'image/jpeg,*/*'
     });
 
     expect(webpFromAccept?.mime).toBe('image/webp');
     expect(pngDefault?.mime).toBe('image/png');
-    // Should land in different cache slots — neither should be a cache hit.
     expect(webpFromAccept?.cached).toBe(false);
     expect(pngDefault?.cached).toBe(false);
 
-    // Repeat one of them to confirm cache works per-format.
     const webpAgain = await core.getTransformedAsset({
-      id,
+      ref_key: refKey,
       params: { w: 80, auto: 'format' },
       accept: 'image/webp,image/*,*/*'
     });
     expect(webpAgain?.cached).toBe(true);
+  });
+
+  it('updateAsset bumps version, mints new ref_key, transform cache misses → re-renders', async () => {
+    const v1Bytes = await sharp({
+      create: { width: 100, height: 100, channels: 3, background: { r: 255, g: 0, b: 0 } }
+    })
+      .png()
+      .toBuffer();
+    const v1 = await core.uploadAsset({
+      kind: 'image',
+      bytes: v1Bytes,
+      meta: { mime: 'image/png' }
+    });
+    const v1RefKey = Buffer.from(v1.ref_key).toString('hex');
+    const v1Id = Buffer.from(v1.id).toString('hex');
+
+    // Cache the v1 transform.
+    const t1 = await core.getTransformedAsset({
+      ref_key: v1RefKey,
+      params: { w: 50, fm: 'webp' }
+    });
+    expect(t1?.cached).toBe(false);
+    expect(t1?.version).toBe(1);
+
+    // Replace the bytes (different color → different output).
+    const v2Bytes = await sharp({
+      create: { width: 100, height: 100, channels: 3, background: { r: 0, g: 0, b: 255 } }
+    })
+      .png()
+      .toBuffer();
+    const v2 = await core.updateAsset({
+      id: v1Id,
+      parent_version: 1,
+      bytes: v2Bytes
+    });
+    expect(v2.version).toBe(2);
+    expect(v2.id).toBe(v1Id);
+    expect(v2.ref_key).not.toBe(v1RefKey);
+
+    // The v1 ref_key still serves v1 bytes (version-pinned forever).
+    const v1Again = await core.getTransformedAsset({
+      ref_key: v1RefKey,
+      params: { w: 50, fm: 'webp' }
+    });
+    expect(v1Again?.cached).toBe(true);
+    expect(v1Again?.version).toBe(1);
+
+    // The new ref_key is a fresh cache slot — first hit re-renders.
+    const t2 = await core.getTransformedAsset({
+      ref_key: v2.ref_key,
+      params: { w: 50, fm: 'webp' }
+    });
+    expect(t2?.cached).toBe(false);
+    expect(t2?.version).toBe(2);
+    expect(t2?.bytes.equals(t1!.bytes)).toBe(false);
   });
 });

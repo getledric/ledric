@@ -95,18 +95,23 @@ export interface AssetMeta {
 }
 
 export interface Asset {
+  /** Stable asset id — what entry content references. Doesn't change across versions. */
   id: string;
+  /** Per-version opaque key. URL-bearing. Different per version. */
+  ref_key: string;
   kind: string;
   version: number;
   current_version: number;
   published_version: number | null;
   storage_ref: string;
   meta: AssetMeta;
+  /** Canonical URL — uses ref_key, version-pinned, safe to long-cache. */
   url: string;
 }
 
 export interface AssetSummary {
   id: string;
+  ref_key: string;
   kind: string;
   version: number;
   storage_ref: string;

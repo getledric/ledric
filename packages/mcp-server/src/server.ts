@@ -131,6 +131,33 @@ const RenameArgsSchema = z
   })
   .strict();
 
+const UpdateAssetArgsSchema = z
+  .object({
+    id: z.string().length(32),
+    parent_version: IntFromStringOrNumber,
+    bytes_b64: z.string(),
+    meta: ObjectOrJsonString.optional(),
+    author: z.string().optional()
+  })
+  .strict();
+
+const DeleteTypeArgsSchema = z
+  .object({
+    name: z.string(),
+    parent_version: IntFromStringOrNumber,
+    cascade: z.boolean().optional(),
+    author: z.string().optional()
+  })
+  .strict();
+
+const DeleteEntryArgsSchema = z
+  .object({
+    ref: EntryRefSchema,
+    parent_version: IntFromStringOrNumber,
+    author: z.string().optional()
+  })
+  .strict();
+
 const MigrateEntriesArgsSchema = z
   .object({
     type: z.string(),
@@ -173,6 +200,7 @@ Core workflows:
 - List + read: find returns paginated entries; read returns one. Both support locale projection, asset expansion, and inline-ref resolution.
 - Backfill after a schema change: migrate_entries walks every entry of a type, optionally applying a merge_patch, and re-stamps with the current schema_version.
 - Rename: rename_entry retires the old slug (which keeps redirecting forever) and assigns a new one.
+- Delete: delete_entry soft-deletes a single entry (parent_version required); reads stop seeing it but the row stays. delete_type soft-deletes a content type (parent_version required); refuses with TYPE_NOT_EMPTY when entries remain unless cascade:true is passed, which deletes the type and every entry in one transaction.
 
 Field types — use these as the "type" discriminator on each field def:
   string, number, boolean, date, slug, enum, asset, references, array, object, vector, markdown, jss, css.
@@ -186,7 +214,8 @@ Field types — use these as the "type" discriminator on each field def:
 
 Conventions worth knowing:
 - Localization. A type with locales[] declared accepts a _locale sidecar in content: {..., "_locale": {"fr": {"title": "...", "body": "..."}}}. Pass locale on reads to project the entry into that locale (with the configured fallback chain). Fields opt in via "localized": true.
-- Asset fields hold 32-char hex ids. Pass expand_assets: true on read/find to inline {id, kind, meta, url} so SDK consumers don't round-trip per image.
+- Asset fields hold 32-char hex ids — STABLE across versions, what entry content carries. The bytes URL is keyed on a separate per-version ref_key (also 32-char hex), so URLs change automatically when bytes change. Pass expand_assets: true on read/find to inline {id, ref_key, kind, version, meta, url} so SDK consumers don't round-trip per image.
+- Replacing asset bytes: update_asset { id, parent_version, bytes_b64, meta? } bumps assets.current_version, mints a new ref_key, leaves the asset id intact. Reading entries afterwards through expand_assets surfaces the new url automatically.
 - Image transforms (consumer-side URL concern). Asset URLs accept imgix-style query params for resize / format / quality: w, h, fit (clip|crop, with cover/contain aliases), q (1-100), fm (jpg|png|webp|avif), auto=format (server picks best from Accept), dpr (1-4 multiplier on w/h). Example: /assets/<id>?w=400&fm=webp. Source bytes never change; transformed bytes are computed at request time and cached. Don't store transform params in entry content — that's a renderer-side decision per page/breakpoint.
 - Structural references (the references field type and inline :::ref{to="type/slug"}::: directives) accept an optional @version suffix to pin: "blog_post/hello@3". On draft, dangling or wrong-typed refs come back as warnings (the draft still saves). On publish, the same issues become errors — VALIDATION_FAILED with a structured errors[] payload. read of an entry whose stored content has unresolved refs attaches a _warnings sidecar so callers can flag stale targets without re-running the check.
 - Inline references in markdown bodies use the directive :::ref{to="type/slug"}:::. Pass resolve_refs: true on read/find to get a _refs sidecar listing the resolved targets (with display strings and URLs); danglers come back as {to, found:false}.
@@ -494,6 +523,83 @@ export function createMcpServer(core: Core): Server {
           required: ['ref'],
           additionalProperties: false
         }
+      },
+      {
+        name: 'delete_type',
+        description:
+          'Soft-delete a content type. Requires `parent_version` (optimistic concurrency). With live entries the call fails with TYPE_NOT_EMPTY unless `cascade: true`, which also soft-deletes every entry of the type. Reads stop seeing soft-deleted types and entries; the rows stay in storage and can be recovered manually.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Content type name.' },
+            parent_version: {
+              type: 'integer',
+              description: "The type's current version. Must match."
+            },
+            cascade: {
+              type: 'boolean',
+              description:
+                'When true, soft-delete every non-deleted entry of this type in the same transaction. Default false (refuses if any entries remain).'
+            },
+            author: { type: 'string' }
+          },
+          required: ['name', 'parent_version'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'update_asset',
+        description:
+          'Replace the bytes of an existing asset in place. The asset id stays put — entry content keeps resolving — but a fresh ref_key is minted, so URLs built from expand_assets change automatically. Requires parent_version (optimistic concurrency) matching assets.current_version. `bytes_b64` is base64-encoded source bytes. Optional `meta` REPLACES the previous meta (no merge); omit it to carry the existing meta forward.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Asset id (32-char hex).' },
+            parent_version: {
+              type: 'integer',
+              description: "The asset's current version. Must match."
+            },
+            bytes_b64: {
+              type: 'string',
+              description: 'Base64-encoded raw bytes for the new version.'
+            },
+            meta: {
+              type: 'object',
+              description:
+                'Optional replacement metadata. When provided, fully replaces previous meta (does not merge).',
+              additionalProperties: true
+            },
+            author: { type: 'string' }
+          },
+          required: ['id', 'parent_version', 'bytes_b64'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'delete_entry',
+        description:
+          'Soft-delete a single entry. Requires `parent_version` (optimistic concurrency). Reads stop seeing it, but the row stays in storage. To reuse the same slug for a fresh entry the deleted row must be hard-purged manually for now.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            ref: {
+              type: 'object',
+              properties: {
+                type: { type: 'string' },
+                slug: { type: 'string' }
+              },
+              required: ['type', 'slug'],
+              additionalProperties: false
+            },
+            parent_version: {
+              type: 'integer',
+              description: "The entry's current version. Must match."
+            },
+            author: { type: 'string' }
+          },
+          required: ['ref', 'parent_version'],
+          additionalProperties: false
+        }
       }
     ]
   }));
@@ -565,6 +671,34 @@ export function createMcpServer(core: Core): Server {
             content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
           };
         }
+        case 'update_asset': {
+          const parsed = UpdateAssetArgsSchema.parse(args ?? {});
+          const bytes = new Uint8Array(Buffer.from(parsed.bytes_b64, 'base64'));
+          const result = await core.updateAsset({
+            id: parsed.id,
+            parent_version: parsed.parent_version,
+            bytes,
+            ...(parsed.meta !== undefined ? { meta: parsed.meta as Record<string, unknown> } : {}),
+            ...(parsed.author !== undefined ? { author: parsed.author } : {})
+          });
+          return {
+            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
+          };
+        }
+        case 'delete_type': {
+          const parsed = DeleteTypeArgsSchema.parse(args ?? {});
+          const result = await core.deleteType(parsed);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
+          };
+        }
+        case 'delete_entry': {
+          const parsed = DeleteEntryArgsSchema.parse(args ?? {});
+          const result = await core.deleteEntry(parsed);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
+          };
+        }
         case 'get_asset': {
           const parsed = GetAssetArgsSchema.parse(args ?? {});
           const result = await core.getAsset(parsed);
@@ -627,6 +761,7 @@ function serializeToolError(err: unknown): Record<string, unknown> {
     slug?: unknown;
     kind?: unknown;
     ref?: unknown;
+    entry_count?: unknown;
   };
   if (typeof e.code === 'string') out.code = e.code;
   if (Array.isArray(e.errors)) out.errors = e.errors;
@@ -638,6 +773,7 @@ function serializeToolError(err: unknown): Record<string, unknown> {
   if (typeof e.slug === 'string') out.slug = e.slug;
   if (typeof e.kind === 'string') out.kind = e.kind;
   if (typeof e.ref === 'string') out.ref = e.ref;
+  if (typeof e.entry_count === 'number') out.entry_count = e.entry_count;
   return out;
 }
 

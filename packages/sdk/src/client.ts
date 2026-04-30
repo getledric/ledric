@@ -162,9 +162,13 @@ export class LedricClient {
     return (await res.json()) as TypeDescription;
   }
 
-  /** GET /assets/:id/meta — asset metadata only. */
-  async asset(id: string): Promise<Asset | null> {
-    const url = `${this.baseUrl}/assets/${encodeURIComponent(id)}/meta`;
+  /**
+   * GET /assets/:key/meta — fetch asset metadata. Accepts either an
+   * asset id (stable handle that lives in entry content) or a ref_key
+   * (per-version URL key). The server dual-looks-up.
+   */
+  async asset(key: string): Promise<Asset | null> {
+    const url = `${this.baseUrl}/assets/${encodeURIComponent(key)}/meta`;
     const res = await this._fetch(url, { headers: this._headers });
     if (res.status === 404) return null;
     if (!res.ok) await this._raise(res, url);
@@ -186,17 +190,29 @@ export class LedricClient {
 
   /**
    * Build an absolute asset URL with optional imgix-style transforms.
-   * Pure helper — never fetches. Same shape on both server (Astro/SSR)
-   * and browser; safe to render straight into `<img src>`.
+   * Accepts either a resolved asset object (preferred — uses its
+   * `ref_key`) or a bare ref_key hex string. Never takes a raw asset
+   * id — those don't have URLs of their own; resolve via expand_assets
+   * or `client.asset(id)` first.
+   *
+   * Pure helper. Safe on both server (Astro/SSR) and browser.
    */
-  assetUrl(id: string, opts: AssetTransformOptions = {}): string {
+  assetUrl(
+    refKeyOrAsset: string | { ref_key: string },
+    opts: AssetTransformOptions = {}
+  ): string {
+    const refKey =
+      typeof refKeyOrAsset === 'string' ? refKeyOrAsset : refKeyOrAsset.ref_key;
     const qs = buildAssetQueryString(opts);
-    return `${this.baseUrl}/assets/${encodeURIComponent(id)}${qs}`;
+    return `${this.baseUrl}/assets/${encodeURIComponent(refKey)}${qs}`;
   }
 
   /** Fetch raw asset bytes as a Uint8Array. Returns null on 404. */
-  async assetBytes(id: string, opts: AssetTransformOptions = {}): Promise<Uint8Array | null> {
-    const url = this.assetUrl(id, opts);
+  async assetBytes(
+    refKeyOrAsset: string | { ref_key: string },
+    opts: AssetTransformOptions = {}
+  ): Promise<Uint8Array | null> {
+    const url = this.assetUrl(refKeyOrAsset, opts);
     const res = await this._fetch(url, { headers: this._headers });
     if (res.status === 404) return null;
     if (!res.ok) await this._raise(res, url);

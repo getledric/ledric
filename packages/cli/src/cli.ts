@@ -27,8 +27,9 @@ USAGE
   ledric asset upload <file>         upload a file (db backend by default)
   ledric asset upload <file> --assets-backend local
                                      … or write bytes to ./ledric-assets
+  ledric asset replace <id> <file>   in-place bytes replacement (bumps version, mints fresh ref_key)
   ledric asset ls [--kind image]     list assets
-  ledric asset get <id>              read asset metadata
+  ledric asset get <id>              read asset metadata (incl. ref_key)
   ledric asset bytes <id>            write asset bytes to stdout
   ledric rename <type>/<old> <new>   rename an entry (old slug keeps redirecting)
   ledric refs check                  lint all entries for dangling :::ref{} directives

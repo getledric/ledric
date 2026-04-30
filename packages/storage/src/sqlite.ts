@@ -57,6 +57,18 @@ export class NotFoundError extends Error {
   }
 }
 
+export class TypeNotEmptyError extends Error {
+  readonly code = 'TYPE_NOT_EMPTY';
+  constructor(
+    public readonly type: string,
+    public readonly entry_count: number
+  ) {
+    super(
+      `TYPE_NOT_EMPTY: type "${type}" still has ${entry_count} non-deleted entries. Pass cascade:true to delete them too, or delete_entry them first.`
+    );
+  }
+}
+
 const MAIN_ENV_NAME = 'main';
 
 export type AssetsConfig =
@@ -553,6 +565,10 @@ export class SqliteStorage implements Storage {
       created_at: number;
     }
 
+    // Direct reads always exclude soft-deleted entries — the slug-history
+    // fallback (in readEntry) is what handles "the slug used to point at
+    // this entry, but it was renamed". A deleted entry has neither a
+    // current row nor a retired-slug pointer, so callers see null.
     const row = opts?.version !== undefined
       ? this.db
           .prepare<[number, Buffer, string, string], JoinRow>(
@@ -561,7 +577,7 @@ export class SqliteStorage implements Storage {
              FROM entries e
              JOIN types t ON t.id = e.type_id
              JOIN entry_versions ev ON ev.entry_id = e.id AND ev.version = ?
-             WHERE e.env_id = ? AND t.name = ? AND e.slug = ?`
+             WHERE e.env_id = ? AND t.name = ? AND e.slug = ? AND e.deleted_at IS NULL`
           )
           .get(opts.version, envId, ref.type, ref.slug)
       : this.db
@@ -571,7 +587,7 @@ export class SqliteStorage implements Storage {
              FROM entries e
              JOIN types t ON t.id = e.type_id
              JOIN entry_versions ev ON ev.entry_id = e.id AND ev.version = e.current_version
-             WHERE e.env_id = ? AND t.name = ? AND e.slug = ?`
+             WHERE e.env_id = ? AND t.name = ? AND e.slug = ? AND e.deleted_at IS NULL`
           )
           .get(envId, ref.type, ref.slug);
 
@@ -803,8 +819,96 @@ export class SqliteStorage implements Storage {
     };
   }
 
+  async deleteType(input: import('./types.js').DeleteTypeInput): Promise<import('./types.js').DeleteTypeResult> {
+    const envId = Buffer.from(this.mainEnvId);
+    // Atomic: ensure not already deleted, version match, optional cascade,
+    // then mark deleted_at. better-sqlite3's transaction wrapper keeps
+    // the steps consistent across read + write.
+    const tx = this.db.transaction((): import('./types.js').DeleteTypeResult => {
+      const typeRow = this.db
+        .prepare<[Buffer, string], { id: Buffer; current_version: number; deleted_at: number | null }>(
+          'SELECT id, current_version, deleted_at FROM types WHERE env_id = ? AND name = ?'
+        )
+        .get(envId, input.name);
+      if (!typeRow || typeRow.deleted_at !== null) {
+        throw new NotFoundError('type', input.name);
+      }
+      if (typeRow.current_version !== input.parent_version) {
+        throw new VersionConflictError(
+          'type',
+          input.name,
+          typeRow.current_version,
+          input.parent_version
+        );
+      }
+
+      const liveCount = this.db
+        .prepare<[Buffer, Buffer], { n: number }>(
+          'SELECT COUNT(*) AS n FROM entries WHERE env_id = ? AND type_id = ? AND deleted_at IS NULL'
+        )
+        .get(envId, typeRow.id)?.n ?? 0;
+
+      let entries_deleted = 0;
+      if (liveCount > 0) {
+        if (input.cascade !== true) {
+          throw new TypeNotEmptyError(input.name, liveCount);
+        }
+        const now = Date.now();
+        const info = this.db
+          .prepare(
+            'UPDATE entries SET deleted_at = ? WHERE env_id = ? AND type_id = ? AND deleted_at IS NULL'
+          )
+          .run(now, envId, typeRow.id);
+        entries_deleted = info.changes;
+      }
+
+      const now = Date.now();
+      this.db
+        .prepare('UPDATE types SET deleted_at = ? WHERE id = ?')
+        .run(now, typeRow.id);
+
+      return { name: input.name, deleted_at: now, entries_deleted };
+    });
+    return tx();
+  }
+
+  async deleteEntry(input: import('./types.js').DeleteEntryInput): Promise<import('./types.js').DeleteEntryResult> {
+    const typeRow = this.requireTypeId(input.ref.type);
+    const envId = Buffer.from(this.mainEnvId);
+
+    const row = this.db
+      .prepare<[Buffer, Buffer, string], { id: Buffer; current_version: number }>(
+        `SELECT id, current_version FROM entries
+         WHERE env_id = ? AND type_id = ? AND slug = ? AND deleted_at IS NULL`
+      )
+      .get(envId, Buffer.from(typeRow.id), input.ref.slug);
+
+    if (!row) throw new NotFoundError('entry', `${input.ref.type}/${input.ref.slug}`);
+    if (row.current_version !== input.parent_version) {
+      throw new VersionConflictError(
+        input.ref.type,
+        input.ref.slug,
+        row.current_version,
+        input.parent_version
+      );
+    }
+
+    const now = Date.now();
+    this.db
+      .prepare('UPDATE entries SET deleted_at = ? WHERE id = ?')
+      .run(now, row.id);
+
+    return {
+      id: new Uint8Array(row.id),
+      type: input.ref.type,
+      slug: input.ref.slug,
+      deleted_at: now
+    };
+  }
+
   async createAsset(input: CreateAssetInput): Promise<AssetWrite> {
     const assetId = uuidv7Bytes();
+    const refKey = uuidv7Bytes();
     const now = Date.now();
     const backend = this.assetBackends.default();
     const meta: AssetMeta = {
@@ -830,14 +934,154 @@ export class SqliteStorage implements Storage {
       this.db
         .prepare(
           `INSERT INTO asset_versions
-             (asset_id, version, storage_ref, meta, parent_version, author, created_at)
-           VALUES (?, 1, ?, ?, NULL, ?, ?)`
+             (asset_id, version, storage_ref, meta, parent_version, author, created_at, ref_key)
+           VALUES (?, 1, ?, ?, NULL, ?, ?, ?)`
         )
-        .run(assetId, storageRef, JSON.stringify(meta), input.author ?? null, now);
+        .run(assetId, storageRef, JSON.stringify(meta), input.author ?? null, now, Buffer.from(refKey));
     });
     tx();
 
-    return { id: assetId, version: 1, kind: input.kind, storage_ref: storageRef, meta };
+    return {
+      id: assetId,
+      version: 1,
+      kind: input.kind,
+      storage_ref: storageRef,
+      meta,
+      ref_key: refKey
+    };
+  }
+
+  async updateAsset(input: import('./types.js').UpdateAssetInput): Promise<AssetWrite> {
+    const envId = Buffer.from(this.mainEnvId);
+    const idBuf = Buffer.from(input.id);
+
+    // Resolve current state outside the transaction so we can talk to
+    // the asset backend (which may do IO) before locking the DB.
+    const cur = this.db
+      .prepare<[Buffer, Buffer], { kind: string; current_version: number; deleted_at: number | null }>(
+        'SELECT kind, current_version, deleted_at FROM assets WHERE env_id = ? AND id = ?'
+      )
+      .get(envId, idBuf);
+    if (!cur || cur.deleted_at !== null) {
+      throw new NotFoundError('asset', Buffer.from(input.id).toString('hex'));
+    }
+    if (cur.current_version !== input.parent_version) {
+      throw new VersionConflictError(
+        'asset',
+        Buffer.from(input.id).toString('hex'),
+        cur.current_version,
+        input.parent_version
+      );
+    }
+
+    // Carry meta forward unless the caller supplied a replacement.
+    const prevMetaRow = this.db
+      .prepare<[Buffer, number], { meta: string }>(
+        'SELECT meta FROM asset_versions WHERE asset_id = ? AND version = ?'
+      )
+      .get(idBuf, cur.current_version);
+    const prevMeta = prevMetaRow ? (JSON.parse(prevMetaRow.meta) as AssetMeta) : {};
+
+    const baseMeta: AssetMeta = input.meta !== undefined ? input.meta : prevMeta;
+    const meta: AssetMeta = { ...baseMeta, size: input.bytes.byteLength };
+
+    const refKey = uuidv7Bytes();
+    const newVersion = cur.current_version + 1;
+    const now = Date.now();
+    const backend = this.assetBackends.default();
+    const storageRef = await backend.put({
+      assetId: input.id,
+      version: newVersion,
+      bytes: input.bytes,
+      ...(meta.mime !== undefined ? { mime: meta.mime } : {})
+    });
+
+    const tx = this.db.transaction(() => {
+      // Re-check inside the transaction so two concurrent updates can't
+      // both bump from the same parent_version.
+      const recheck = this.db
+        .prepare<[Buffer, Buffer], { current_version: number }>(
+          'SELECT current_version FROM assets WHERE env_id = ? AND id = ?'
+        )
+        .get(envId, idBuf);
+      if (!recheck || recheck.current_version !== input.parent_version) {
+        throw new VersionConflictError(
+          'asset',
+          Buffer.from(input.id).toString('hex'),
+          recheck?.current_version ?? -1,
+          input.parent_version
+        );
+      }
+      this.db
+        .prepare(
+          `INSERT INTO asset_versions
+             (asset_id, version, storage_ref, meta, parent_version, author, created_at, ref_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          idBuf,
+          newVersion,
+          storageRef,
+          JSON.stringify(meta),
+          cur.current_version,
+          input.author ?? null,
+          now,
+          Buffer.from(refKey)
+        );
+      this.db
+        .prepare('UPDATE assets SET current_version = ? WHERE id = ?')
+        .run(newVersion, idBuf);
+    });
+    tx();
+
+    return {
+      id: new Uint8Array(input.id),
+      version: newVersion,
+      kind: cur.kind,
+      storage_ref: storageRef,
+      meta,
+      ref_key: refKey
+    };
+  }
+
+  async findAssetByRefKey(refKey: Uint8Array): Promise<AssetDetail | null> {
+    const envId = Buffer.from(this.mainEnvId);
+    interface JoinRow {
+      id: Buffer;
+      kind: string;
+      current_version: number;
+      published_version: number | null;
+      deleted_at: number | null;
+      version: number;
+      storage_ref: string;
+      meta: string;
+      author: string | null;
+      created_at: number;
+      ref_key: Buffer;
+    }
+    const row = this.db
+      .prepare<[Buffer, Buffer], JoinRow>(
+        `SELECT a.id, a.kind, a.current_version, a.published_version, a.deleted_at,
+                av.version, av.storage_ref, av.meta, av.author, av.created_at, av.ref_key
+         FROM asset_versions av
+         JOIN assets a ON a.id = av.asset_id
+         WHERE a.env_id = ? AND av.ref_key = ?`
+      )
+      .get(envId, Buffer.from(refKey));
+    if (!row) return null;
+    return {
+      id: new Uint8Array(row.id),
+      kind: row.kind,
+      current_version: row.current_version,
+      published_version: row.published_version,
+      deleted_at: row.deleted_at,
+      version: row.version,
+      storage_ref: row.storage_ref,
+      meta: JSON.parse(row.meta) as AssetMeta,
+      author: row.author,
+      created_at: row.created_at,
+      ref_key: new Uint8Array(row.ref_key)
+    };
   }
 
   async getAsset(
@@ -856,13 +1100,14 @@ export class SqliteStorage implements Storage {
       meta: string;
       author: string | null;
       created_at: number;
+      ref_key: Buffer;
     }
 
     const row = opts?.version !== undefined
       ? this.db
           .prepare<[number, Buffer, Buffer], JoinRow>(
             `SELECT a.kind, a.current_version, a.published_version, a.deleted_at,
-                    av.version, av.storage_ref, av.meta, av.author, av.created_at
+                    av.version, av.storage_ref, av.meta, av.author, av.created_at, av.ref_key
              FROM assets a
              JOIN asset_versions av ON av.asset_id = a.id AND av.version = ?
              WHERE a.env_id = ? AND a.id = ?`
@@ -871,7 +1116,7 @@ export class SqliteStorage implements Storage {
       : this.db
           .prepare<[Buffer, Buffer], JoinRow>(
             `SELECT a.kind, a.current_version, a.published_version, a.deleted_at,
-                    av.version, av.storage_ref, av.meta, av.author, av.created_at
+                    av.version, av.storage_ref, av.meta, av.author, av.created_at, av.ref_key
              FROM assets a
              JOIN asset_versions av ON av.asset_id = a.id AND av.version = a.current_version
              WHERE a.env_id = ? AND a.id = ?`
@@ -890,7 +1135,8 @@ export class SqliteStorage implements Storage {
       storage_ref: row.storage_ref,
       meta: JSON.parse(row.meta) as AssetMeta,
       author: row.author,
-      created_at: row.created_at
+      created_at: row.created_at,
+      ref_key: new Uint8Array(row.ref_key)
     };
   }
 
@@ -910,6 +1156,7 @@ export class SqliteStorage implements Storage {
       storage_ref: string;
       meta: string;
       created_at: number;
+      ref_key: Buffer;
     }
 
     const params: unknown[] = [envId];
@@ -919,7 +1166,7 @@ export class SqliteStorage implements Storage {
     const rows = this.db
       .prepare<unknown[], Row>(
         `SELECT a.id, a.kind, a.current_version, a.published_version, a.deleted_at,
-                av.storage_ref, av.meta, av.created_at
+                av.storage_ref, av.meta, av.created_at, av.ref_key
          FROM assets a
          JOIN asset_versions av ON av.asset_id = a.id AND av.version = a.current_version
          WHERE a.env_id = ?${kindFilter}${deletedFilter}
@@ -946,7 +1193,8 @@ export class SqliteStorage implements Storage {
         deleted_at: r.deleted_at,
         storage_ref: r.storage_ref,
         meta: JSON.parse(r.meta) as AssetMeta,
-        created_at: r.created_at
+        created_at: r.created_at,
+        ref_key: new Uint8Array(r.ref_key)
       })),
       total: countRow?.c ?? 0,
       offset

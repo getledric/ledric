@@ -163,5 +163,22 @@ export const migrations: Migration[] = [
       CREATE INDEX idx_api_keys_env_role ON api_keys (env_id, role);
       CREATE INDEX idx_api_keys_hash ON api_keys (key_hash);
     `
+  },
+  {
+    id: 6,
+    name: '0006_asset_ref_keys',
+    sql: `
+      -- Per-version opaque key used in asset retrieval URLs. Decoupled
+      -- from the asset id so URLs change when bytes change (cache-stable
+      -- forever) without breaking entry-content references that point
+      -- at the stable asset id.
+      ALTER TABLE asset_versions ADD COLUMN ref_key BLOB;
+
+      -- Backfill any existing rows with a fresh 16-byte random key.
+      -- New rows are populated with uuidv7Bytes() from JS at write time.
+      UPDATE asset_versions SET ref_key = randomblob(16) WHERE ref_key IS NULL;
+
+      CREATE UNIQUE INDEX idx_asset_versions_ref_key ON asset_versions (ref_key);
+    `
   }
 ];

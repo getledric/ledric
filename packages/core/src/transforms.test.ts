@@ -228,25 +228,33 @@ describe('FsTransformCache', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('round-trips bytes by (assetId, version, key, ext)', async () => {
+  it('round-trips bytes by (refKey, paramsHash, ext)', async () => {
     const bytes = Buffer.from('hello');
-    await cache.put('abc123', 1, 'k1', 'webp', bytes);
-    const got = await cache.get('abc123', 1, 'k1', 'webp');
+    await cache.put('refkey1', 'k1', 'webp', bytes);
+    const got = await cache.get('refkey1', 'k1', 'webp');
     expect(got).not.toBeNull();
     expect(got?.equals(bytes)).toBe(true);
   });
 
   it('returns null on a cache miss', async () => {
-    expect(await cache.get('abc', 1, 'missing', 'webp')).toBeNull();
+    expect(await cache.get('abc', 'missing', 'webp')).toBeNull();
   });
 
-  it('puts different versions into different files (no collision)', async () => {
-    await cache.put('a', 1, 'k', 'webp', Buffer.from('v1'));
-    await cache.put('a', 2, 'k', 'webp', Buffer.from('v2'));
-    const v1 = await cache.get('a', 1, 'k', 'webp');
-    const v2 = await cache.get('a', 2, 'k', 'webp');
+  it('different ref_keys are distinct slots (no collision across versions)', async () => {
+    await cache.put('rk-v1', 'k', 'webp', Buffer.from('v1'));
+    await cache.put('rk-v2', 'k', 'webp', Buffer.from('v2'));
+    const v1 = await cache.get('rk-v1', 'k', 'webp');
+    const v2 = await cache.get('rk-v2', 'k', 'webp');
     expect(v1?.toString()).toBe('v1');
     expect(v2?.toString()).toBe('v2');
+  });
+
+  it('clear(refKey) removes every entry for a ref_key', async () => {
+    await cache.put('rk-x', 'k1', 'webp', Buffer.from('a'));
+    await cache.put('rk-x', 'k2', 'webp', Buffer.from('b'));
+    await cache.clear('rk-x');
+    expect(await cache.get('rk-x', 'k1', 'webp')).toBeNull();
+    expect(await cache.get('rk-x', 'k2', 'webp')).toBeNull();
   });
 });
 

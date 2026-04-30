@@ -7,8 +7,11 @@
 //     this file with no Core or storage dependency.
 //   - A `TransformCache` interface defines the storage hook. The default
 //     implementation, FsTransformCache, writes transformed bytes to disk
-//     keyed by (assetId, version, paramsHash). Other backends (memory,
-//     s3) can plug in by implementing the same interface.
+//     keyed by (refKey, paramsHash). The ref_key is the per-version
+//     opaque id minted at upload/replace time, so cache entries from
+//     stale versions are naturally addressable but never collide with
+//     fresh ones. Other backends (memory, s3) plug in via the same
+//     interface.
 //   - Core.getTransformedAsset (in core.ts) ties it all together.
 
 import { promises as fs } from 'node:fs';
@@ -252,29 +255,24 @@ export function transformCacheKey(
 }
 
 /**
- * Pluggable cache for transformed bytes. Implementations only need to
- * read/write blobs keyed by (assetId, version, paramsHash) — they don't
- * need to understand mime or params themselves. The caller computes the
- * expected mime from params separately.
+ * Pluggable cache for transformed bytes. Keyed by (refKey, paramsHash).
+ * The ref_key is the per-version opaque id, so distinct versions always
+ * land in distinct cache slots — no stale-version reuse.
  */
 export interface TransformCache {
-  get(assetId: string, version: number, key: string, ext: string): Promise<Buffer | null>;
-  put(
-    assetId: string,
-    version: number,
-    key: string,
-    ext: string,
-    bytes: Buffer
-  ): Promise<void>;
+  get(refKey: string, key: string, ext: string): Promise<Buffer | null>;
+  put(refKey: string, key: string, ext: string, bytes: Buffer): Promise<void>;
+  /**
+   * Drop every cached entry for a ref_key. Optional — implementations
+   * that can't easily enumerate may no-op. Used by clearTransformCache
+   * when the operator wants to reclaim space without restarting.
+   */
+  clear(refKey: string): Promise<void>;
 }
 
 /**
  * Disk-backed transform cache. Layout:
- *   <root>/<assetId>/<version>-<key>.<ext>
- *
- * One directory per asset means we can blow it away wholesale when a
- * source asset changes. Versioned filenames mean a new asset version
- * never collides with cached transforms of the previous version.
+ *   <root>/<refKey>/<paramsHash>.<ext>
  */
 export class FsTransformCache implements TransformCache {
   constructor(private readonly root: string) {}
@@ -284,22 +282,12 @@ export class FsTransformCache implements TransformCache {
     return this.root;
   }
 
-  private fileFor(
-    assetId: string,
-    version: number,
-    key: string,
-    ext: string
-  ): string {
-    return join(this.root, assetId, `${version}-${key}.${ext}`);
+  private fileFor(refKey: string, key: string, ext: string): string {
+    return join(this.root, refKey, `${key}.${ext}`);
   }
 
-  async get(
-    assetId: string,
-    version: number,
-    key: string,
-    ext: string
-  ): Promise<Buffer | null> {
-    const path = this.fileFor(assetId, version, key, ext);
+  async get(refKey: string, key: string, ext: string): Promise<Buffer | null> {
+    const path = this.fileFor(refKey, key, ext);
     try {
       return await fs.readFile(path);
     } catch (err) {
@@ -309,15 +297,23 @@ export class FsTransformCache implements TransformCache {
   }
 
   async put(
-    assetId: string,
-    version: number,
+    refKey: string,
     key: string,
     ext: string,
     bytes: Buffer
   ): Promise<void> {
-    const path = this.fileFor(assetId, version, key, ext);
+    const path = this.fileFor(refKey, key, ext);
     await fs.mkdir(dirname(path), { recursive: true });
     await fs.writeFile(path, bytes);
+  }
+
+  async clear(refKey: string): Promise<void> {
+    const dir = join(this.root, refKey);
+    try {
+      await fs.rm(dir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   }
 }
 

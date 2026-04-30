@@ -110,6 +110,7 @@ const uploadCommand = defineCommand({
         JSON.stringify(
           {
             id: toHex(result.id),
+            ref_key: toHex(result.ref_key),
             version: result.version,
             kind: result.kind,
             storage_ref: result.storage_ref,
@@ -165,6 +166,7 @@ const lsCommand = defineCommand({
             offset: result.offset,
             results: result.results.map((r) => ({
               id: toHex(r.id),
+              ref_key: toHex(r.ref_key),
               kind: r.kind,
               version: r.current_version,
               storage_ref: r.storage_ref,
@@ -218,6 +220,7 @@ const getCommand = defineCommand({
         JSON.stringify(
           {
             id: toHex(asset.id),
+            ref_key: toHex(asset.ref_key),
             kind: asset.kind,
             version: asset.version,
             current_version: asset.current_version,
@@ -294,13 +297,122 @@ const bytesCommand = defineCommand({
   }
 });
 
+const replaceCommand = defineCommand({
+  meta: {
+    name: 'replace',
+    description:
+      'Replace the bytes of an existing asset in place. Bumps version, mints a fresh ref_key, leaves the asset id intact so entry references keep resolving.'
+  },
+  args: {
+    id: {
+      type: 'positional',
+      description: 'Asset id (32-char hex).',
+      required: true
+    },
+    file: {
+      type: 'positional',
+      description: 'Path to the new bytes.',
+      required: true
+    },
+    db: {
+      type: 'string',
+      description: 'Path to the SQLite database file.',
+      default: './ledric.db'
+    },
+    'parent-version': {
+      type: 'string',
+      description:
+        "The asset's current version (run `ledric asset get <id>` to see it). Required — protects against concurrent replacements."
+    },
+    mime: {
+      type: 'string',
+      description: 'Override mime. Auto-detected from extension if omitted.'
+    },
+    alt: {
+      type: 'string',
+      description: 'Alt text. Provided alone, this also clears any previous meta fields beyond mime/alt.'
+    },
+    'assets-backend': {
+      type: 'string',
+      description: 'Asset backend: db (default) or local.'
+    },
+    'assets-root': {
+      type: 'string',
+      description: 'For the local backend: directory where bytes are written.'
+    }
+  },
+  async run({ args }) {
+    const abs = path.resolve(args.file);
+    const bytes = await fs.readFile(abs);
+    const mime = args.mime ?? guessMime(abs);
+
+    const storage = await SqliteStorage.open({
+      path: args.db,
+      assets: assetsConfigFromArgs({
+        assetsBackend: args['assets-backend'],
+        assetsRoot: args['assets-root']
+      })
+    });
+    try {
+      const core = new Core(storage);
+
+      // Resolve parent_version: explicit flag wins; otherwise read the
+      // current version off the asset row to avoid making the user
+      // chase it down for the simple single-author flow.
+      let parentVersion: number;
+      if (args['parent-version']) {
+        parentVersion = parseInt(args['parent-version'], 10);
+      } else {
+        const cur = await core.getAsset({ id: args.id });
+        if (!cur) {
+          process.stderr.write(`ledric: no asset ${args.id} in ${args.db}\n`);
+          process.exit(1);
+        }
+        parentVersion = cur.current_version;
+      }
+
+      const meta: Record<string, unknown> | undefined =
+        mime !== undefined || args.alt !== undefined
+          ? {
+              ...(mime !== undefined ? { mime } : {}),
+              ...(args.alt !== undefined ? { alt: args.alt } : {})
+            }
+          : undefined;
+
+      const result = await core.updateAsset({
+        id: args.id,
+        parent_version: parentVersion,
+        bytes,
+        ...(meta !== undefined ? { meta } : {})
+      });
+      process.stdout.write(
+        JSON.stringify(
+          {
+            id: result.id,
+            ref_key: result.ref_key,
+            version: result.version,
+            kind: result.kind,
+            storage_ref: result.storage_ref,
+            meta: result.meta
+          },
+          null,
+          2
+        ) + '\n'
+      );
+    } finally {
+      await storage.close();
+    }
+  }
+});
+
 export const assetCommand = defineCommand({
   meta: {
     name: 'asset',
-    description: 'Manage assets (upload, list, read).'
+    description: 'Manage assets (upload, list, read, replace).'
   },
   subCommands: {
     upload: uploadCommand,
+    replace: replaceCommand,
     ls: lsCommand,
     get: getCommand,
     bytes: bytesCommand

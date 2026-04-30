@@ -168,12 +168,29 @@ export interface CreateAssetInput {
   author?: string;
 }
 
+/**
+ * Replace the bytes (and optionally meta) of an existing asset, bumping
+ * its current_version. The asset id stays put — entry content keeps
+ * resolving — but the new version row gets its own ref_key, so URLs
+ * built from `expand_assets` change automatically and cache safely.
+ */
+export interface UpdateAssetInput {
+  id: Uint8Array;
+  parent_version: number;
+  bytes: Uint8Array;
+  /** When provided, replaces the meta on the new version (does not merge). */
+  meta?: AssetMeta;
+  author?: string;
+}
+
 export interface AssetWrite {
   id: Uint8Array;
   version: number;
   kind: string;
   storage_ref: string;
   meta: AssetMeta;
+  /** 16-byte opaque key for the URL of this specific version. */
+  ref_key: Uint8Array;
 }
 
 export interface AssetSummary {
@@ -185,6 +202,8 @@ export interface AssetSummary {
   storage_ref: string;
   meta: AssetMeta;
   created_at: number;
+  /** ref_key of the current version — used to build cache-stable URLs. */
+  ref_key: Uint8Array;
 }
 
 export interface AssetDetail extends AssetSummary {
@@ -203,6 +222,38 @@ export interface ListAssetsResult {
   results: AssetSummary[];
   total: number;
   offset: number;
+}
+
+/** ---------- Soft-delete ---------- */
+
+export interface DeleteTypeInput {
+  name: string;
+  parent_version: number;
+  /**
+   * When true, every non-deleted entry of this type is soft-deleted in
+   * the same transaction. When false (default), the operation throws
+   * TypeNotEmptyError if any entries remain.
+   */
+  cascade?: boolean;
+}
+
+export interface DeleteTypeResult {
+  name: string;
+  deleted_at: number;
+  /** Count of entries that were cascade-deleted alongside the type. */
+  entries_deleted: number;
+}
+
+export interface DeleteEntryInput {
+  ref: EntryRef;
+  parent_version: number;
+}
+
+export interface DeleteEntryResult {
+  id: Uint8Array;
+  type: string;
+  slug: string;
+  deleted_at: number;
 }
 
 /** ---------- API keys ---------- */
@@ -240,7 +291,11 @@ export interface Storage {
   getType(name: string): Promise<TypeDetail | null>;
 
   createAsset(input: CreateAssetInput): Promise<AssetWrite>;
+  /** Replace the bytes of an existing asset; mints a new ref_key. */
+  updateAsset(input: UpdateAssetInput): Promise<AssetWrite>;
   getAsset(id: Uint8Array, opts?: { version?: number }): Promise<AssetDetail | null>;
+  /** Look up an asset version by its opaque ref_key (the URL key). Returns null on miss. */
+  findAssetByRefKey(ref_key: Uint8Array): Promise<AssetDetail | null>;
   listAssets(input?: ListAssetsInput): Promise<ListAssetsResult>;
   readAssetBytes(id: Uint8Array, opts?: { version?: number }): Promise<Buffer>;
 
@@ -250,6 +305,10 @@ export interface Storage {
   findEntries(input: FindEntriesInput): Promise<FindEntriesResult>;
   publishEntry(input: PublishEntryInput): Promise<EntryWrite>;
   renameEntry(input: RenameEntryInput): Promise<RenameEntryResult>;
+  /** Soft-delete a type. With cascade, also soft-deletes all its entries. */
+  deleteType(input: DeleteTypeInput): Promise<DeleteTypeResult>;
+  /** Soft-delete an entry. Reads stop seeing it; storage row stays. */
+  deleteEntry(input: DeleteEntryInput): Promise<DeleteEntryResult>;
 
   /** Create an API key row from a pre-hashed secret. Returns the assigned id + created_at. */
   createApiKey(input: CreateApiKeyInput): Promise<{ id: Uint8Array; created_at: number }>;

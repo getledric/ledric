@@ -3,9 +3,13 @@ import type { Storage, AssetMeta } from '@ledric/storage';
 
 export interface ResolvedAsset {
   id: string;
+  /** Per-version opaque key. The URL is built from this, not from id. */
+  ref_key: string;
+  version: number;
   kind: string;
   storage_ref: string;
   meta: AssetMeta;
+  /** Canonical URL — version-pinned via ref_key, safe to long-cache. */
   url: string;
 }
 
@@ -25,12 +29,15 @@ async function expandOne(
   const idBytes = Buffer.from(raw, 'hex');
   const asset = await storage.getAsset(new Uint8Array(idBytes));
   if (!asset) return null;
+  const refKeyHex = Buffer.from(asset.ref_key).toString('hex');
   return {
     id: raw,
+    ref_key: refKeyHex,
+    version: asset.version,
     kind: asset.kind,
     storage_ref: asset.storage_ref,
     meta: asset.meta,
-    url: `/assets/${raw}`
+    url: `/assets/${refKeyHex}`
   };
 }
 

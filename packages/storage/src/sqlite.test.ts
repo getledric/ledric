@@ -133,6 +133,218 @@ describe('SqliteStorage', () => {
     expect(all.total).toBe(3);
   });
 
+  describe('updateAsset / findAssetByRefKey', () => {
+    it('mints a fresh ref_key on createAsset and lets findAssetByRefKey resolve it', async () => {
+      const w = await storage.createAsset({
+        kind: 'file',
+        bytes: Buffer.from('v1', 'utf8'),
+        meta: { mime: 'text/plain' }
+      });
+      expect(w.ref_key.byteLength).toBe(16);
+
+      const found = await storage.findAssetByRefKey(w.ref_key);
+      expect(found).not.toBeNull();
+      expect(Buffer.from(found!.id).equals(Buffer.from(w.id))).toBe(true);
+      expect(found!.version).toBe(1);
+    });
+
+    it('updateAsset bumps version, mints new ref_key, keeps id stable', async () => {
+      const v1 = await storage.createAsset({
+        kind: 'file',
+        bytes: Buffer.from('v1', 'utf8'),
+        meta: { mime: 'text/plain', alt: 'one' }
+      });
+
+      const v2 = await storage.updateAsset({
+        id: v1.id,
+        parent_version: 1,
+        bytes: Buffer.from('v2-bytes-bigger', 'utf8')
+      });
+
+      expect(v2.version).toBe(2);
+      // Same asset id…
+      expect(Buffer.from(v2.id).equals(Buffer.from(v1.id))).toBe(true);
+      // …new ref_key.
+      expect(Buffer.from(v2.ref_key).equals(Buffer.from(v1.ref_key))).toBe(false);
+      // Meta carried forward when not provided, with refreshed size.
+      expect(v2.meta.alt).toBe('one');
+      expect(v2.meta.size).toBe(15);
+
+      // Old ref_key still resolves to v1's bytes.
+      const refV1 = await storage.findAssetByRefKey(v1.ref_key);
+      expect(refV1?.version).toBe(1);
+      const refV2 = await storage.findAssetByRefKey(v2.ref_key);
+      expect(refV2?.version).toBe(2);
+
+      // Bytes at each version match.
+      const b1 = await storage.readAssetBytes(v1.id, { version: 1 });
+      const b2 = await storage.readAssetBytes(v1.id, { version: 2 });
+      expect(b1.toString()).toBe('v1');
+      expect(b2.toString()).toBe('v2-bytes-bigger');
+    });
+
+    it('updateAsset replaces meta entirely when provided (not a merge)', async () => {
+      const v1 = await storage.createAsset({
+        kind: 'image',
+        bytes: Buffer.from([1, 2, 3]),
+        meta: { mime: 'image/png', alt: 'before', dims: { w: 10, h: 10 } }
+      });
+      const v2 = await storage.updateAsset({
+        id: v1.id,
+        parent_version: 1,
+        bytes: Buffer.from([4, 5, 6, 7]),
+        meta: { mime: 'image/jpeg' } // explicit narrow meta — drops alt + dims
+      });
+      expect(v2.meta.mime).toBe('image/jpeg');
+      expect(v2.meta.alt).toBeUndefined();
+      expect(v2.meta.dims).toBeUndefined();
+      expect(v2.meta.size).toBe(4);
+    });
+
+    it('updateAsset rejects on parent_version mismatch (VERSION_CONFLICT)', async () => {
+      const v1 = await storage.createAsset({
+        kind: 'file',
+        bytes: Buffer.from('a')
+      });
+      await expect(
+        storage.updateAsset({ id: v1.id, parent_version: 99, bytes: Buffer.from('b') })
+      ).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
+    });
+
+    it('updateAsset NOT_FOUND for unknown id', async () => {
+      const id = new Uint8Array(16);
+      await expect(
+        storage.updateAsset({ id, parent_version: 1, bytes: Buffer.from('x') })
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('findAssetByRefKey returns null for unknown ref_key', async () => {
+      expect(await storage.findAssetByRefKey(new Uint8Array(16))).toBeNull();
+    });
+  });
+
+  describe('deleteType / deleteEntry', () => {
+    it('soft-deletes an empty type and frees subsequent listTypes()', async () => {
+      const def = defineType('product', { title: field.string() });
+      await storage.createType({ definition: def });
+
+      const r = await storage.deleteType({ name: 'product', parent_version: 1 });
+      expect(r.name).toBe('product');
+      expect(r.entries_deleted).toBe(0);
+      expect(r.deleted_at).toBeGreaterThan(0);
+
+      const live = await storage.listTypes();
+      expect(live.find((t) => t.name === 'product')).toBeUndefined();
+
+      const all = await storage.listTypes({ includeDeleted: true });
+      expect(all.find((t) => t.name === 'product')?.deleted_at).toBeGreaterThan(0);
+    });
+
+    it('refuses to delete a type with live entries unless cascade is set', async () => {
+      const def = defineType('product', { title: field.string({ required: true }) });
+      await storage.createType({ definition: def });
+      await storage.createEntry({
+        type: 'product',
+        slug: 'a',
+        content: { title: 'A' },
+        schema_version: 1
+      });
+
+      await expect(
+        storage.deleteType({ name: 'product', parent_version: 1 })
+      ).rejects.toMatchObject({ code: 'TYPE_NOT_EMPTY', entry_count: 1 });
+    });
+
+    it('cascade-soft-deletes the type and its entries in one shot', async () => {
+      const def = defineType('product', { title: field.string({ required: true }) });
+      await storage.createType({ definition: def });
+      await storage.createEntry({ type: 'product', slug: 'a', content: { title: 'A' }, schema_version: 1 });
+      await storage.createEntry({ type: 'product', slug: 'b', content: { title: 'B' }, schema_version: 1 });
+
+      const r = await storage.deleteType({ name: 'product', parent_version: 1, cascade: true });
+      expect(r.entries_deleted).toBe(2);
+
+      // Reads stop seeing the cascaded entries.
+      expect(await storage.readEntry({ type: 'product', slug: 'a' })).toBeNull();
+    });
+
+    it('parent_version mismatch raises VERSION_CONFLICT', async () => {
+      const def = defineType('product', { title: field.string() });
+      await storage.createType({ definition: def });
+      await expect(
+        storage.deleteType({ name: 'product', parent_version: 99 })
+      ).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
+    });
+
+    it('NOT_FOUND when the type is missing or already deleted', async () => {
+      await expect(
+        storage.deleteType({ name: 'nope', parent_version: 1 })
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+      const def = defineType('p', { title: field.string() });
+      await storage.createType({ definition: def });
+      await storage.deleteType({ name: 'p', parent_version: 1 });
+      await expect(
+        storage.deleteType({ name: 'p', parent_version: 1 })
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+
+    it('soft-deletes an entry and reads stop seeing it', async () => {
+      const def = defineType('product', { title: field.string({ required: true }) });
+      await storage.createType({ definition: def });
+      const created = await storage.createEntry({
+        type: 'product',
+        slug: 'a',
+        content: { title: 'A' },
+        schema_version: 1
+      });
+
+      const r = await storage.deleteEntry({
+        ref: { type: 'product', slug: 'a' },
+        parent_version: created.version
+      });
+      expect(r.slug).toBe('a');
+      expect(r.deleted_at).toBeGreaterThan(0);
+
+      expect(await storage.readEntry({ type: 'product', slug: 'a' })).toBeNull();
+    });
+
+    it('deleteEntry refuses on parent_version mismatch', async () => {
+      const def = defineType('product', { title: field.string() });
+      await storage.createType({ definition: def });
+      await storage.createEntry({
+        type: 'product',
+        slug: 'a',
+        content: { title: 'A' },
+        schema_version: 1
+      });
+      await expect(
+        storage.deleteEntry({ ref: { type: 'product', slug: 'a' }, parent_version: 99 })
+      ).rejects.toMatchObject({ code: 'VERSION_CONFLICT' });
+    });
+
+    it('deleteEntry NOT_FOUND on already-deleted entries', async () => {
+      const def = defineType('product', { title: field.string() });
+      await storage.createType({ definition: def });
+      const created = await storage.createEntry({
+        type: 'product',
+        slug: 'a',
+        content: { title: 'A' },
+        schema_version: 1
+      });
+      await storage.deleteEntry({
+        ref: { type: 'product', slug: 'a' },
+        parent_version: created.version
+      });
+      await expect(
+        storage.deleteEntry({
+          ref: { type: 'product', slug: 'a' },
+          parent_version: created.version
+        })
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
+
   describe('api_keys', () => {
     it('starts with no active keys (auth-off mode)', async () => {
       expect(await storage.countActiveApiKeys()).toBe(0);
