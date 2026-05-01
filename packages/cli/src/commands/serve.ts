@@ -6,6 +6,7 @@ import { runStdio } from '@ledric/mcp-server';
 import { runHttp } from '@ledric/http-server';
 import { guiAssetsPath } from '@ledric/gui';
 import { bootstrapApiKeysIfEmpty, printFirstBootKeys } from './auth-bootstrap.js';
+import { loadConfig, resolveDb } from '../config.js';
 
 function assetsConfigFromArgs(args: {
   'assets-backend'?: string;
@@ -25,8 +26,7 @@ export const serveCommand = defineCommand({
   args: {
     db: {
       type: 'string',
-      description: 'Path to the SQLite database file.',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     http: {
       type: 'boolean',
@@ -35,13 +35,11 @@ export const serveCommand = defineCommand({
     },
     'http-port': {
       type: 'string',
-      description: 'HTTP port (when --http or --gui is set).',
-      default: '3000'
+      description: 'HTTP port (when --http or --gui is set). Defaults to ledric.config.json or 3000.'
     },
     'http-host': {
       type: 'string',
-      description: 'HTTP host.',
-      default: '127.0.0.1'
+      description: 'HTTP host. Defaults to ledric.config.json or 127.0.0.1.'
     },
     gui: {
       type: 'boolean',
@@ -59,7 +57,7 @@ export const serveCommand = defineCommand({
     },
     'assets-backend': {
       type: 'string',
-      description: 'Asset backend: db (default) or local.'
+      description: 'Asset backend: db or local. Defaults to ledric.config.json or db.'
     },
     'assets-root': {
       type: 'string',
@@ -83,14 +81,24 @@ export const serveCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const wantHttp = args.http === true || args.gui === true;
+    const cfg = loadConfig();
+    const dbPath = resolveDb(args.db);
+    const httpPortStr =
+      args['http-port'] ?? (cfg.http?.port !== undefined ? String(cfg.http.port) : '3000');
+    const httpHost = args['http-host'] ?? cfg.http?.host ?? '127.0.0.1';
+    const assetsBackend = args['assets-backend'] ?? cfg.assets?.backend;
+    const assetsRoot = args['assets-root'] ?? cfg.assets?.path;
+    const requireReaderKey =
+      args['require-reader-key'] === true || cfg.auth?.requireReaderKey === true;
+    const wantGui = args.gui === true || cfg.gui?.enabled === true;
+    const wantHttp = args.http === true || wantGui;
 
     const assetsConfig = assetsConfigFromArgs({
-      'assets-backend': args['assets-backend'],
-      'assets-root': args['assets-root']
+      'assets-backend': assetsBackend,
+      'assets-root': assetsRoot
     });
     const storage = await SqliteStorage.open({
-      path: args.db,
+      path: dbPath,
       ...(assetsConfig !== undefined ? { assets: assetsConfig } : {})
     });
 
@@ -125,20 +133,20 @@ export const serveCommand = defineCommand({
       );
       if (bootstrapped !== null) printFirstBootKeys(bootstrapped);
 
-      const guiOpts =
-        args.gui === true
-          ? {
-              assetsPath: args['gui-path'] ?? guiAssetsPath,
-              mountPath: args['gui-mount'] ?? '/admin'
-            }
-          : undefined;
+      const guiMount = args['gui-mount'] ?? cfg.gui?.mount ?? '/admin';
+      const guiOpts = wantGui
+        ? {
+            assetsPath: args['gui-path'] ?? guiAssetsPath,
+            mountPath: guiMount
+          }
+        : undefined;
       httpServer = await runHttp(core, {
-        port: parseInt(args['http-port'], 10),
-        host: args['http-host'],
+        port: parseInt(httpPortStr, 10),
+        host: httpHost,
         ...(guiOpts !== undefined ? { gui: guiOpts } : {}),
         auth: {
           storage,
-          requireReaderKey: args['require-reader-key'] === true,
+          requireReaderKey,
           ...(envAdminKey !== undefined ? { envAdminKey } : {}),
           ...(envReaderKey !== undefined ? { envReaderKey } : {})
         }
@@ -157,7 +165,7 @@ export const serveCommand = defineCommand({
       );
     }
 
-    process.stderr.write(`ledric: opened ${args.db}; MCP stdio server ready\n`);
+    process.stderr.write(`ledric: opened ${dbPath}; MCP stdio server ready\n`);
 
     const shutdown = async (signal: string): Promise<void> => {
       process.stderr.write(`ledric: ${signal} received, shutting down\n`);

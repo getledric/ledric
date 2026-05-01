@@ -9,11 +9,15 @@ import { renameCommand } from './commands/rename.js';
 import { refsCommand } from './commands/refs.js';
 import { keysCommand } from './commands/keys.js';
 import { tagCommand, untagCommand, tagsCommand } from './commands/tag.js';
+import { initCommand } from './commands/init.js';
 
 const CONFIG_HELP = `
 ledric — MCP/LLM-native self-hosted CMS
 
 USAGE
+  ledric init                        interactive setup: writes ledric.config.json,
+                                     patches .mcp.json, optionally mints API keys
+  ledric init --yes                  non-interactive — accept all defaults
   ledric serve                       MCP stdio (default; uses ./ledric.db)
   ledric serve --http                 … plus the HTTP API on :3000
   ledric serve --gui                 … plus HTTP and the admin GUI at /admin
@@ -67,6 +71,7 @@ const main = defineCommand({
     description: 'ledric — MCP/LLM-native self-hosted CMS.'
   },
   subCommands: {
+    init: initCommand,
     serve: serveCommand,
     http: httpCommand,
     get: getCommand,

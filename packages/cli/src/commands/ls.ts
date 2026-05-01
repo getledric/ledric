@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty';
 import { Core } from '@ledric/core';
 import { SqliteStorage, NotFoundError } from '@ledric/storage';
+import { resolveDb } from '../config.js';
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -19,8 +20,7 @@ export const lsCommand = defineCommand({
     },
     db: {
       type: 'string',
-      description: 'Path to the SQLite database file.',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     limit: {
       type: 'string',
@@ -47,7 +47,8 @@ export const lsCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: args.db });
+    const dbPath = resolveDb(args.db);
+    const storage = await SqliteStorage.open({ path: dbPath });
     try {
       const core = new Core(storage);
 
@@ -60,7 +61,7 @@ export const lsCommand = defineCommand({
           rows.push({ name: t.name, version: t.current_version, entries: count.total });
         }
         process.stdout.write(
-          JSON.stringify({ db: args.db, types: rows }, null, 2) + '\n'
+          JSON.stringify({ db: dbPath, types: rows }, null, 2) + '\n'
         );
         return;
       }
@@ -69,7 +70,7 @@ export const lsCommand = defineCommand({
       if (!typeDetail) {
         const known = (await storage.listTypes()).map((t) => t.name);
         process.stderr.write(
-          `ledric: no type "${args.type}" in ${args.db}\n` +
+          `ledric: no type "${args.type}" in ${dbPath}\n` +
             (known.length > 0
               ? `  known types: ${known.join(', ')}\n`
               : `  this database has no types yet; create one with create_type over MCP.\n`)

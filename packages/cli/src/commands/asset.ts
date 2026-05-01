@@ -4,6 +4,7 @@ import { defineCommand } from 'citty';
 import { Core } from '@ledric/core';
 import { SqliteStorage, NotFoundError } from '@ledric/storage';
 import type { AssetsConfig } from '@ledric/storage';
+import { resolveDb } from '../config.js';
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -65,8 +66,7 @@ const uploadCommand = defineCommand({
     },
     db: {
       type: 'string',
-      description: 'Path to the SQLite database file.',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     kind: {
       type: 'string',
@@ -101,7 +101,7 @@ const uploadCommand = defineCommand({
     const tags = splitTags(args.tag);
 
     const storage = await SqliteStorage.open({
-      path: args.db,
+      path: resolveDb(args.db),
       assets: assetsConfigFromArgs({
         assetsBackend: args['assets-backend'],
         assetsRoot: args['assets-root']
@@ -146,8 +146,7 @@ const lsCommand = defineCommand({
   args: {
     db: {
       type: 'string',
-      description: 'Path to the SQLite database file.',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     kind: {
       type: 'string',
@@ -167,7 +166,7 @@ const lsCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: args.db });
+    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const tags = splitTags(args.tag);
@@ -214,7 +213,7 @@ const getCommand = defineCommand({
     },
     db: {
       type: 'string',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     version: {
       type: 'string',
@@ -222,7 +221,8 @@ const getCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: args.db });
+    const dbPath = resolveDb(args.db);
+    const storage = await SqliteStorage.open({ path: dbPath });
     try {
       const core = new Core(storage);
       const versionNum = args.version ? parseInt(args.version, 10) : undefined;
@@ -231,7 +231,7 @@ const getCommand = defineCommand({
         ...(versionNum !== undefined ? { version: versionNum } : {})
       });
       if (!asset) {
-        process.stderr.write(`ledric: no asset ${args.id} in ${args.db}\n`);
+        process.stderr.write(`ledric: no asset ${args.id} in ${dbPath}\n`);
         process.exit(1);
       }
       process.stdout.write(
@@ -277,7 +277,7 @@ const bytesCommand = defineCommand({
     },
     db: {
       type: 'string',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     version: {
       type: 'string'
@@ -289,7 +289,7 @@ const bytesCommand = defineCommand({
   },
   async run({ args }) {
     const storage = await SqliteStorage.open({
-      path: args.db,
+      path: resolveDb(args.db),
       assets: {
         backend: 'local',
         root: args['assets-root'] ?? './ledric-assets'
@@ -334,8 +334,7 @@ const replaceCommand = defineCommand({
     },
     db: {
       type: 'string',
-      description: 'Path to the SQLite database file.',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     'parent-version': {
       type: 'string',
@@ -364,8 +363,9 @@ const replaceCommand = defineCommand({
     const bytes = await fs.readFile(abs);
     const mime = args.mime ?? guessMime(abs);
 
+    const dbPath = resolveDb(args.db);
     const storage = await SqliteStorage.open({
-      path: args.db,
+      path: dbPath,
       assets: assetsConfigFromArgs({
         assetsBackend: args['assets-backend'],
         assetsRoot: args['assets-root']
@@ -383,7 +383,7 @@ const replaceCommand = defineCommand({
       } else {
         const cur = await core.getAsset({ id: args.id });
         if (!cur) {
-          process.stderr.write(`ledric: no asset ${args.id} in ${args.db}\n`);
+          process.stderr.write(`ledric: no asset ${args.id} in ${dbPath}\n`);
           process.exit(1);
         }
         parentVersion = cur.current_version;
@@ -431,7 +431,7 @@ const tagCommand = defineCommand({
   args: {
     id: { type: 'positional', description: 'Asset id (32-char hex).', required: true },
     tags: { type: 'positional', description: '"hero, Featured Event, q4"', required: true },
-    db: { type: 'string', default: './ledric.db' }
+    db: { type: 'string', description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.' }
   },
   async run({ args }) {
     const tags = splitTags(args.tags);
@@ -439,7 +439,7 @@ const tagCommand = defineCommand({
       process.stderr.write('ledric: no tags provided\n');
       process.exit(1);
     }
-    const storage = await SqliteStorage.open({ path: args.db });
+    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const result = await core.addAssetTags(args.id, tags);
@@ -458,7 +458,7 @@ const untagCommand = defineCommand({
   args: {
     id: { type: 'positional', required: true },
     tags: { type: 'positional', required: true },
-    db: { type: 'string', default: './ledric.db' }
+    db: { type: 'string', description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.' }
   },
   async run({ args }) {
     const tags = splitTags(args.tags);
@@ -466,7 +466,7 @@ const untagCommand = defineCommand({
       process.stderr.write('ledric: no tags provided\n');
       process.exit(1);
     }
-    const storage = await SqliteStorage.open({ path: args.db });
+    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const result = await core.removeAssetTags(args.id, tags);
@@ -483,10 +483,10 @@ const tagsCommand = defineCommand({
     description: 'List every tag in the env (across assets and entries) with usage counts.'
   },
   args: {
-    db: { type: 'string', default: './ledric.db' }
+    db: { type: 'string', description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.' }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: args.db });
+    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const result = await core.listTags();

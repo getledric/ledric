@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty';
 import { SqliteStorage, generateApiKey } from '@ledric/storage';
 import type { ApiKeyRole } from '@ledric/storage';
+import { resolveDb } from '../config.js';
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -19,8 +20,7 @@ const listCommand = defineCommand({
   args: {
     db: {
       type: 'string',
-      description: 'Path to the SQLite database file.',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     'include-revoked': {
       type: 'boolean',
@@ -29,7 +29,7 @@ const listCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: args.db });
+    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
     try {
       const rows = await storage.listApiKeys({
         includeRevoked: args['include-revoked']
@@ -78,8 +78,7 @@ const createCommand = defineCommand({
   args: {
     db: {
       type: 'string',
-      description: 'Path to the SQLite database file.',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     role: {
       type: 'string',
@@ -105,7 +104,7 @@ const createCommand = defineCommand({
       process.exit(1);
     }
     const role: ApiKeyRole = args.role;
-    const storage = await SqliteStorage.open({ path: args.db });
+    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
     try {
       const k = generateApiKey(role);
       await storage.createApiKey({
@@ -151,8 +150,7 @@ const revokeCommand = defineCommand({
   args: {
     db: {
       type: 'string',
-      description: 'Path to the SQLite database file.',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     id: {
       type: 'positional',
@@ -162,7 +160,7 @@ const revokeCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: args.db });
+    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
     try {
       // Accept either an id prefix (hex) or a key prefix (lka_/lkr_)
       // so the user can paste straight from any column of `keys list`.

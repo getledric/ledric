@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty';
 import { Core } from '@ledric/core';
 import { SqliteStorage, NotFoundError } from '@ledric/storage';
+import { resolveDb } from '../config.js';
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -19,8 +20,7 @@ export const getCommand = defineCommand({
     },
     db: {
       type: 'string',
-      description: 'Path to the SQLite database file.',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     version: {
       type: 'string',
@@ -50,14 +50,15 @@ export const getCommand = defineCommand({
       process.exit(2);
     }
 
-    const storage = await SqliteStorage.open({ path: args.db });
+    const dbPath = resolveDb(args.db);
+    const storage = await SqliteStorage.open({ path: dbPath });
     try {
       const core = new Core(storage);
       const typeDetail = await storage.getType(type);
       if (!typeDetail) {
         const known = (await storage.listTypes()).map((t) => t.name);
         process.stderr.write(
-          `ledric: no type "${type}" in ${args.db}\n` +
+          `ledric: no type "${type}" in ${dbPath}\n` +
             (known.length > 0
               ? `  known types: ${known.join(', ')}\n`
               : `  this database has no types yet; create one with create_type over MCP.\n`)
@@ -74,7 +75,7 @@ export const getCommand = defineCommand({
       });
 
       if (!entry) {
-        process.stderr.write(`ledric: no entry "${type}/${slug}" in ${args.db}\n`);
+        process.stderr.write(`ledric: no entry "${type}/${slug}" in ${dbPath}\n`);
         process.exit(1);
       }
 

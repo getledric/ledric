@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty';
 import { Core, collectInlineRefs } from '@ledric/core';
 import { SqliteStorage } from '@ledric/storage';
+import { resolveDb } from '../config.js';
 
 interface DanglingRef {
   entry_type: string;
@@ -18,8 +19,7 @@ const checkCommand = defineCommand({
   args: {
     db: {
       type: 'string',
-      description: 'Path to the SQLite database file.',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     type: {
       type: 'string',
@@ -32,7 +32,7 @@ const checkCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: args.db });
+    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const types = args.type

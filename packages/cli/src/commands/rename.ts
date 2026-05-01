@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty';
 import { Core } from '@ledric/core';
 import { SqliteStorage, NotFoundError } from '@ledric/storage';
+import { resolveDb } from '../config.js';
 
 export const renameCommand = defineCommand({
   meta: {
@@ -20,7 +21,7 @@ export const renameCommand = defineCommand({
     },
     db: {
       type: 'string',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     locale: {
       type: 'string',
@@ -33,7 +34,7 @@ export const renameCommand = defineCommand({
       process.stderr.write(`error: ref must be <type>/<slug>, got "${args.ref}"\n`);
       process.exit(2);
     }
-    const storage = await SqliteStorage.open({ path: args.db });
+    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const result = await core.rename({

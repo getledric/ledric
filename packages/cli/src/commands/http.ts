@@ -5,6 +5,7 @@ import type { AssetsConfig } from '@ledric/storage';
 import { runHttp } from '@ledric/http-server';
 import { guiAssetsPath } from '@ledric/gui';
 import { bootstrapApiKeysIfEmpty, printFirstBootKeys } from './auth-bootstrap.js';
+import { loadConfig, resolveDb } from '../config.js';
 
 function assetsConfigFromArgs(args: {
   'assets-backend'?: string;
@@ -24,22 +25,19 @@ export const httpCommand = defineCommand({
   args: {
     db: {
       type: 'string',
-      description: 'Path to the SQLite database file.',
-      default: './ledric.db'
+      description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.'
     },
     port: {
       type: 'string',
-      description: 'Port to listen on.',
-      default: '3000'
+      description: 'Port to listen on. Defaults to ledric.config.json or 3000.'
     },
     host: {
       type: 'string',
-      description: 'Host to bind.',
-      default: '127.0.0.1'
+      description: 'Host to bind. Defaults to ledric.config.json or 127.0.0.1.'
     },
     'assets-backend': {
       type: 'string',
-      description: 'Asset backend: db (default) or local.'
+      description: 'Asset backend: db or local. Defaults to ledric.config.json or db.'
     },
     'assets-root': {
       type: 'string',
@@ -77,12 +75,21 @@ export const httpCommand = defineCommand({
     }
   },
   async run({ args }) {
+    const cfg = loadConfig();
+    const dbPath = resolveDb(args.db);
+    const portStr = args.port ?? (cfg.http?.port !== undefined ? String(cfg.http.port) : '3000');
+    const host = args.host ?? cfg.http?.host ?? '127.0.0.1';
+    const assetsBackend = args['assets-backend'] ?? cfg.assets?.backend;
+    const assetsRoot = args['assets-root'] ?? cfg.assets?.path;
+    const requireReaderKey =
+      args['require-reader-key'] === true || cfg.auth?.requireReaderKey === true;
+
     const assetsConfig = assetsConfigFromArgs({
-      'assets-backend': args['assets-backend'],
-      'assets-root': args['assets-root']
+      'assets-backend': assetsBackend,
+      'assets-root': assetsRoot
     });
     const storage = await SqliteStorage.open({
-      path: args.db,
+      path: dbPath,
       ...(assetsConfig !== undefined ? { assets: assetsConfig } : {})
     });
 
@@ -119,18 +126,18 @@ export const httpCommand = defineCommand({
         : undefined;
 
     const { url, close } = await runHttp(core, {
-      port: parseInt(args.port, 10),
-      host: args.host,
+      port: parseInt(portStr, 10),
+      host,
       ...(guiOpts !== undefined ? { gui: guiOpts } : {}),
       auth: {
         storage,
-        requireReaderKey: args['require-reader-key'] === true,
+        requireReaderKey,
         ...(envAdminKey !== undefined ? { envAdminKey } : {}),
         ...(envReaderKey !== undefined ? { envReaderKey } : {})
       }
     });
 
-    process.stderr.write(`ledric: opened ${args.db}; HTTP server listening at ${url}\n`);
+    process.stderr.write(`ledric: opened ${dbPath}; HTTP server listening at ${url}\n`);
     if (guiOpts !== undefined) {
       process.stderr.write(`       admin GUI at ${url}${guiOpts.mountPath}\n`);
     }

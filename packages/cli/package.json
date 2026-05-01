@@ -30,6 +30,7 @@
     "prepack": "tsup"
   },
   "dependencies": {
+    "@clack/prompts": "^1.3.0",
     "@ledric/core": "workspace:*",
     "@ledric/gui": "workspace:*",
     "@ledric/http-server": "workspace:*",
