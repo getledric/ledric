@@ -1,6 +1,6 @@
 {
   "name": "@ledric/gui",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "ledric admin GUI — React via CDN, served by @ledric/http-server.",
   "license": "Apache-2.0",
   "repository": {
@@ -27,6 +27,10 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepack": "tsup"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

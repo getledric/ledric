@@ -1,6 +1,6 @@
 {
   "name": "@ledric/storage",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "ledric storage: Drizzle-based adapter(s). SQLite (better-sqlite3) default, Postgres as second target.",
   "license": "Apache-2.0",
   "repository": {
@@ -25,7 +25,11 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepack": "tsup"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@ledric/schema": "workspace:*",
