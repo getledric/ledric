@@ -30,7 +30,7 @@ ledric sits in the middle and gets out of the way.
 
 **Imgix-compatible image transforms, no SaaS bill.** Asset URLs accept the usual `w`, `h`, `fit`, `q`, `fm`, `auto=format`, `dpr` — libvips does the work, transformed bytes are cached on disk. URLs are version-pinned, so browser and CDN caches stay correct even when you replace the source image in place.
 
-**Auth without ceremony.** On first HTTP boot ledric mints one admin key and one reader key, prints them once, and the auth gate turns on. By default writes need the admin key; reads stay open. Flip `--require-reader-key` for closed-reads mode. Want to rotate? `ledric keys create --role admin --raw | pbcopy` and revoke the old one.
+**Auth without ceremony.** `ledric init` mints an admin key and a reader key on the way through; if you skip init, the first HTTP boot does it instead. Either way they're printed once and the auth gate turns on. By default writes need the admin key; reads stay open. Flip `--require-reader-key` for closed-reads mode. Rotate with `ledric keys create --role admin --raw | pbcopy` and revoke the old one.
 
 **Agents are properly invited.** Connect Claude Desktop, Cursor, or anything else that speaks MCP. Your AI gets the same surface you do — with validation, with version history, with structured errors — so it can draft posts, publish them, and evolve the content model without you holding its hand.
 
@@ -41,14 +41,31 @@ ledric sits in the middle and gets out of the way.
 Needs Node 22+. That's it.
 
 ```bash
-# Pick your shape:
-npx -y ledric serve                # MCP stdio only — perfect for Claude Desktop
-npx -y ledric serve --gui          # also: HTTP API + admin GUI at http://127.0.0.1:3000/admin
+# Interactive: walks you through DB path, port, MCP client wiring, key minting.
+npx -y ledric init
+
+# Or skip the prompts — same flow, all defaults:
+npx -y ledric init --yes
 ```
 
-A `./ledric.db` file just appeared next to you. With `--gui`, ledric also generates an admin key and a reader key on first boot and prints them once to stderr — copy them somewhere safe.
+`init` writes a `ledric.config.json`, patches your project's `.mcp.json` so Claude Code picks up the server automatically, mints admin + reader API keys, drops them into `.env.local`, and adds the usual entries to `.gitignore`. After that:
 
-Point Claude Desktop at the stdio MCP:
+```bash
+npx ledric serve                # MCP stdio only — perfect for Claude Desktop
+npx ledric serve --gui          # also: HTTP API + admin GUI at http://127.0.0.1:3000/admin
+```
+
+A `./ledric.db` file just appeared next to you. The admin GUI is at `http://127.0.0.1:3000/admin` — paste the admin key from `.env.local` to get in. Same key works for the inline editor on any consumer site that loads `/admin/inline.js`.
+
+### Wire it into your MCP client
+
+| Client | How |
+|---|---|
+| **Claude Code** | `init` already patched `.mcp.json` for you, or do it yourself: `claude mcp add ledric -- npx -y ledric serve` |
+| **Claude Desktop** | Run `init` and answer "yes" to the global prompt — it patches `~/Library/Application Support/Claude/claude_desktop_config.json`. Or paste the JSON below into that file by hand. |
+| **Cursor** | Cursor reads the same `.mcp.json` Claude Code does — `init` already wired it. |
+
+Manual Claude Desktop config:
 
 ```json
 {
@@ -64,15 +81,7 @@ Point Claude Desktop at the stdio MCP:
 
 `cwd` matters — `ledric.db` lives in the working directory.
 
-Or one-liner for Claude Code:
-
-```bash
-claude mcp add ledric -- npx -y ledric serve
-```
-
-Ask Claude to call `describe_model`. Watch it read your (empty) content model. Ask it to `create_type` for a blog post. Draft a post. Publish it. You're shipping.
-
-If you want the admin UI in your browser, paste the printed admin key into the prompt at `http://127.0.0.1:3000/admin`. Same key works for the inline editor on any consumer site that loads `/admin/inline.js`.
+Restart the client. Ask Claude to call `describe_model`. Watch it read your (empty) content model. Ask it to set up a blog. Draft a post. Publish it. You're shipping.
 
 ## See your content from the outside
 
@@ -83,21 +92,22 @@ npx ledric get blog_post/hello-world       # one post, in the shape a website wo
 npx ledric asset upload hero.jpg           # store an image
 ```
 
-## Inside the box
+## Docs
 
-- A full content model: types, fields, references, assets, examples
-- An MCP surface that covers the whole lifecycle — introspect, draft, publish, evolve the schema, backfill existing content, manage assets, soft-delete with cascade
-- An HTTP API with the same shape, so websites and SDKs don't need MCP
-- Versioning on both entries *and* schemas — evolve a type and old content still reads correctly; time-travel to any version with one call
-- An admin GUI plus a drop-in inline editor (browse and edit through `/admin`, or sprinkle `data-ledric-ref` on your rendered site for click-to-edit)
-- Imgix-compatible image transforms with on-disk cache — resize, format, quality, auto-pick-from-Accept, all driven by URL params
-- Asset storage + serving, with SQLite-blob and local-filesystem backends built in and an adapter slot for S3 / R2 / whatever; in-place bytes replacement (`update_asset`) bumps the version without breaking entry references
-- Markdown-first rich text with per-field HTML policies (allow / sanitize / forbid), and JSS / CSS field types when you want to attach styling to a block
-- Full localization — per-field or per-entry, with fallback rules
-- Slug renames with permanent redirects, so links never rot
-- API key auth (admin / reader roles, first-boot auto-generated) — turn on by minting a key, off by not minting one
-- A CLI for everything you'd want to do from a terminal
-- One SQLite file you can back up with `cp`
+Pages are short, scoped, and self-contained — pick the one that
+matches what you're trying to do.
+
+| | |
+|---|---|
+| **[Schema](./docs/schema.md)** | Field types catalogue, `defineType()` examples, common + type-level options, validation, schema evolution. |
+| **[Agent recipes](./docs/agent-recipes.md)** | Example prompts you can paste into Claude: project setup, drafting, schema evolution, bulk ops, refactoring, localization. |
+| _coming_ | MCP tools reference (the full 20-tool surface) |
+| _coming_ | HTTP API reference + curl examples |
+| _coming_ | Inline editor — `<script>` install, `data-ledric-ref` walkthrough |
+| _coming_ | Assets, transforms, ref-key model |
+| _coming_ | API keys + auth |
+| _coming_ | TypeScript and PHP SDK usage |
+| _coming_ | Localization |
 
 ## The design philosophy
 
@@ -120,7 +130,7 @@ pnpm build
 pnpm cli serve --gui             # same as `npx ledric serve --gui`, but against your dev tree
 ```
 
-`pnpm dev` watches and rebuilds. `pnpm test` runs the suite (vitest, ~290 tests).
+`pnpm dev` watches and rebuilds. `pnpm test` runs the suite (vitest, ~310 tests).
 
 ## Status
 
