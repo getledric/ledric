@@ -3,6 +3,11 @@
     "description": "PHP read client for ledric — the MCP/LLM-native CMS.",
     "type": "library",
     "license": "Apache-2.0",
+    "homepage": "https://github.com/getledric/ledric",
+    "support": {
+        "issues": "https://github.com/getledric/ledric/issues",
+        "source": "https://github.com/getledric/ledric"
+    },
     "keywords": ["cms", "ledric", "headless", "api"],
     "autoload": {
         "psr-4": {

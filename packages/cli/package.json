@@ -3,6 +3,13 @@
   "version": "0.0.0",
   "description": "ledric CLI — single-binary entry point.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getledric/ledric.git",
+    "directory": "packages/cli"
+  },
+  "bugs": "https://github.com/getledric/ledric/issues",
+  "homepage": "https://github.com/getledric/ledric#readme",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

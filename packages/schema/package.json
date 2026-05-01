@@ -3,6 +3,13 @@
   "version": "0.0.0",
   "description": "ledric schema definition helpers: defineType, field.*, JSON emit, Zod codegen.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getledric/ledric.git",
+    "directory": "packages/schema"
+  },
+  "bugs": "https://github.com/getledric/ledric/issues",
+  "homepage": "https://github.com/getledric/ledric#readme",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

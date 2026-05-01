@@ -3,6 +3,13 @@
   "version": "0.0.0",
   "description": "ledric admin GUI — React via CDN, served by @ledric/http-server.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getledric/ledric.git",
+    "directory": "packages/gui"
+  },
+  "bugs": "https://github.com/getledric/ledric/issues",
+  "homepage": "https://github.com/getledric/ledric#readme",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
