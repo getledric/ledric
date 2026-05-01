@@ -103,7 +103,7 @@ matches what you're trying to do.
 | **[Agent recipes](./docs/agent-recipes.md)** | Example prompts you can paste into Claude: project setup, drafting, schema evolution, bulk ops, refactoring, localization. |
 | **[MCP tools](./docs/mcp-tools.md)** | The full 20-tool surface — args, returns, examples. Same surface as `POST /rpc` over HTTP. |
 | **[HTTP API](./docs/http-api.md)** | REST routes for reads, multipart upload, generic `POST /rpc`, image transforms, slug redirects, error codes. |
-| _coming_ | Inline editor — `<script>` install, `data-ledric-ref` walkthrough |
+| **[Inline editor](./docs/inline-editor.md)** | `<script>` install, `data-ledric-ref` / `data-ledric-field` attributes, `refAttrs()` helpers in both SDKs, auth, behaviour. |
 | _coming_ | Assets, transforms, ref-key model |
 | _coming_ | API keys + auth |
 | _coming_ | TypeScript and PHP SDK usage |
