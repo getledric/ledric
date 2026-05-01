@@ -4,16 +4,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { field } from '@ledric/schema';
-import { SqliteStorage } from '@ledric/storage';
+import { openSqlite, type LedricStorage } from '@ledric/storage';
 import { Core } from './core.js';
 import { FsTransformCache } from './transforms.js';
 
 describe('Core', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let core: Core;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     core = new Core(storage);
   });
 
@@ -91,7 +91,7 @@ describe('Core', () => {
 });
 
 describe('Core.getTransformedAsset', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let cacheDir: string;
   let core: Core;
 
@@ -104,7 +104,7 @@ describe('Core.getTransformedAsset', () => {
   }
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     cacheDir = mkdtempSync(join(tmpdir(), 'ledric-tx-core-'));
     core = new Core(storage, { transformCache: new FsTransformCache(cacheDir) });
   });

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Core } from './core.js';
-import { SqliteStorage } from '@ledric/storage';
+import { openSqlite, type LedricStorage } from '@ledric/storage';
 import {
   extractInlineRefs,
   collectInlineRefs,
@@ -55,11 +55,11 @@ describe('collectInlineRefs', () => {
 });
 
 describe('resolveInlineRefs (round trip)', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let core: Core;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     core = new Core(storage);
     await core.createType({
       name: 'post',

@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { homedir, platform } from 'node:os';
-import { SqliteStorage } from '@ledric/storage';
+import { openSqlite } from '@ledric/storage';
 import { bootstrapApiKeysIfEmpty } from './auth-bootstrap.js';
 import { configPath, type LedricConfig } from '../config.js';
 
@@ -317,7 +317,7 @@ export const initCommand = defineCommand({
 
     // 4. Mint API keys (and write .env.local)
     if (answers.mintKeys) {
-      const storage = await SqliteStorage.open({ path: answers.db });
+      const storage = await openSqlite({ path: answers.db });
       try {
         const keys = await bootstrapApiKeysIfEmpty(storage, undefined, undefined);
         if (keys === null) {

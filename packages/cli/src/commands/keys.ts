@@ -1,5 +1,5 @@
 import { defineCommand } from 'citty';
-import { SqliteStorage, generateApiKey } from '@ledric/storage';
+import { openSqlite, generateApiKey } from '@ledric/storage';
 import type { ApiKeyRole } from '@ledric/storage';
 import { resolveDb } from '../config.js';
 
@@ -29,7 +29,7 @@ const listCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
+    const storage = await openSqlite({ path: resolveDb(args.db) });
     try {
       const rows = await storage.listApiKeys({
         includeRevoked: args['include-revoked']
@@ -104,7 +104,7 @@ const createCommand = defineCommand({
       process.exit(1);
     }
     const role: ApiKeyRole = args.role;
-    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
+    const storage = await openSqlite({ path: resolveDb(args.db) });
     try {
       const k = generateApiKey(role);
       await storage.createApiKey({
@@ -160,7 +160,7 @@ const revokeCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
+    const storage = await openSqlite({ path: resolveDb(args.db) });
     try {
       // Accept either an id prefix (hex) or a key prefix (lka_/lkr_)
       // so the user can paste straight from any column of `keys list`.

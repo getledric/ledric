@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Core } from '@ledric/core';
-import { SqliteStorage } from '@ledric/storage';
+import { openSqlite, type LedricStorage } from '@ledric/storage';
 import { createMcpServer } from './server.js';
 
 interface TextBlock {
@@ -22,11 +22,11 @@ function firstText(content: unknown): string {
 }
 
 describe('MCP server (in-memory round trip)', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let client: Client;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     const core = new Core(storage);
     const server = createMcpServer(core);
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

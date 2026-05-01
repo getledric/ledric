@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 import { Core } from '@ledric/core';
-import { SqliteStorage, NotFoundError } from '@ledric/storage';
+import { openSqlite, NotFoundError } from '@ledric/storage';
 import { resolveDb } from '../config.js';
 
 function toHex(bytes: Uint8Array): string {
@@ -48,7 +48,7 @@ export const lsCommand = defineCommand({
   },
   async run({ args }) {
     const dbPath = resolveDb(args.db);
-    const storage = await SqliteStorage.open({ path: dbPath });
+    const storage = await openSqlite({ path: dbPath });
     try {
       const core = new Core(storage);
 

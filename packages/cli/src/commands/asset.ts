@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { defineCommand } from 'citty';
 import { Core } from '@ledric/core';
-import { SqliteStorage, NotFoundError } from '@ledric/storage';
+import { openSqlite, NotFoundError } from '@ledric/storage';
 import type { AssetsConfig } from '@ledric/storage';
 import { resolveDb } from '../config.js';
 
@@ -100,7 +100,7 @@ const uploadCommand = defineCommand({
     const kind = args.kind ?? guessKind(mime);
     const tags = splitTags(args.tag);
 
-    const storage = await SqliteStorage.open({
+    const storage = await openSqlite({
       path: resolveDb(args.db),
       assets: assetsConfigFromArgs({
         assetsBackend: args['assets-backend'],
@@ -166,7 +166,7 @@ const lsCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
+    const storage = await openSqlite({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const tags = splitTags(args.tag);
@@ -222,7 +222,7 @@ const getCommand = defineCommand({
   },
   async run({ args }) {
     const dbPath = resolveDb(args.db);
-    const storage = await SqliteStorage.open({ path: dbPath });
+    const storage = await openSqlite({ path: dbPath });
     try {
       const core = new Core(storage);
       const versionNum = args.version ? parseInt(args.version, 10) : undefined;
@@ -288,7 +288,7 @@ const bytesCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({
+    const storage = await openSqlite({
       path: resolveDb(args.db),
       assets: {
         backend: 'local',
@@ -364,7 +364,7 @@ const replaceCommand = defineCommand({
     const mime = args.mime ?? guessMime(abs);
 
     const dbPath = resolveDb(args.db);
-    const storage = await SqliteStorage.open({
+    const storage = await openSqlite({
       path: dbPath,
       assets: assetsConfigFromArgs({
         assetsBackend: args['assets-backend'],
@@ -439,7 +439,7 @@ const tagCommand = defineCommand({
       process.stderr.write('ledric: no tags provided\n');
       process.exit(1);
     }
-    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
+    const storage = await openSqlite({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const result = await core.addAssetTags(args.id, tags);
@@ -466,7 +466,7 @@ const untagCommand = defineCommand({
       process.stderr.write('ledric: no tags provided\n');
       process.exit(1);
     }
-    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
+    const storage = await openSqlite({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const result = await core.removeAssetTags(args.id, tags);
@@ -486,7 +486,7 @@ const tagsCommand = defineCommand({
     db: { type: 'string', description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.' }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
+    const storage = await openSqlite({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const result = await core.listTags();

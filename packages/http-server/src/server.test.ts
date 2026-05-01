@@ -4,16 +4,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { Core, FsTransformCache } from '@ledric/core';
-import { SqliteStorage } from '@ledric/storage';
+import { openSqlite, type LedricStorage } from '@ledric/storage';
 import { createHttpServer } from './server.js';
 import type { FastifyInstance } from 'fastify';
 
 describe('HTTP server', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let app: FastifyInstance;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     const core = new Core(storage);
     app = createHttpServer(core);
     await app.ready();
@@ -365,12 +365,12 @@ describe('HTTP server', () => {
 });
 
 describe('HTTP server with GUI mount', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let app: FastifyInstance;
   let guiDir: string;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     guiDir = mkdtempSync(join(tmpdir(), 'ledric-gui-test-'));
     writeFileSync(
       join(guiDir, 'index.html'),
@@ -451,13 +451,13 @@ describe('HTTP server with GUI mount', () => {
 });
 
 describe('HTTP server with auth (admin-protects-writes default)', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let app: FastifyInstance;
   let adminSecret: string;
   let readerSecret: string;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     const core = new Core(storage);
 
     // Seed one type so reads have something to find later.
@@ -573,12 +573,12 @@ describe('HTTP server with auth (admin-protects-writes default)', () => {
 });
 
 describe('HTTP server with auth (--require-reader-key mode)', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let app: FastifyInstance;
   let readerSecret: string;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     const core = new Core(storage);
 
     const { generateApiKey } = await import('@ledric/storage');
@@ -614,11 +614,11 @@ describe('HTTP server with auth (--require-reader-key mode)', () => {
 });
 
 describe('HTTP server with auth + env-var keys', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let app: FastifyInstance;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     const core = new Core(storage);
 
     // Pretend an operator set LEDRIC_ADMIN_KEY in the environment. The
@@ -649,11 +649,11 @@ describe('HTTP server with auth + env-var keys', () => {
 });
 
 describe('HTTP server with auth-off (no keys exist)', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let app: FastifyInstance;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     const core = new Core(storage);
     // Auth wired but DB has zero active keys — should pass through.
     app = createHttpServer(core, { auth: { storage } });
@@ -682,11 +682,11 @@ describe('HTTP server with auth-off (no keys exist)', () => {
 });
 
 describe('HTTP server with no auth configured at all', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let app: FastifyInstance;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     const core = new Core(storage);
     app = createHttpServer(core); // no auth opts
     await app.ready();

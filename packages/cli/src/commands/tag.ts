@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 import { Core } from '@ledric/core';
-import { SqliteStorage } from '@ledric/storage';
+import { openSqlite } from '@ledric/storage';
 import { resolveDb } from '../config.js';
 
 function splitTags(raw: string | undefined): string[] {
@@ -34,7 +34,7 @@ export const tagCommand = defineCommand({
       process.exit(1);
     }
     const ref = parseEntryRef(args.ref);
-    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
+    const storage = await openSqlite({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const result = await core.addEntryTags(ref, tags);
@@ -62,7 +62,7 @@ export const untagCommand = defineCommand({
       process.exit(1);
     }
     const ref = parseEntryRef(args.ref);
-    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
+    const storage = await openSqlite({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const result = await core.removeEntryTags(ref, tags);
@@ -82,7 +82,7 @@ export const tagsCommand = defineCommand({
     db: { type: 'string', description: 'Path to the SQLite database file. Defaults to ledric.config.json or ./ledric.db.' }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: resolveDb(args.db) });
+    const storage = await openSqlite({ path: resolveDb(args.db) });
     try {
       const core = new Core(storage);
       const result = await core.listTags();

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { defineType, field } from '@ledric/schema';
-import { SqliteStorage } from '@ledric/storage';
+import { openSqlite, type LedricStorage } from '@ledric/storage';
 import { Core, ValidationFailedError } from './core.js';
 import { parseRef } from './parse-ref.js';
 import { checkStructuralRefs } from './check-refs.js';
@@ -31,11 +31,11 @@ describe('parseRef', () => {
 });
 
 describe('checkStructuralRefs', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let core: Core;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     core = new Core(storage);
 
     await core.createType({
@@ -137,11 +137,11 @@ describe('checkStructuralRefs', () => {
 });
 
 describe('Core.draft / Core.publish — warn on draft, error on publish', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let core: Core;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     core = new Core(storage);
     await core.createType({
       name: 'block',
