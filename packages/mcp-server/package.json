@@ -2,6 +2,7 @@
   "name": "@ledric/mcp-server",
   "version": "0.0.0",
   "description": "ledric MCP server: MCP tool surface bound to @ledric/core (stdio + HTTP+SSE).",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

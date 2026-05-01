@@ -2,7 +2,7 @@
     "name": "ledric/sdk",
     "description": "PHP read client for ledric — the MCP/LLM-native CMS.",
     "type": "library",
-    "license": "MIT",
+    "license": "Apache-2.0",
     "keywords": ["cms", "ledric", "headless", "api"],
     "autoload": {
         "psr-4": {

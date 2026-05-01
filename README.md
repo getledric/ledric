@@ -109,4 +109,6 @@ Alpha. The core works end-to-end. Shapes will shift before v1. If you try it and
 
 ## License
 
-TBD.
+Apache License 2.0 — see [LICENSE](./LICENSE).
+
+"ledric" is a trademark of James Turle; the Apache License grants you the code, not the name. See [NOTICE](./NOTICE) for details.

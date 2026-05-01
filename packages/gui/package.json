@@ -2,6 +2,7 @@
   "name": "@ledric/gui",
   "version": "0.0.0",
   "description": "ledric admin GUI — React via CDN, served by @ledric/http-server.",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

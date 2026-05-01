@@ -2,6 +2,7 @@
   "name": "@ledric/core",
   "version": "0.0.0",
   "description": "ledric core: schema engine, versioning, refs, validation, ACL. DB-agnostic.",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
