@@ -17,7 +17,7 @@ From the repo root, in two terminals:
 
 ```bash
 # 1. ledric API
-pnpm cli http
+npx ledric http
 
 # 2. astro dev server
 pnpm --filter @ledric/example-astro-blog dev

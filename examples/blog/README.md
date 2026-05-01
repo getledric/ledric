@@ -11,7 +11,7 @@ from ledric?"
 From the repo root, in one terminal:
 
 ```bash
-pnpm cli http
+npx ledric http
 ```
 
 That starts the HTTP server on `http://localhost:3000` against

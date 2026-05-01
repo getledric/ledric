@@ -38,18 +38,15 @@ ledric sits in the middle and gets out of the way.
 
 ## Two minutes to running
 
-```bash
-# Node 22+ and pnpm (via corepack)
-corepack enable
-pnpm install
-pnpm build
+Needs Node 22+. That's it.
 
+```bash
 # Pick your shape:
-pnpm cli serve                # MCP stdio only — perfect for Claude Desktop
-pnpm cli serve --gui          # also: HTTP API + admin GUI at http://127.0.0.1:3000/admin
+npx -y ledric serve                # MCP stdio only — perfect for Claude Desktop
+npx -y ledric serve --gui          # also: HTTP API + admin GUI at http://127.0.0.1:3000/admin
 ```
 
-That's it. A `./ledric.db` file just appeared next to you. With `--gui`, ledric also generates an admin key and a reader key on first boot and prints them once to stderr — copy them somewhere safe.
+A `./ledric.db` file just appeared next to you. With `--gui`, ledric also generates an admin key and a reader key on first boot and prints them once to stderr — copy them somewhere safe.
 
 Point Claude Desktop at the stdio MCP:
 
@@ -57,11 +54,20 @@ Point Claude Desktop at the stdio MCP:
 {
   "mcpServers": {
     "ledric": {
-      "command": "node",
-      "args": ["/absolute/path/to/ledric/packages/cli/dist/cli.js", "serve"]
+      "command": "npx",
+      "args": ["-y", "ledric", "serve"],
+      "cwd": "/absolute/path/to/your/content/dir"
     }
   }
 }
+```
+
+`cwd` matters — `ledric.db` lives in the working directory.
+
+Or one-liner for Claude Code:
+
+```bash
+claude mcp add ledric -- npx -y ledric serve
 ```
 
 Ask Claude to call `describe_model`. Watch it read your (empty) content model. Ask it to `create_type` for a blog post. Draft a post. Publish it. You're shipping.
@@ -71,10 +77,10 @@ If you want the admin UI in your browser, paste the printed admin key into the p
 ## See your content from the outside
 
 ```bash
-pnpm cli ls                              # what types do I have?
-pnpm cli ls blog_post                    # what posts?
-pnpm cli get blog_post/hello-world       # one post, in the shape a website would render
-pnpm cli asset upload hero.jpg           # store an image
+npx ledric ls                              # what types do I have?
+npx ledric ls blog_post                    # what posts?
+npx ledric get blog_post/hello-world       # one post, in the shape a website would render
+npx ledric asset upload hero.jpg           # store an image
 ```
 
 ## Inside the box
@@ -102,6 +108,19 @@ Three constraints we don't break:
 3. **The schema is the API.** `describe_model` tells an LLM everything it needs in one call. No separate docs to keep in sync.
 
 Everything else in this project is a consequence of those three.
+
+## From source
+
+```bash
+git clone https://github.com/getledric/ledric
+cd ledric
+corepack enable                  # one time, ever — wires up pnpm
+pnpm install
+pnpm build
+pnpm cli serve --gui             # same as `npx ledric serve --gui`, but against your dev tree
+```
+
+`pnpm dev` watches and rebuilds. `pnpm test` runs the suite (vitest, ~290 tests).
 
 ## Status
 
