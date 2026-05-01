@@ -101,7 +101,7 @@ matches what you're trying to do.
 |---|---|
 | **[Schema](./docs/schema.md)** | Field types catalogue, `defineType()` examples, common + type-level options, validation, schema evolution. |
 | **[Agent recipes](./docs/agent-recipes.md)** | Example prompts you can paste into Claude: project setup, drafting, schema evolution, bulk ops, refactoring, localization. |
-| _coming_ | MCP tools reference (the full 20-tool surface) |
+| **[MCP tools](./docs/mcp-tools.md)** | The full 20-tool surface — args, returns, examples. Same surface as `POST /rpc` over HTTP. |
 | _coming_ | HTTP API reference + curl examples |
 | _coming_ | Inline editor — `<script>` install, `data-ledric-ref` walkthrough |
 | _coming_ | Assets, transforms, ref-key model |
