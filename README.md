@@ -99,6 +99,7 @@ matches what you're trying to do.
 
 | | |
 |---|---|
+| **[Build with an agent](./docs/build-with-an-agent.md)** | End-to-end walkthrough: ask Claude to set up the schema, seed content, build an Astro site that renders it, wire up inline editing. Anchored to the committed `examples/astro-blog/` artifact. |
 | **[Schema](./docs/schema.md)** | Field types catalogue, `defineType()` examples, common + type-level options, validation, schema evolution. |
 | **[Agent recipes](./docs/agent-recipes.md)** | Example prompts you can paste into Claude: project setup, drafting, schema evolution, bulk ops, refactoring, localization. |
 | **[MCP tools](./docs/mcp-tools.md)** | The full 20-tool surface — args, returns, examples. Same surface as `POST /rpc` over HTTP. |
