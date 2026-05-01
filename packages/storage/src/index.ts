@@ -52,13 +52,25 @@ export type { GeneratedApiKey } from './keys.js';
 export { normalizeTag, normalizeTags } from './tags.js';
 export type { NormalizedTag } from './tags.js';
 
+// Storage implementation: a dialect-agnostic LedricStorage class plus
+// per-dialect factory functions.
 export {
-  SqliteStorage,
+  LedricStorage,
   VersionConflictError,
   NotFoundError,
   TypeNotEmptyError
-} from './sqlite.js';
-export type { OpenOptions, AssetsConfig } from './sqlite.js';
+} from './storage.js';
+export type { AssetsConfig } from './storage.js';
+
+export { openSqlite, openMysql, openPostgres } from './dialects/index.js';
+export type {
+  OpenSqliteOptions,
+  OpenMysqlOptions,
+  OpenPostgresOptions
+} from './dialects/index.js';
+
+export type { Database as DatabaseSchema } from './schema.js';
+export type { Dialect } from './migrations/run.js';
 
 export type {
   AssetBackend,

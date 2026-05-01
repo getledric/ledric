@@ -1,36 +1,44 @@
-import type { Database as BetterSqliteDatabase } from 'better-sqlite3';
+import type { Kysely } from 'kysely';
+import type { Database } from '../schema.js';
 import type { AssetBackend, AssetGetResult, AssetPutInput } from './backend.js';
 
 export class DbAssetBackend implements AssetBackend {
   readonly scheme = 'db';
 
-  constructor(private readonly db: BetterSqliteDatabase) {}
+  constructor(private readonly db: Kysely<Database>) {}
 
-  put(input: AssetPutInput): Promise<string> {
-    this.db
-      .prepare('INSERT INTO asset_blobs (asset_id, version, bytes) VALUES (?, ?, ?)')
-      .run(input.assetId, input.version, input.bytes);
+  async put(input: AssetPutInput): Promise<string> {
+    await this.db
+      .insertInto('asset_blobs')
+      .values({
+        asset_id: Buffer.from(input.assetId),
+        version: input.version,
+        bytes: Buffer.from(input.bytes)
+      })
+      .execute();
     const hex = Buffer.from(input.assetId).toString('hex');
-    return Promise.resolve(`db:${hex}:${input.version}`);
+    return `db:${hex}:${input.version}`;
   }
 
-  get(storageRef: string): Promise<AssetGetResult> {
+  async get(storageRef: string): Promise<AssetGetResult> {
     const { id, version } = parseDbRef(storageRef);
-    const row = this.db
-      .prepare<[Buffer, number], { bytes: Buffer }>(
-        'SELECT bytes FROM asset_blobs WHERE asset_id = ? AND version = ?'
-      )
-      .get(id, version);
+    const row = await this.db
+      .selectFrom('asset_blobs')
+      .select('bytes')
+      .where('asset_id', '=', id)
+      .where('version', '=', version)
+      .executeTakeFirst();
     if (!row) throw new Error(`No asset_blob for ref ${storageRef}`);
-    return Promise.resolve({ bytes: row.bytes });
+    return { bytes: Buffer.from(row.bytes) };
   }
 
-  delete(storageRef: string): Promise<void> {
+  async delete(storageRef: string): Promise<void> {
     const { id, version } = parseDbRef(storageRef);
-    this.db
-      .prepare('DELETE FROM asset_blobs WHERE asset_id = ? AND version = ?')
-      .run(id, version);
-    return Promise.resolve();
+    await this.db
+      .deleteFrom('asset_blobs')
+      .where('asset_id', '=', id)
+      .where('version', '=', version)
+      .execute();
   }
 }
 

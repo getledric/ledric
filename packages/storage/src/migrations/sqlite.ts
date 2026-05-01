@@ -1,10 +1,11 @@
-export interface Migration {
-  id: number;
-  name: string;
-  sql: string;
-}
+import type { Migration } from './types.js';
 
-export const migrations: Migration[] = [
+// Consolidated initial schema for SQLite. Replaces the previous
+// 7-migration history (the package never shipped to production, so the
+// history was rolled into one). All future migrations append to this
+// list as new entries.
+
+export const sqliteMigrations: Migration[] = [
   {
     id: 1,
     name: '0001_init',
@@ -40,12 +41,7 @@ export const migrations: Migration[] = [
       ) STRICT;
 
       CREATE INDEX idx_type_versions_created ON type_versions (created_at);
-    `
-  },
-  {
-    id: 2,
-    name: '0002_entries',
-    sql: `
+
       CREATE TABLE entries (
         id                BLOB    PRIMARY KEY,
         env_id            BLOB    NOT NULL REFERENCES envs(id),
@@ -83,17 +79,24 @@ export const migrations: Migration[] = [
         type_id    BLOB    NOT NULL REFERENCES types(id),
         entry_id   BLOB    NOT NULL REFERENCES entries(id),
         retired_at INTEGER NOT NULL,
+        locale     TEXT,
         PRIMARY KEY (env_id, slug, retired_at)
       ) STRICT;
 
       CREATE INDEX idx_slug_history_entry ON slug_history (entry_id);
       CREATE INDEX idx_slug_history_type  ON slug_history (env_id, type_id);
-    `
-  },
-  {
-    id: 3,
-    name: '0003_assets',
-    sql: `
+
+      CREATE TABLE entries_slugs (
+        env_id   BLOB    NOT NULL REFERENCES envs(id),
+        type_id  BLOB    NOT NULL REFERENCES types(id),
+        locale   TEXT    NOT NULL,
+        slug     TEXT    NOT NULL,
+        entry_id BLOB    NOT NULL REFERENCES entries(id),
+        PRIMARY KEY (env_id, type_id, locale, slug)
+      ) STRICT;
+
+      CREATE INDEX idx_entries_slugs_entry ON entries_slugs (entry_id);
+
       CREATE TABLE assets (
         id                BLOB    PRIMARY KEY,
         env_id            BLOB    NOT NULL REFERENCES envs(id),
@@ -113,10 +116,12 @@ export const migrations: Migration[] = [
         parent_version INTEGER,
         author         TEXT,
         created_at     INTEGER NOT NULL,
+        ref_key        BLOB    NOT NULL,
         PRIMARY KEY (asset_id, version)
       ) STRICT;
 
       CREATE INDEX idx_asset_versions_created ON asset_versions (created_at);
+      CREATE UNIQUE INDEX idx_asset_versions_ref_key ON asset_versions (ref_key);
 
       CREATE TABLE asset_blobs (
         asset_id BLOB    NOT NULL,
@@ -124,30 +129,7 @@ export const migrations: Migration[] = [
         bytes    BLOB    NOT NULL,
         PRIMARY KEY (asset_id, version)
       ) STRICT;
-    `
-  },
-  {
-    id: 4,
-    name: '0004_locales',
-    sql: `
-      ALTER TABLE slug_history ADD COLUMN locale TEXT;
 
-      CREATE TABLE entries_slugs (
-        env_id   BLOB    NOT NULL REFERENCES envs(id),
-        type_id  BLOB    NOT NULL REFERENCES types(id),
-        locale   TEXT    NOT NULL,
-        slug     TEXT    NOT NULL,
-        entry_id BLOB    NOT NULL REFERENCES entries(id),
-        PRIMARY KEY (env_id, type_id, locale, slug)
-      ) STRICT;
-
-      CREATE INDEX idx_entries_slugs_entry ON entries_slugs (entry_id);
-    `
-  },
-  {
-    id: 5,
-    name: '0005_api_keys',
-    sql: `
       CREATE TABLE api_keys (
         id           BLOB    PRIMARY KEY,
         env_id       BLOB    NOT NULL REFERENCES envs(id),
@@ -162,33 +144,7 @@ export const migrations: Migration[] = [
 
       CREATE INDEX idx_api_keys_env_role ON api_keys (env_id, role);
       CREATE INDEX idx_api_keys_hash ON api_keys (key_hash);
-    `
-  },
-  {
-    id: 6,
-    name: '0006_asset_ref_keys',
-    sql: `
-      -- Per-version opaque key used in asset retrieval URLs. Decoupled
-      -- from the asset id so URLs change when bytes change (cache-stable
-      -- forever) without breaking entry-content references that point
-      -- at the stable asset id.
-      ALTER TABLE asset_versions ADD COLUMN ref_key BLOB;
 
-      -- Backfill any existing rows with a fresh 16-byte random key.
-      -- New rows are populated with uuidv7Bytes() from JS at write time.
-      UPDATE asset_versions SET ref_key = randomblob(16) WHERE ref_key IS NULL;
-
-      CREATE UNIQUE INDEX idx_asset_versions_ref_key ON asset_versions (ref_key);
-    `
-  },
-  {
-    id: 7,
-    name: '0007_tags',
-    sql: `
-      -- Shared tag table. Slug is the canonical, lowercased, URL-safe
-      -- form used for matching and filtering. Label preserves whatever
-      -- case the first author wrote ("Featured Event"). update_tag
-      -- relabels in place; the slug is the stable identity.
       CREATE TABLE tags (
         id          BLOB    PRIMARY KEY,
         env_id      BLOB    NOT NULL REFERENCES envs(id),

@@ -1,16 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Core } from '@ledric/core';
-import { SqliteStorage } from '@ledric/storage';
+import { openSqlite, type LedricStorage } from '@ledric/storage';
 import { runHttp } from '@ledric/http-server';
 import { createLedricClient, LedricError } from './client.js';
 
 describe('LedricClient', () => {
-  let storage: SqliteStorage;
+  let storage: LedricStorage;
   let server: { url: string; close: () => Promise<void> };
   let client: ReturnType<typeof createLedricClient>;
 
   beforeAll(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
     const core = new Core(storage);
 
     await core.createType({

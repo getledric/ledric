@@ -1,22 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { defineType, field } from '@ledric/schema';
-import { SqliteStorage } from './sqlite.js';
+import { openSqlite } from './dialects/sqlite.js';
+import type { LedricStorage } from './storage.js';
 
-describe('SqliteStorage', () => {
-  let storage: SqliteStorage;
+describe('LedricStorage (sqlite)', () => {
+  let storage: LedricStorage;
 
   beforeEach(async () => {
-    storage = await SqliteStorage.open({ path: ':memory:' });
+    storage = await openSqlite({ path: ':memory:' });
   });
 
   afterEach(async () => {
     await storage.close();
   });
 
-  it('seeds the main env on open', () => {
-    const envs = storage.db
-      .prepare('SELECT name FROM envs')
-      .all() as Array<{ name: string }>;
+  it('seeds the main env on open', async () => {
+    const envs = await storage.db.selectFrom('envs').select('name').execute();
     expect(envs.map((e) => e.name)).toEqual(['main']);
   });
 
@@ -101,7 +100,7 @@ describe('SqliteStorage', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ledric-assets-'));
     try {
       await storage.close();
-      storage = await SqliteStorage.open({
+      storage = await openSqlite({
         path: ':memory:',
         assets: { backend: 'local', root: dir }
       });
@@ -504,11 +503,11 @@ describe('SqliteStorage', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ledric-'));
     const dbPath = join(dir, 'test.db');
     try {
-      const s1 = await SqliteStorage.open({ path: dbPath });
+      const s1 = await openSqlite({ path: dbPath });
       await s1.createType({ definition: defineType('t', { a: field.string() }) });
       await s1.close();
 
-      const s2 = await SqliteStorage.open({ path: dbPath });
+      const s2 = await openSqlite({ path: dbPath });
       const types = await s2.listTypes();
       expect(types.map((t) => t.name)).toEqual(['t']);
       await s2.close();

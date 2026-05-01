@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 import { Core, FsTransformCache } from '@ledric/core';
-import { SqliteStorage } from '@ledric/storage';
+import { openSqlite } from '@ledric/storage';
 import type { AssetsConfig } from '@ledric/storage';
 import { runHttp } from '@ledric/http-server';
 import { guiAssetsPath } from '@ledric/gui';
@@ -81,7 +81,7 @@ export const httpCommand = defineCommand({
       'assets-backend': args['assets-backend'],
       'assets-root': args['assets-root']
     });
-    const storage = await SqliteStorage.open({
+    const storage = await openSqlite({
       path: args.db,
       ...(assetsConfig !== undefined ? { assets: assetsConfig } : {})
     });

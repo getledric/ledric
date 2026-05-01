@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 import { Core, collectInlineRefs } from '@ledric/core';
-import { SqliteStorage } from '@ledric/storage';
+import { openSqlite } from '@ledric/storage';
 
 interface DanglingRef {
   entry_type: string;
@@ -32,7 +32,7 @@ const checkCommand = defineCommand({
     }
   },
   async run({ args }) {
-    const storage = await SqliteStorage.open({ path: args.db });
+    const storage = await openSqlite({ path: args.db });
     try {
       const core = new Core(storage);
       const types = args.type

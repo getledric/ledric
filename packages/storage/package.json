@@ -1,7 +1,7 @@
 {
   "name": "@ledric/storage",
   "version": "0.1.0",
-  "description": "ledric storage: Drizzle-based adapter(s). SQLite (better-sqlite3) default, Postgres as second target.",
+  "description": "ledric storage: Kysely-based dialect adapters. SQLite (better-sqlite3) default; MySQL and Postgres also supported.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -34,9 +34,21 @@
   "dependencies": {
     "@ledric/schema": "workspace:*",
     "better-sqlite3": "^11.5.0",
+    "kysely": "^0.27.4",
     "uuid": "^11.0.3"
   },
+  "peerDependencies": {
+    "mysql2": "^3.11.0",
+    "pg": "^8.13.0"
+  },
+  "peerDependenciesMeta": {
+    "mysql2": { "optional": true },
+    "pg": { "optional": true }
+  },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12"
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/pg": "^8.11.10",
+    "mysql2": "^3.11.0",
+    "pg": "^8.13.0"
   }
 }

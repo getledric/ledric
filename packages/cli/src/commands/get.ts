@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 import { Core } from '@ledric/core';
-import { SqliteStorage, NotFoundError } from '@ledric/storage';
+import { openSqlite, NotFoundError } from '@ledric/storage';
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -50,7 +50,7 @@ export const getCommand = defineCommand({
       process.exit(2);
     }
 
-    const storage = await SqliteStorage.open({ path: args.db });
+    const storage = await openSqlite({ path: args.db });
     try {
       const core = new Core(storage);
       const typeDetail = await storage.getType(type);

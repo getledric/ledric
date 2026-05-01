@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { defineType, field } from '@ledric/schema';
 import { Core } from './core.js';
-import { SqliteStorage } from '@ledric/storage';
+import { openSqlite, type LedricStorage } from '@ledric/storage';
 import { deriveContent } from './derive.js';
 import { validateContent } from './validate.js';
 
@@ -144,11 +144,11 @@ describe('field defaults', () => {
   });
 
   describe('end-to-end through Core.draft', () => {
-    let storage: SqliteStorage;
+    let storage: LedricStorage;
     let core: Core;
 
     beforeEach(async () => {
-      storage = await SqliteStorage.open({ path: ':memory:' });
+      storage = await openSqlite({ path: ':memory:' });
       core = new Core(storage);
       await core.createType({
         name: 'cta_band',
