@@ -31,6 +31,7 @@ export interface Entry<F = Record<string, unknown>> {
   _redirect?: { from: string; to: string; locale?: string };
   _refs?: ResolvedRef[];
   _warnings?: ValidationWarning[];
+  tags?: TagInfo[];
 }
 
 export interface EntrySummary<F = Record<string, unknown>> {
@@ -41,6 +42,7 @@ export interface EntrySummary<F = Record<string, unknown>> {
   published_version: number | null;
   fields: F;
   _refs?: ResolvedRef[];
+  tags?: TagInfo[];
 }
 
 export interface FindResult<F = Record<string, unknown>> {
@@ -94,6 +96,18 @@ export interface AssetMeta {
   [k: string]: unknown;
 }
 
+export interface TagInfo {
+  /** Canonical, lowercased, URL-safe form. The stable identity. */
+  slug: string;
+  /** Display form, case preserved. */
+  label: string;
+}
+
+export interface TagWithCounts extends TagInfo {
+  asset_uses: number;
+  entry_uses: number;
+}
+
 export interface Asset {
   /** Stable asset id — what entry content references. Doesn't change across versions. */
   id: string;
@@ -107,6 +121,8 @@ export interface Asset {
   meta: AssetMeta;
   /** Canonical URL — uses ref_key, version-pinned, safe to long-cache. */
   url: string;
+  /** Tags currently applied to this asset, sorted by label asc. */
+  tags?: TagInfo[];
 }
 
 export interface AssetSummary {
@@ -117,6 +133,7 @@ export interface AssetSummary {
   storage_ref: string;
   meta: AssetMeta;
   url: string;
+  tags?: TagInfo[];
 }
 
 export interface ListAssetsResult {
@@ -128,6 +145,8 @@ export interface ListAssetsResult {
 export type EntryRef = string | { type: string; slug: string };
 
 export interface FindOptions {
+  /** Filter to entries that have ALL of these tags (matched by slug). */
+  tags?: string[];
   limit?: number;
   offset?: number;
   locale?: string;
@@ -139,6 +158,8 @@ export interface FindOptions {
 
 export interface ListAssetsOptions {
   kind?: string;
+  /** Filter to assets that have ALL of these tags. */
+  tags?: string[];
   limit?: number;
   offset?: number;
 }

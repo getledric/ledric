@@ -32,6 +32,8 @@ export type {
   DeleteTypeResult,
   DeleteEntryInput,
   DeleteEntryResult,
+  TagInfo,
+  TagWithCounts,
   ApiKeyRole,
   CreateApiKeyInput,
   ApiKeyRow,
@@ -46,6 +48,9 @@ export {
   ROLE_PREFIX
 } from './keys.js';
 export type { GeneratedApiKey } from './keys.js';
+
+export { normalizeTag, normalizeTags } from './tags.js';
+export type { NormalizedTag } from './tags.js';
 
 export {
   SqliteStorage,

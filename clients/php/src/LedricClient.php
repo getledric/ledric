@@ -87,6 +87,9 @@ class LedricClient
         if (!empty($opts['resolveRefs'])) {
             $params['resolve_refs'] = '1';
         }
+        if (isset($opts['tags']) && is_array($opts['tags']) && count($opts['tags']) > 0) {
+            $params['tag'] = array_map('strval', $opts['tags']);
+        }
         $qs = $this->qs($params);
         $url = $this->baseUrl . '/entries/' . rawurlencode($type) . $qs;
         $res = $this->http->send('GET', $url, $this->headers);
@@ -159,11 +162,85 @@ class LedricClient
         if (isset($opts['offset'])) {
             $params['offset'] = (string) $opts['offset'];
         }
+        if (isset($opts['tags']) && is_array($opts['tags']) && count($opts['tags']) > 0) {
+            $params['tag'] = array_map('strval', $opts['tags']);
+        }
         $url = $this->baseUrl . '/assets' . $this->qs($params);
         $res = $this->http->send('GET', $url, $this->headers);
         /** @var array{total: int, offset: int, results: array<int, array<string, mixed>>} $body */
         $body = $this->jsonOrThrow($res, $url);
         return $body;
+    }
+
+    /**
+     * GET /tags — every tag in the env with usage counts.
+     *
+     * @return array<int, array{slug: string, label: string, asset_uses: int, entry_uses: int}>
+     */
+    public function tags(): array
+    {
+        $url = $this->baseUrl . '/tags';
+        $res = $this->http->send('GET', $url, $this->headers);
+        /** @var array<int, array{slug: string, label: string, asset_uses: int, entry_uses: int}> $body */
+        $body = $this->jsonOrThrow($res, $url);
+        return $body;
+    }
+
+    /**
+     * Tag CRUD. Inputs are free-form; server normalizes (case/whitespace/leading-#).
+     *
+     * @param array<int, string> $tags
+     * @return array<int, array{slug: string, label: string}>
+     */
+    public function addAssetTags(string $id, array $tags): array
+    {
+        return (array) $this->rpc('add_asset_tags', ['id' => $id, 'tags' => $tags]);
+    }
+
+    /** @param array<int, string> $tags @return array{removed: int} */
+    public function removeAssetTags(string $id, array $tags): array
+    {
+        return (array) $this->rpc('remove_asset_tags', ['id' => $id, 'tags' => $tags]);
+    }
+
+    /**
+     * @param string|array{type: string, slug: string} $ref
+     * @param array<int, string> $tags
+     * @return array<int, array{slug: string, label: string}>
+     */
+    public function addEntryTags($ref, array $tags): array
+    {
+        [$type, $slug] = $this->parseRef($ref);
+        return (array) $this->rpc('add_entry_tags', [
+            'ref' => ['type' => $type, 'slug' => $slug],
+            'tags' => $tags
+        ]);
+    }
+
+    /**
+     * @param string|array{type: string, slug: string} $ref
+     * @param array<int, string> $tags
+     * @return array{removed: int}
+     */
+    public function removeEntryTags($ref, array $tags): array
+    {
+        [$type, $slug] = $this->parseRef($ref);
+        return (array) $this->rpc('remove_entry_tags', [
+            'ref' => ['type' => $type, 'slug' => $slug],
+            'tags' => $tags
+        ]);
+    }
+
+    /**
+     * Relabel an existing tag. Slug is the stable identity; the new
+     * label sticks but the slug never changes.
+     *
+     * @return array{slug: string, label: string}|null
+     */
+    public function updateTag(string $slug, string $label): ?array
+    {
+        $r = $this->rpc('update_tag', ['slug' => $slug, 'label' => $label]);
+        return is_array($r) ? $r : null;
     }
 
     /**
@@ -367,7 +444,10 @@ class LedricClient
     }
 
     /**
-     * @param array<string, string> $params
+     * Build a query string. Values may be a string (single) or an array
+     * (repeated, e.g. `?tag=a&tag=b`).
+     *
+     * @param array<string, string|array<int, string>> $params
      */
     private function qs(array $params): string
     {
@@ -376,7 +456,13 @@ class LedricClient
         }
         $pairs = [];
         foreach ($params as $k => $v) {
-            $pairs[] = rawurlencode($k) . '=' . rawurlencode($v);
+            if (is_array($v)) {
+                foreach ($v as $item) {
+                    $pairs[] = rawurlencode($k) . '=' . rawurlencode((string) $item);
+                }
+            } else {
+                $pairs[] = rawurlencode($k) . '=' . rawurlencode($v);
+            }
         }
         return '?' . implode('&', $pairs);
     }

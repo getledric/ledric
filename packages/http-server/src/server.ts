@@ -19,6 +19,13 @@ function parseRefKeyHex(s: string): Buffer | null {
   return Buffer.from(s, 'hex');
 }
 
+/** Collapse `?tag=a&tag=b` (string | string[] | undefined) into a string[]. */
+function collectTagParam(raw: string | string[] | undefined): string[] {
+  if (raw === undefined) return [];
+  if (Array.isArray(raw)) return raw;
+  return [raw];
+}
+
 function toJsonSafe(value: unknown): unknown {
   if (value instanceof Uint8Array) return Buffer.from(value).toString('hex');
   if (Array.isArray(value)) return value.map(toJsonSafe);
@@ -228,7 +235,13 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       'migrate_entries',
       'get_asset',
       'list_assets',
-      'update_asset'
+      'update_asset',
+      'add_asset_tags',
+      'remove_asset_tags',
+      'add_entry_tags',
+      'remove_entry_tags',
+      'list_tags',
+      'update_tag'
     ],
     /**
      * Quick pointers the consumer SDK / agent can use without round-
@@ -267,19 +280,22 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       locale?: string;
       expand_assets?: string;
       resolve_refs?: string;
+      tag?: string | string[];
     };
   }>('/entries/:type', async (req) => {
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
     const offset = req.query.offset ? parseInt(req.query.offset, 10) : undefined;
     const expandAssets = parseExpandAssets(req.query.expand_assets);
     const resolveRefs = req.query.resolve_refs === '1' || req.query.resolve_refs === 'true';
+    const tags = collectTagParam(req.query.tag);
     const result = await core.find({
       type: req.params.type,
       ...(limit !== undefined ? { limit } : {}),
       ...(offset !== undefined ? { offset } : {}),
       ...(req.query.locale !== undefined ? { locale: req.query.locale } : {}),
       ...(expandAssets !== undefined ? { expand_assets: expandAssets } : {}),
-      ...(resolveRefs ? { resolve_refs: true } : {})
+      ...(resolveRefs ? { resolve_refs: true } : {}),
+      ...(tags.length > 0 ? { tags } : {})
     });
     return toJsonSafe({
       total: result.total,
@@ -291,6 +307,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
         version: r.current_version,
         published_version: r.published_version,
         fields: r.content,
+        tags: r.tags,
         ...(r._refs !== undefined ? { _refs: r._refs } : {})
       }))
     });
@@ -346,14 +363,16 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
   });
 
   app.get<{
-    Querystring: { kind?: string; limit?: string; offset?: string };
+    Querystring: { kind?: string; limit?: string; offset?: string; tag?: string | string[] };
   }>('/assets', async (req) => {
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
     const offset = req.query.offset ? parseInt(req.query.offset, 10) : undefined;
+    const tags = collectTagParam(req.query.tag);
     const result = await core.listAssets({
       ...(req.query.kind !== undefined ? { kind: req.query.kind } : {}),
       ...(limit !== undefined ? { limit } : {}),
-      ...(offset !== undefined ? { offset } : {})
+      ...(offset !== undefined ? { offset } : {}),
+      ...(tags.length > 0 ? { tags } : {})
     });
     return toJsonSafe({
       total: result.total,
@@ -367,11 +386,16 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
           version: r.current_version,
           storage_ref: r.storage_ref,
           meta: r.meta,
-          url: `/assets/${refKeyHex}`
+          url: `/assets/${refKeyHex}`,
+          tags: r.tags
         };
       })
     });
   });
+
+  // Combined tag list: assets and entries together with separate counts.
+  // Single endpoint matches the `list_tags` MCP tool surface.
+  app.get('/tags', async () => toJsonSafe(await core.listTags()));
 
   app.post('/assets', async (req, reply) => {
     if (!req.isMultipart()) {
@@ -384,6 +408,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     let filename: string | undefined;
     let kindOverride: string | undefined;
     let altOverride: string | undefined;
+    const tags: string[] = [];
 
     for await (const part of req.parts()) {
       if (part.type === 'file' && part.fieldname === 'file') {
@@ -395,6 +420,13 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
         if (part.fieldname === 'kind') kindOverride = value;
         else if (part.fieldname === 'alt') altOverride = value;
         else if (part.fieldname === 'mime') mime = value;
+        // Accept `tag` (single) or `tags` (single field with comma-separated, or repeated).
+        else if (part.fieldname === 'tag' || part.fieldname === 'tags') {
+          for (const t of value.split(',')) {
+            const trimmed = t.trim();
+            if (trimmed.length > 0) tags.push(trimmed);
+          }
+        }
       }
     }
 
@@ -413,7 +445,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
           ...(mime !== undefined ? { mime } : {}),
           ...(filename !== undefined ? { filename } : {}),
           ...(altOverride !== undefined ? { alt: altOverride } : {})
-        }
+        },
+        ...(tags.length > 0 ? { tags } : {})
       });
       const idHex = Buffer.from(written.id).toString('hex');
       const refKeyHex = Buffer.from(written.ref_key).toString('hex');
@@ -644,6 +677,28 @@ async function dispatchTool(
         ...(raw.meta !== undefined ? { meta: raw.meta as Record<string, unknown> } : {}),
         ...(raw.author !== undefined ? { author: String(raw.author) } : {})
       });
+    }
+    case 'add_asset_tags': {
+      const raw = a as { id?: unknown; tags?: unknown };
+      return core.addAssetTags(String(raw.id), Array.isArray(raw.tags) ? raw.tags.map(String) : []);
+    }
+    case 'remove_asset_tags': {
+      const raw = a as { id?: unknown; tags?: unknown };
+      return core.removeAssetTags(String(raw.id), Array.isArray(raw.tags) ? raw.tags.map(String) : []);
+    }
+    case 'add_entry_tags': {
+      const raw = a as { ref?: unknown; tags?: unknown };
+      return core.addEntryTags(raw.ref as Parameters<Core['addEntryTags']>[0], Array.isArray(raw.tags) ? raw.tags.map(String) : []);
+    }
+    case 'remove_entry_tags': {
+      const raw = a as { ref?: unknown; tags?: unknown };
+      return core.removeEntryTags(raw.ref as Parameters<Core['removeEntryTags']>[0], Array.isArray(raw.tags) ? raw.tags.map(String) : []);
+    }
+    case 'list_tags':
+      return core.listTags();
+    case 'update_tag': {
+      const raw = a as { slug?: unknown; label?: unknown };
+      return core.updateTag(String(raw.slug), String(raw.label));
     }
     default:
       throw new Error(`Unknown tool "${tool}"`);

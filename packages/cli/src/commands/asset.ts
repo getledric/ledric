@@ -46,6 +46,12 @@ function assetsConfigFromArgs(args: { assetsBackend?: string; assetsRoot?: strin
   return { backend: 'db' };
 }
 
+/** Comma-separated `--tag "Featured Event, hero"` → ["Featured Event", "hero"]. */
+function splitTags(raw: string | undefined): string[] {
+  if (typeof raw !== 'string' || raw.length === 0) return [];
+  return raw.split(',').map((t) => t.trim()).filter((t) => t.length > 0);
+}
+
 const uploadCommand = defineCommand({
   meta: {
     name: 'upload',
@@ -81,6 +87,10 @@ const uploadCommand = defineCommand({
     'assets-root': {
       type: 'string',
       description: 'For the local backend: directory where bytes are written (default ./ledric-assets).'
+    },
+    tag: {
+      type: 'string',
+      description: 'Comma-separated initial tags ("Featured Event, hero, q4").'
     }
   },
   async run({ args }) {
@@ -88,6 +98,7 @@ const uploadCommand = defineCommand({
     const bytes = await fs.readFile(abs);
     const mime = args.mime ?? guessMime(abs);
     const kind = args.kind ?? guessKind(mime);
+    const tags = splitTags(args.tag);
 
     const storage = await SqliteStorage.open({
       path: args.db,
@@ -104,7 +115,8 @@ const uploadCommand = defineCommand({
         meta: {
           ...(mime !== undefined ? { mime } : {}),
           ...(args.alt !== undefined ? { alt: args.alt } : {})
-        }
+        },
+        ...(tags.length > 0 ? { tags } : {})
       });
       process.stdout.write(
         JSON.stringify(
@@ -141,6 +153,10 @@ const lsCommand = defineCommand({
       type: 'string',
       description: 'Filter by kind (image / video / file / …).'
     },
+    tag: {
+      type: 'string',
+      description: 'Comma-separated tag filter (AND semantics).'
+    },
     limit: {
       type: 'string',
       default: '50'
@@ -154,8 +170,10 @@ const lsCommand = defineCommand({
     const storage = await SqliteStorage.open({ path: args.db });
     try {
       const core = new Core(storage);
+      const tags = splitTags(args.tag);
       const result = await core.listAssets({
         ...(args.kind !== undefined ? { kind: args.kind } : {}),
+        ...(tags.length > 0 ? { tags } : {}),
         limit: parseInt(args.limit, 10),
         offset: parseInt(args.offset, 10)
       });
@@ -405,16 +423,93 @@ const replaceCommand = defineCommand({
   }
 });
 
+const tagCommand = defineCommand({
+  meta: {
+    name: 'tag',
+    description: 'Add tags to an asset. Comma-separated tags accepted.'
+  },
+  args: {
+    id: { type: 'positional', description: 'Asset id (32-char hex).', required: true },
+    tags: { type: 'positional', description: '"hero, Featured Event, q4"', required: true },
+    db: { type: 'string', default: './ledric.db' }
+  },
+  async run({ args }) {
+    const tags = splitTags(args.tags);
+    if (tags.length === 0) {
+      process.stderr.write('ledric: no tags provided\n');
+      process.exit(1);
+    }
+    const storage = await SqliteStorage.open({ path: args.db });
+    try {
+      const core = new Core(storage);
+      const result = await core.addAssetTags(args.id, tags);
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    } finally {
+      await storage.close();
+    }
+  }
+});
+
+const untagCommand = defineCommand({
+  meta: {
+    name: 'untag',
+    description: 'Remove tags from an asset. Matches by slug (case-insensitive).'
+  },
+  args: {
+    id: { type: 'positional', required: true },
+    tags: { type: 'positional', required: true },
+    db: { type: 'string', default: './ledric.db' }
+  },
+  async run({ args }) {
+    const tags = splitTags(args.tags);
+    if (tags.length === 0) {
+      process.stderr.write('ledric: no tags provided\n');
+      process.exit(1);
+    }
+    const storage = await SqliteStorage.open({ path: args.db });
+    try {
+      const core = new Core(storage);
+      const result = await core.removeAssetTags(args.id, tags);
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    } finally {
+      await storage.close();
+    }
+  }
+});
+
+const tagsCommand = defineCommand({
+  meta: {
+    name: 'tags',
+    description: 'List every tag in the env (across assets and entries) with usage counts.'
+  },
+  args: {
+    db: { type: 'string', default: './ledric.db' }
+  },
+  async run({ args }) {
+    const storage = await SqliteStorage.open({ path: args.db });
+    try {
+      const core = new Core(storage);
+      const result = await core.listTags();
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    } finally {
+      await storage.close();
+    }
+  }
+});
+
 export const assetCommand = defineCommand({
   meta: {
     name: 'asset',
-    description: 'Manage assets (upload, list, read, replace).'
+    description: 'Manage assets (upload, list, read, replace, tag).'
   },
   subCommands: {
     upload: uploadCommand,
     replace: replaceCommand,
     ls: lsCommand,
     get: getCommand,
-    bytes: bytesCommand
+    bytes: bytesCommand,
+    tag: tagCommand,
+    untag: untagCommand,
+    tags: tagsCommand
   }
 });

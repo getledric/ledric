@@ -133,6 +133,77 @@ describe('SqliteStorage', () => {
     expect(all.total).toBe(3);
   });
 
+  describe('tags', () => {
+    it('add/remove/list flow on an asset, with filter by tag', async () => {
+      const a = await storage.createAsset({ kind: 'image', bytes: Buffer.from([1]), tags: ['#Featured Event', 'hero'] });
+      const b = await storage.createAsset({ kind: 'image', bytes: Buffer.from([2]), tags: ['hero'] });
+
+      // initial tags from createAsset wired through and projected
+      const aTags = await storage.getAssetTags(a.id);
+      expect(aTags.map((t) => t.slug).sort()).toEqual(['featured-event', 'hero']);
+      // the case of the original input is preserved as the label
+      expect(aTags.find((t) => t.slug === 'featured-event')?.label).toBe('Featured Event');
+
+      // adding a duplicate (different case + leading #) is a no-op
+      await storage.addAssetTags(a.id, ['#FEATURED EVENT']);
+      expect((await storage.getAssetTags(a.id)).length).toBe(2);
+
+      // filter by tag — AND semantics
+      const both = await storage.listAssets({ tags: ['hero', 'featured event'] });
+      expect(both.results.map((r) => Buffer.from(r.id).toString('hex'))).toEqual([
+        Buffer.from(a.id).toString('hex')
+      ]);
+      const justHero = await storage.listAssets({ tags: ['hero'] });
+      expect(justHero.total).toBe(2);
+
+      // remove
+      const removed = await storage.removeAssetTags(a.id, ['#Featured Event']);
+      expect(removed).toBe(1);
+      expect((await storage.getAssetTags(a.id)).map((t) => t.slug)).toEqual(['hero']);
+
+      // listAssets results carry tags
+      const list = await storage.listAssets();
+      const aRow = list.results.find((r) => Buffer.from(r.id).toString('hex') === Buffer.from(a.id).toString('hex'));
+      expect(aRow?.tags.map((t) => t.slug)).toEqual(['hero']);
+
+      // listTags has counts
+      const tags = await storage.listTags();
+      const heroTag = tags.find((t) => t.slug === 'hero');
+      expect(heroTag?.asset_uses).toBe(2);
+      expect(heroTag?.entry_uses).toBe(0);
+    });
+
+    it('parallel flow on entries, plus updateTag relabels in place', async () => {
+      const def = (await import('@ledric/schema')).defineType('post', {
+        title: (await import('@ledric/schema')).field.string({ required: true })
+      });
+      await storage.createType({ definition: def });
+      const e1 = await storage.createEntry({
+        type: 'post', slug: 'a', content: { title: 'A' }, schema_version: 1, tags: ['Featured Event']
+      });
+      await storage.createEntry({
+        type: 'post', slug: 'b', content: { title: 'B' }, schema_version: 1, tags: ['featured event', 'q4']
+      });
+
+      // findEntries filter
+      const filtered = await storage.findEntries({ type: 'post', tags: ['featured-event'] });
+      expect(filtered.total).toBe(2);
+      // results carry tags
+      expect(filtered.results.every((r) => r.tags.length > 0)).toBe(true);
+
+      // updateTag relabels but slug is stable
+      const r = await storage.updateTag('featured-event', 'Featured Events');
+      expect(r?.label).toBe('Featured Events');
+      const tagsAfter = await storage.listTags();
+      expect(tagsAfter.find((t) => t.slug === 'featured-event')?.label).toBe('Featured Events');
+
+      // remove + counts update
+      await storage.removeEntryTags(e1.id, ['Featured Event']);
+      const tags = await storage.listTags();
+      expect(tags.find((t) => t.slug === 'featured-event')?.entry_uses).toBe(1);
+    });
+  });
+
   describe('updateAsset / findAssetByRefKey', () => {
     it('mints a fresh ref_key on createAsset and lets findAssetByRefKey resolve it', async () => {
       const w = await storage.createAsset({

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { html } from 'htm/react';
 import { api } from '../lib/api.js';
 import { FieldRenderer } from './fields.js';
+import { TagChips } from './TagChips.js';
 
 export function EntryEditor({ mode }) {
   const { type, slug } = useParams();
@@ -15,6 +16,8 @@ export function EntryEditor({ mode }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [info, setInfo] = useState(null);
+  const [tags, setTags] = useState([]);
+  const [allTags, setAllTags] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -27,6 +30,10 @@ export function EntryEditor({ mode }) {
         if (cancelled) return;
         setTypeDef(t);
 
+        const allTagsData = await api.tags();
+        if (cancelled) return;
+        setAllTags(allTagsData ?? []);
+
         if (mode === 'edit') {
           const entry = await api.read(type, slug);
           if (cancelled) return;
@@ -37,6 +44,7 @@ export function EntryEditor({ mode }) {
           setContent(entry.fields ?? {});
           setParentVersion(entry.version);
           setPublishedVersion(typeof entry.published_version === 'number' ? entry.published_version : null);
+          setTags(entry.tags ?? []);
         } else {
           // initialise from the type's example if there is one
           setContent(t && t.example ? { ...t.example } : {});
@@ -85,6 +93,30 @@ export function EntryEditor({ mode }) {
       setError(e);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function addTag(label) {
+    try {
+      const result = await api.addEntryTags(type, slug, [label]);
+      // returns TagInfo[] — full updated tag list for the entry
+      setTags(result ?? []);
+      setAllTags((prev) => {
+        const slugs = new Set(prev.map((t) => t.slug));
+        const newOnes = (result ?? []).filter((t) => !slugs.has(t.slug));
+        return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+      });
+    } catch (e) {
+      setError(e);
+    }
+  }
+
+  async function removeTag(tagSlug) {
+    try {
+      await api.removeEntryTags(type, slug, [tagSlug]);
+      setTags((prev) => prev.filter((t) => t.slug !== tagSlug));
+    } catch (e) {
+      setError(e);
     }
   }
 
@@ -149,6 +181,19 @@ export function EntryEditor({ mode }) {
             onChange=${(v) => setField(name, v)}
           />`
         )}
+
+        ${mode === 'edit' && html`
+          <div className="mb-6">
+            <label className="block text-xs text-zinc-500 uppercase tracking-widest mb-2">Tags</label>
+            <${TagChips}
+              tags=${tags}
+              allTags=${allTags}
+              onAdd=${addTag}
+              onRemove=${removeTag}
+              disabled=${saving}
+            />
+          </div>
+        `}
 
         <div className="flex items-center gap-3 pt-4 border-t border-zinc-800">
           <button

@@ -25,13 +25,21 @@ export function EntryList() {
   const [typeDef, setTypeDef] = useState(null);
   const [list, setList] = useState(null);
   const [error, setError] = useState(null);
+  const [allTags, setAllTags] = useState([]);
+  const [tagFilter, setTagFilter] = useState('');
+
+  useEffect(() => {
+    api.tags().then((t) => setAllTags(t ?? [])).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setTypeDef(null);
     setList(null);
     setError(null);
-    Promise.all([api.type(type), api.find(type, { limit: 200 })])
+    const opts = { limit: 200 };
+    if (tagFilter) opts.tags = [tagFilter];
+    Promise.all([api.type(type), api.find(type, opts)])
       .then(([t, l]) => {
         if (cancelled) return;
         setTypeDef(t);
@@ -41,7 +49,7 @@ export function EntryList() {
     return () => {
       cancelled = true;
     };
-  }, [type]);
+  }, [type, tagFilter]);
 
   if (error) {
     return html`<div className="text-red-400 border border-red-900 rounded p-4">${error.message}</div>`;
@@ -69,6 +77,28 @@ export function EntryList() {
       </div>
       ${typeDef.description &&
         html`<p className="text-sm text-zinc-400 mb-4">${typeDef.description}</p>`}
+
+      ${allTags.length > 0 && html`
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-xs text-zinc-500 uppercase tracking-widest">Filter</span>
+          <select
+            value=${tagFilter}
+            onChange=${(e) => setTagFilter(e.target.value)}
+            className="bg-zinc-900 border border-zinc-700 text-zinc-300 text-xs rounded px-2 py-1 focus:border-amber-500 outline-none"
+          >
+            <option value="">all tags</option>
+            ${allTags.map((t) => html`<option key=${t.slug} value=${t.slug}>${t.label}</option>`)}
+          </select>
+          ${tagFilter && html`
+            <button
+              type="button"
+              onClick=${() => setTagFilter('')}
+              className="text-xs text-zinc-500 hover:text-zinc-300"
+            >clear</button>
+          `}
+        </div>
+      `}
+
       ${list.results.length === 0
         ? html`<div className="text-zinc-500 border border-zinc-800 rounded p-8 text-center">
             No entries yet.

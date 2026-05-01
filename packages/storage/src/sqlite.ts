@@ -21,11 +21,14 @@ import type {
   AssetSummary,
   AssetWrite,
   ListAssetsInput,
-  ListAssetsResult
+  ListAssetsResult,
+  TagInfo,
+  TagWithCounts
 } from './types.js';
 import { migrations } from './migrations.js';
 import { uuidv7Bytes } from './uuid.js';
 import { contentHash } from './hash.js';
+import { normalizeTag, normalizeTags } from './tags.js';
 import {
   AssetBackendRegistry,
   DbAssetBackend,
@@ -347,6 +350,8 @@ export class SqliteStorage implements Storage {
     const contentJson = JSON.stringify(input.content);
     const localeSlugs = input.locale_slugs ?? {};
     const hasLocaleSlugs = Object.keys(localeSlugs).length > 0;
+    const envId = Buffer.from(this.mainEnvId);
+    const initialTags = normalizeTags(input.tags ?? []);
 
     const tx = this.db.transaction(() => {
       this.db
@@ -372,6 +377,14 @@ export class SqliteStorage implements Storage {
         for (const [locale, slug] of Object.entries(localeSlugs)) {
           insert.run(this.mainEnvId, Buffer.from(typeRow.id), locale, slug, entryId);
         }
+      }
+
+      if (initialTags.length > 0) {
+        const resolved = this.resolveOrCreateTags(envId, initialTags);
+        const ins = this.db.prepare(
+          `INSERT OR IGNORE INTO entry_tags (env_id, entry_id, tag_id) VALUES (?, ?, ?)`
+        );
+        for (const t of resolved) ins.run(envId, Buffer.from(entryId), Buffer.from(t.id));
       }
     });
     tx();
@@ -593,6 +606,7 @@ export class SqliteStorage implements Storage {
 
     if (!row) return null;
 
+    const tags = this.fetchEntryTags(envId, [row.id]).get(row.id.toString('hex')) ?? [];
     return {
       id: new Uint8Array(row.id),
       type: ref.type,
@@ -604,7 +618,8 @@ export class SqliteStorage implements Storage {
       content: JSON.parse(row.content) as Record<string, unknown>,
       content_hash: new Uint8Array(row.content_hash),
       created_at: row.created_at,
-      deleted_at: row.deleted_at
+      deleted_at: row.deleted_at,
+      tags
     };
   }
 
@@ -709,6 +724,24 @@ export class SqliteStorage implements Storage {
     // Deleted filter
     const deletedClause = input.includeDeleted ? '' : 'AND e.deleted_at IS NULL';
 
+    // Tag filter — must have ALL of the provided tags (matched by slug).
+    const tagSlugs = input.tags
+      ? normalizeTags(input.tags).map((t) => t.slug)
+      : [];
+    let tagFilter = '';
+    const tagParams: unknown[] = [];
+    if (tagSlugs.length > 0) {
+      const placeholders = tagSlugs.map(() => '?').join(',');
+      tagFilter = ` AND e.id IN (
+        SELECT et.entry_id FROM entry_tags et
+        JOIN tags t ON t.id = et.tag_id
+        WHERE et.env_id = e.env_id AND t.slug IN (${placeholders})
+        GROUP BY et.entry_id
+        HAVING COUNT(DISTINCT t.slug) = ?
+      )`;
+      tagParams.push(...tagSlugs, tagSlugs.length);
+    }
+
     // Order
     let orderClause = 'ORDER BY ev.created_at DESC';
     if (input.order && input.order.length > 0) {
@@ -739,27 +772,28 @@ export class SqliteStorage implements Storage {
              ev.version, ev.content, ev.schema_version, ev.content_hash, ev.created_at
       FROM entries e
       JOIN entry_versions ev ON ev.entry_id = e.id AND ev.version = e.current_version
-      WHERE e.env_id = ? AND e.type_id = ? ${deletedClause} ${whereSql}
+      WHERE e.env_id = ? AND e.type_id = ? ${deletedClause} ${whereSql}${tagFilter}
       ${orderClause}
       LIMIT ? OFFSET ?
     `;
 
     const rows = this.db
       .prepare<unknown[], JoinRow>(selectSql)
-      .all(envId, Buffer.from(typeRow.id), ...whereParams, limit, offset);
+      .all(envId, Buffer.from(typeRow.id), ...whereParams, ...tagParams, limit, offset);
 
     const countSql = `
       SELECT COUNT(*) AS c
       FROM entries e
       JOIN entry_versions ev ON ev.entry_id = e.id AND ev.version = e.current_version
-      WHERE e.env_id = ? AND e.type_id = ? ${deletedClause} ${whereSql}
+      WHERE e.env_id = ? AND e.type_id = ? ${deletedClause} ${whereSql}${tagFilter}
     `;
 
     const countRow = this.db
       .prepare<unknown[], { c: number }>(countSql)
-      .get(envId, Buffer.from(typeRow.id), ...whereParams);
+      .get(envId, Buffer.from(typeRow.id), ...whereParams, ...tagParams);
 
     const total = countRow?.c ?? 0;
+    const tagsByEntry = this.fetchEntryTags(envId, rows.map((r) => r.id));
 
     const results: EntryDetail[] = rows.map((r) => ({
       id: new Uint8Array(r.id),
@@ -772,7 +806,8 @@ export class SqliteStorage implements Storage {
       content: JSON.parse(r.content) as Record<string, unknown>,
       content_hash: new Uint8Array(r.content_hash),
       created_at: r.created_at,
-      deleted_at: r.deleted_at
+      deleted_at: r.deleted_at,
+      tags: tagsByEntry.get(r.id.toString('hex')) ?? []
     }));
 
     return { results, total, offset };
@@ -923,6 +958,9 @@ export class SqliteStorage implements Storage {
       ...(meta.mime !== undefined ? { mime: meta.mime } : {})
     });
 
+    const envId = Buffer.from(this.mainEnvId);
+    const initialTags = normalizeTags(input.tags ?? []);
+
     const tx = this.db.transaction(() => {
       this.db
         .prepare(
@@ -938,6 +976,14 @@ export class SqliteStorage implements Storage {
            VALUES (?, 1, ?, ?, NULL, ?, ?, ?)`
         )
         .run(assetId, storageRef, JSON.stringify(meta), input.author ?? null, now, Buffer.from(refKey));
+
+      if (initialTags.length > 0) {
+        const resolved = this.resolveOrCreateTags(envId, initialTags);
+        const ins = this.db.prepare(
+          `INSERT OR IGNORE INTO asset_tags (env_id, asset_id, tag_id) VALUES (?, ?, ?)`
+        );
+        for (const t of resolved) ins.run(envId, Buffer.from(assetId), Buffer.from(t.id));
+      }
     });
     tx();
 
@@ -1069,6 +1115,7 @@ export class SqliteStorage implements Storage {
       )
       .get(envId, Buffer.from(refKey));
     if (!row) return null;
+    const tags = this.fetchAssetTags(envId, [row.id]).get(row.id.toString('hex')) ?? [];
     return {
       id: new Uint8Array(row.id),
       kind: row.kind,
@@ -1080,7 +1127,8 @@ export class SqliteStorage implements Storage {
       meta: JSON.parse(row.meta) as AssetMeta,
       author: row.author,
       created_at: row.created_at,
-      ref_key: new Uint8Array(row.ref_key)
+      ref_key: new Uint8Array(row.ref_key),
+      tags
     };
   }
 
@@ -1125,6 +1173,10 @@ export class SqliteStorage implements Storage {
 
     if (!row) return null;
 
+    const tags = this.fetchAssetTags(envId, [Buffer.from(id)]).get(
+      Buffer.from(id).toString('hex')
+    ) ?? [];
+
     return {
       id: new Uint8Array(id),
       kind: row.kind,
@@ -1136,7 +1188,8 @@ export class SqliteStorage implements Storage {
       meta: JSON.parse(row.meta) as AssetMeta,
       author: row.author,
       created_at: row.created_at,
-      ref_key: new Uint8Array(row.ref_key)
+      ref_key: new Uint8Array(row.ref_key),
+      tags
     };
   }
 
@@ -1146,6 +1199,25 @@ export class SqliteStorage implements Storage {
     const offset = input?.offset ?? 0;
     const kindFilter = input?.kind !== undefined ? ' AND a.kind = ?' : '';
     const deletedFilter = input?.includeDeleted === true ? '' : ' AND a.deleted_at IS NULL';
+
+    // Tag filter — must have ALL of the provided tags. Inputs are
+    // normalized so case/whitespace/leading-# variants all match.
+    const tagSlugs = input?.tags
+      ? normalizeTags(input.tags).map((t) => t.slug)
+      : [];
+    let tagFilter = '';
+    const tagParams: unknown[] = [];
+    if (tagSlugs.length > 0) {
+      const placeholders = tagSlugs.map(() => '?').join(',');
+      tagFilter = ` AND a.id IN (
+        SELECT at.asset_id FROM asset_tags at
+        JOIN tags t ON t.id = at.tag_id
+        WHERE at.env_id = a.env_id AND t.slug IN (${placeholders})
+        GROUP BY at.asset_id
+        HAVING COUNT(DISTINCT t.slug) = ?
+      )`;
+      tagParams.push(...tagSlugs, tagSlugs.length);
+    }
 
     interface Row {
       id: Buffer;
@@ -1161,6 +1233,7 @@ export class SqliteStorage implements Storage {
 
     const params: unknown[] = [envId];
     if (input?.kind !== undefined) params.push(input.kind);
+    params.push(...tagParams);
     params.push(limit, offset);
 
     const rows = this.db
@@ -1169,7 +1242,7 @@ export class SqliteStorage implements Storage {
                 av.storage_ref, av.meta, av.created_at, av.ref_key
          FROM assets a
          JOIN asset_versions av ON av.asset_id = a.id AND av.version = a.current_version
-         WHERE a.env_id = ?${kindFilter}${deletedFilter}
+         WHERE a.env_id = ?${kindFilter}${deletedFilter}${tagFilter}
          ORDER BY av.created_at DESC
          LIMIT ? OFFSET ?`
       )
@@ -1177,12 +1250,15 @@ export class SqliteStorage implements Storage {
 
     const countParams: unknown[] = [envId];
     if (input?.kind !== undefined) countParams.push(input.kind);
+    countParams.push(...tagParams);
 
     const countRow = this.db
       .prepare<unknown[], { c: number }>(
-        `SELECT COUNT(*) AS c FROM assets a WHERE a.env_id = ?${kindFilter}${deletedFilter}`
+        `SELECT COUNT(*) AS c FROM assets a WHERE a.env_id = ?${kindFilter}${deletedFilter}${tagFilter}`
       )
       .get(...countParams);
+
+    const tagsByAsset = this.fetchAssetTags(envId, rows.map((r) => r.id));
 
     return {
       results: rows.map((r) => ({
@@ -1194,7 +1270,8 @@ export class SqliteStorage implements Storage {
         storage_ref: r.storage_ref,
         meta: JSON.parse(r.meta) as AssetMeta,
         created_at: r.created_at,
-        ref_key: new Uint8Array(r.ref_key)
+        ref_key: new Uint8Array(r.ref_key),
+        tags: tagsByAsset.get(r.id.toString('hex')) ?? []
       })),
       total: countRow?.c ?? 0,
       offset
@@ -1309,6 +1386,234 @@ export class SqliteStorage implements Storage {
       )
       .get(Buffer.from(this.mainEnvId));
     return row?.n ?? 0;
+  }
+
+  // -------------------- Tags --------------------
+
+  /**
+   * Resolve normalized tag inputs to existing tag rows, creating any
+   * that don't exist yet. Existing rows keep their original label —
+   * later writes don't relabel automatically. Returns the resolved tag
+   * rows in input order, with their canonical label (existing or new).
+   */
+  private resolveOrCreateTags(
+    envId: Buffer,
+    inputs: readonly { slug: string; label: string }[]
+  ): { id: Uint8Array; slug: string; label: string }[] {
+    if (inputs.length === 0) return [];
+    const findStmt = this.db.prepare<[Buffer, string], { id: Buffer; label: string }>(
+      'SELECT id, label FROM tags WHERE env_id = ? AND slug = ?'
+    );
+    const insertStmt = this.db.prepare(
+      `INSERT INTO tags (id, env_id, slug, label, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    );
+    const out: { id: Uint8Array; slug: string; label: string }[] = [];
+    for (const t of inputs) {
+      const row = findStmt.get(envId, t.slug);
+      if (row) {
+        out.push({ id: new Uint8Array(row.id), slug: t.slug, label: row.label });
+      } else {
+        const id = uuidv7Bytes();
+        insertStmt.run(Buffer.from(id), envId, t.slug, t.label, Date.now());
+        out.push({ id, slug: t.slug, label: t.label });
+      }
+    }
+    return out;
+  }
+
+  /** Slug-only lookup of tag ids — used by `removeXTags` and the filter path. */
+  private lookupTagIdsBySlug(envId: Buffer, slugs: readonly string[]): Buffer[] {
+    if (slugs.length === 0) return [];
+    const placeholders = slugs.map(() => '?').join(',');
+    const rows = this.db
+      .prepare<unknown[], { id: Buffer }>(
+        `SELECT id FROM tags WHERE env_id = ? AND slug IN (${placeholders})`
+      )
+      .all(envId, ...slugs);
+    return rows.map((r) => r.id);
+  }
+
+  /** Tags currently attached to a given asset, sorted by label asc. */
+  private fetchAssetTags(envId: Buffer, assetIds: readonly Buffer[]): Map<string, TagInfo[]> {
+    const out = new Map<string, TagInfo[]>();
+    if (assetIds.length === 0) return out;
+    const placeholders = assetIds.map(() => '?').join(',');
+    const rows = this.db
+      .prepare<unknown[], { asset_id: Buffer; slug: string; label: string }>(
+        `SELECT at.asset_id, t.slug, t.label
+         FROM asset_tags at
+         JOIN tags t ON t.id = at.tag_id
+         WHERE at.env_id = ? AND at.asset_id IN (${placeholders})
+         ORDER BY t.label COLLATE NOCASE ASC`
+      )
+      .all(envId, ...assetIds);
+    for (const r of rows) {
+      const key = r.asset_id.toString('hex');
+      const list = out.get(key) ?? [];
+      list.push({ slug: r.slug, label: r.label });
+      out.set(key, list);
+    }
+    return out;
+  }
+
+  /** Tags currently attached to a given entry, sorted by label asc. */
+  private fetchEntryTags(envId: Buffer, entryIds: readonly Buffer[]): Map<string, TagInfo[]> {
+    const out = new Map<string, TagInfo[]>();
+    if (entryIds.length === 0) return out;
+    const placeholders = entryIds.map(() => '?').join(',');
+    const rows = this.db
+      .prepare<unknown[], { entry_id: Buffer; slug: string; label: string }>(
+        `SELECT et.entry_id, t.slug, t.label
+         FROM entry_tags et
+         JOIN tags t ON t.id = et.tag_id
+         WHERE et.env_id = ? AND et.entry_id IN (${placeholders})
+         ORDER BY t.label COLLATE NOCASE ASC`
+      )
+      .all(envId, ...entryIds);
+    for (const r of rows) {
+      const key = r.entry_id.toString('hex');
+      const list = out.get(key) ?? [];
+      list.push({ slug: r.slug, label: r.label });
+      out.set(key, list);
+    }
+    return out;
+  }
+
+  async addAssetTags(assetId: Uint8Array, inputs: readonly string[]): Promise<TagInfo[]> {
+    const normalized = normalizeTags(inputs);
+    if (normalized.length === 0) return [];
+    const envId = Buffer.from(this.mainEnvId);
+    const idBuf = Buffer.from(assetId);
+
+    return this.db.transaction((): TagInfo[] => {
+      const exists = this.db
+        .prepare<[Buffer, Buffer], { ok: number }>(
+          'SELECT 1 AS ok FROM assets WHERE env_id = ? AND id = ? AND deleted_at IS NULL'
+        )
+        .get(envId, idBuf);
+      if (!exists) {
+        throw new NotFoundError('asset', Buffer.from(assetId).toString('hex'));
+      }
+      const tags = this.resolveOrCreateTags(envId, normalized);
+      const ins = this.db.prepare(
+        `INSERT OR IGNORE INTO asset_tags (env_id, asset_id, tag_id) VALUES (?, ?, ?)`
+      );
+      for (const t of tags) ins.run(envId, idBuf, Buffer.from(t.id));
+      return tags.map((t) => ({ slug: t.slug, label: t.label }));
+    })();
+  }
+
+  async removeAssetTags(assetId: Uint8Array, inputs: readonly string[]): Promise<number> {
+    const normalized = normalizeTags(inputs);
+    if (normalized.length === 0) return 0;
+    const envId = Buffer.from(this.mainEnvId);
+    const tagIds = this.lookupTagIdsBySlug(envId, normalized.map((n) => n.slug));
+    if (tagIds.length === 0) return 0;
+    const placeholders = tagIds.map(() => '?').join(',');
+    const result = this.db
+      .prepare(
+        `DELETE FROM asset_tags WHERE env_id = ? AND asset_id = ? AND tag_id IN (${placeholders})`
+      )
+      .run(envId, Buffer.from(assetId), ...tagIds);
+    return result.changes;
+  }
+
+  async getAssetTags(assetId: Uint8Array): Promise<TagInfo[]> {
+    const envId = Buffer.from(this.mainEnvId);
+    return this.fetchAssetTags(envId, [Buffer.from(assetId)]).get(
+      Buffer.from(assetId).toString('hex')
+    ) ?? [];
+  }
+
+  async addEntryTags(entryId: Uint8Array, inputs: readonly string[]): Promise<TagInfo[]> {
+    const normalized = normalizeTags(inputs);
+    if (normalized.length === 0) return [];
+    const envId = Buffer.from(this.mainEnvId);
+    const idBuf = Buffer.from(entryId);
+
+    return this.db.transaction((): TagInfo[] => {
+      const exists = this.db
+        .prepare<[Buffer, Buffer], { ok: number }>(
+          'SELECT 1 AS ok FROM entries WHERE env_id = ? AND id = ? AND deleted_at IS NULL'
+        )
+        .get(envId, idBuf);
+      if (!exists) {
+        throw new NotFoundError('entry', Buffer.from(entryId).toString('hex'));
+      }
+      const tags = this.resolveOrCreateTags(envId, normalized);
+      const ins = this.db.prepare(
+        `INSERT OR IGNORE INTO entry_tags (env_id, entry_id, tag_id) VALUES (?, ?, ?)`
+      );
+      for (const t of tags) ins.run(envId, idBuf, Buffer.from(t.id));
+      return tags.map((t) => ({ slug: t.slug, label: t.label }));
+    })();
+  }
+
+  async removeEntryTags(entryId: Uint8Array, inputs: readonly string[]): Promise<number> {
+    const normalized = normalizeTags(inputs);
+    if (normalized.length === 0) return 0;
+    const envId = Buffer.from(this.mainEnvId);
+    const tagIds = this.lookupTagIdsBySlug(envId, normalized.map((n) => n.slug));
+    if (tagIds.length === 0) return 0;
+    const placeholders = tagIds.map(() => '?').join(',');
+    const result = this.db
+      .prepare(
+        `DELETE FROM entry_tags WHERE env_id = ? AND entry_id = ? AND tag_id IN (${placeholders})`
+      )
+      .run(envId, Buffer.from(entryId), ...tagIds);
+    return result.changes;
+  }
+
+  async getEntryTags(entryId: Uint8Array): Promise<TagInfo[]> {
+    const envId = Buffer.from(this.mainEnvId);
+    return this.fetchEntryTags(envId, [Buffer.from(entryId)]).get(
+      Buffer.from(entryId).toString('hex')
+    ) ?? [];
+  }
+
+  async listTags(): Promise<TagWithCounts[]> {
+    const envId = Buffer.from(this.mainEnvId);
+    // Counts are filtered to non-deleted assets/entries so a "stale"
+    // tag attached only to deleted things shows zero — matches what
+    // the user actually sees in lists.
+    const rows = this.db
+      .prepare<[Buffer], { slug: string; label: string; asset_uses: number; entry_uses: number }>(
+        `SELECT t.slug, t.label,
+                COALESCE((
+                  SELECT COUNT(*) FROM asset_tags at
+                  JOIN assets a ON a.id = at.asset_id
+                  WHERE at.env_id = t.env_id AND at.tag_id = t.id AND a.deleted_at IS NULL
+                ), 0) AS asset_uses,
+                COALESCE((
+                  SELECT COUNT(*) FROM entry_tags et
+                  JOIN entries e ON e.id = et.entry_id
+                  WHERE et.env_id = t.env_id AND et.tag_id = t.id AND e.deleted_at IS NULL
+                ), 0) AS entry_uses
+         FROM tags t
+         WHERE t.env_id = ?
+         ORDER BY (asset_uses + entry_uses) DESC, t.label COLLATE NOCASE ASC`
+      )
+      .all(envId);
+    return rows.map((r) => ({
+      slug: r.slug,
+      label: r.label,
+      asset_uses: r.asset_uses,
+      entry_uses: r.entry_uses
+    }));
+  }
+
+  async updateTag(slug: string, label: string): Promise<TagInfo | null> {
+    const newLabel = normalizeTag(label);
+    if (newLabel === null) {
+      throw new Error(`updateTag: invalid label "${label}"`);
+    }
+    const envId = Buffer.from(this.mainEnvId);
+    const result = this.db
+      .prepare('UPDATE tags SET label = ? WHERE env_id = ? AND slug = ?')
+      .run(newLabel.label, envId, slug);
+    if (result.changes === 0) return null;
+    return { slug, label: newLabel.label };
   }
 
   async close(): Promise<void> {

@@ -65,6 +65,8 @@ describe('MCP server (in-memory round trip)', () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'add_asset_tags',
+      'add_entry_tags',
       'alter_type',
       'create_type',
       'delete_entry',
@@ -74,11 +76,15 @@ describe('MCP server (in-memory round trip)', () => {
       'find',
       'get_asset',
       'list_assets',
+      'list_tags',
       'migrate_entries',
       'publish',
       'read',
+      'remove_asset_tags',
+      'remove_entry_tags',
       'rename_entry',
-      'update_asset'
+      'update_asset',
+      'update_tag'
     ]);
   });
 

@@ -9,7 +9,9 @@ import type {
   Asset,
   ListAssetsResult,
   ListAssetsOptions,
-  AssetTransformOptions
+  AssetTransformOptions,
+  TagInfo,
+  TagWithCounts
 } from './types.js';
 
 export interface LedricClientOptions {
@@ -138,6 +140,7 @@ export class LedricClient {
       );
     }
     if (opts.resolveRefs === true) params.set('resolve_refs', '1');
+    if (opts.tags) for (const t of opts.tags) params.append('tag', t);
     const qs = params.toString() ? `?${params.toString()}` : '';
     const url = `${this.baseUrl}/entries/${encodeURIComponent(type)}${qs}`;
     const res = await this._fetch(url, { headers: this._headers });
@@ -181,11 +184,37 @@ export class LedricClient {
     if (opts.kind !== undefined) params.set('kind', opts.kind);
     if (opts.limit !== undefined) params.set('limit', String(opts.limit));
     if (opts.offset !== undefined) params.set('offset', String(opts.offset));
+    if (opts.tags) for (const t of opts.tags) params.append('tag', t);
     const qs = params.toString() ? `?${params.toString()}` : '';
     const url = `${this.baseUrl}/assets${qs}`;
     const res = await this._fetch(url, { headers: this._headers });
     if (!res.ok) await this._raise(res, url);
     return (await res.json()) as ListAssetsResult;
+  }
+
+  /** GET /tags — every tag in the env with usage counts. */
+  async tags(): Promise<TagWithCounts[]> {
+    const url = `${this.baseUrl}/tags`;
+    const res = await this._fetch(url, { headers: this._headers });
+    if (!res.ok) await this._raise(res, url);
+    return (await res.json()) as TagWithCounts[];
+  }
+
+  /** Add tags to an asset. Inputs are free-form strings; server normalizes. */
+  async addAssetTags(id: string, tags: string[]): Promise<TagInfo[]> {
+    return this.rpc<TagInfo[]>('add_asset_tags', { id, tags });
+  }
+  async removeAssetTags(id: string, tags: string[]): Promise<{ removed: number }> {
+    return this.rpc<{ removed: number }>('remove_asset_tags', { id, tags });
+  }
+  async addEntryTags(ref: EntryRef, tags: string[]): Promise<TagInfo[]> {
+    return this.rpc<TagInfo[]>('add_entry_tags', { ref: parseRef(ref), tags });
+  }
+  async removeEntryTags(ref: EntryRef, tags: string[]): Promise<{ removed: number }> {
+    return this.rpc<{ removed: number }>('remove_entry_tags', { ref: parseRef(ref), tags });
+  }
+  async updateTag(slug: string, label: string): Promise<TagInfo | null> {
+    return this.rpc<TagInfo | null>('update_tag', { slug, label });
   }
 
   /**

@@ -41,6 +41,22 @@ export interface AlterTypeResult {
   change_class: ChangeClass;
 }
 
+/** ---------- Tags ---------- */
+
+export interface TagInfo {
+  /** Canonical, lowercased, URL-safe form. The stable identity. */
+  slug: string;
+  /** Display form, case preserved. */
+  label: string;
+}
+
+export interface TagWithCounts extends TagInfo {
+  /** Number of non-deleted assets currently using this tag. */
+  asset_uses: number;
+  /** Number of non-deleted entries currently using this tag. */
+  entry_uses: number;
+}
+
 export interface CreateEntryInput {
   type: string;
   slug: string;
@@ -49,6 +65,8 @@ export interface CreateEntryInput {
   author?: string;
   /** Non-default-locale slug overrides ({ "fr": "bonjour-le-monde", … }). */
   locale_slugs?: Record<string, string>;
+  /** Initial tags. Free-form strings; normalized server-side. */
+  tags?: readonly string[];
 }
 
 export interface UpdateEntryInput {
@@ -109,6 +127,8 @@ export interface EntryDetail {
     expected?: unknown;
     actual?: unknown;
   }>;
+  /** Sorted by label, ascending. Empty array when untagged. */
+  tags: TagInfo[];
 }
 
 export interface RenameEntryInput {
@@ -134,6 +154,8 @@ export interface EntrySummary {
   current_version: number;
   published_version: number | null;
   deleted_at: number | null;
+  /** Sorted by label, ascending. Empty array when untagged. */
+  tags: TagInfo[];
 }
 
 export interface FindEntriesInput {
@@ -143,6 +165,8 @@ export interface FindEntriesInput {
   offset?: number;
   order?: Array<{ field: string; dir: 'asc' | 'desc' }>;
   includeDeleted?: boolean;
+  /** Filter to entries that have ALL of these tags (matched by slug). */
+  tags?: readonly string[];
 }
 
 export interface FindEntriesResult {
@@ -166,6 +190,8 @@ export interface CreateAssetInput {
   bytes: Uint8Array;
   meta?: AssetMeta;
   author?: string;
+  /** Initial tags. Free-form strings; normalized server-side. */
+  tags?: readonly string[];
 }
 
 /**
@@ -204,6 +230,8 @@ export interface AssetSummary {
   created_at: number;
   /** ref_key of the current version — used to build cache-stable URLs. */
   ref_key: Uint8Array;
+  /** Sorted by label, ascending. Empty array when untagged. */
+  tags: TagInfo[];
 }
 
 export interface AssetDetail extends AssetSummary {
@@ -216,6 +244,8 @@ export interface ListAssetsInput {
   limit?: number;
   offset?: number;
   includeDeleted?: boolean;
+  /** Filter to assets that have ALL of these tags (matched by slug). */
+  tags?: readonly string[];
 }
 
 export interface ListAssetsResult {
@@ -309,6 +339,25 @@ export interface Storage {
   deleteType(input: DeleteTypeInput): Promise<DeleteTypeResult>;
   /** Soft-delete an entry. Reads stop seeing it; storage row stays. */
   deleteEntry(input: DeleteEntryInput): Promise<DeleteEntryResult>;
+
+  /**
+   * Tag operations. Inputs are free-form strings; the storage layer
+   * normalizes (`#Featured Event`, `featured event`, `FEATURED EVENT`
+   * all collapse to slug `featured-event`). Adding an unknown tag for
+   * the first time creates the row in `tags` with the caller's
+   * preserved-case label; later writes match by slug and inherit the
+   * existing label.
+   */
+  addAssetTags(assetId: Uint8Array, inputs: readonly string[]): Promise<TagInfo[]>;
+  removeAssetTags(assetId: Uint8Array, inputs: readonly string[]): Promise<number>;
+  getAssetTags(assetId: Uint8Array): Promise<TagInfo[]>;
+  addEntryTags(entryId: Uint8Array, inputs: readonly string[]): Promise<TagInfo[]>;
+  removeEntryTags(entryId: Uint8Array, inputs: readonly string[]): Promise<number>;
+  getEntryTags(entryId: Uint8Array): Promise<TagInfo[]>;
+  /** Every tag in the env, ordered by total uses desc, then label asc. */
+  listTags(): Promise<TagWithCounts[]>;
+  /** Relabel an existing tag. Slug is the stable identity and never changes. */
+  updateTag(slug: string, label: string): Promise<TagInfo | null>;
 
   /** Create an API key row from a pre-hashed secret. Returns the assigned id + created_at. */
   createApiKey(input: CreateApiKeyInput): Promise<{ id: Uint8Array; created_at: number }>;

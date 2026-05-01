@@ -158,6 +158,29 @@ const DeleteEntryArgsSchema = z
   })
   .strict();
 
+const TagsListSchema = z.array(z.string()).min(1);
+
+const AssetTagsArgsSchema = z
+  .object({
+    id: z.string().length(32),
+    tags: TagsListSchema
+  })
+  .strict();
+
+const EntryTagsArgsSchema = z
+  .object({
+    ref: EntryRefSchema,
+    tags: TagsListSchema
+  })
+  .strict();
+
+const UpdateTagArgsSchema = z
+  .object({
+    slug: z.string(),
+    label: z.string()
+  })
+  .strict();
+
 const MigrateEntriesArgsSchema = z
   .object({
     type: z.string(),
@@ -201,6 +224,7 @@ Core workflows:
 - Backfill after a schema change: migrate_entries walks every entry of a type, optionally applying a merge_patch, and re-stamps with the current schema_version.
 - Rename: rename_entry retires the old slug (which keeps redirecting forever) and assigns a new one.
 - Delete: delete_entry soft-deletes a single entry (parent_version required); reads stop seeing it but the row stays. delete_type soft-deletes a content type (parent_version required); refuses with TYPE_NOT_EMPTY when entries remain unless cascade:true is passed, which deletes the type and every entry in one transaction.
+- Tags: add_asset_tags / remove_asset_tags / add_entry_tags / remove_entry_tags accept free-form strings ("#Featured Event", "featured event", "FEATURED EVENT" all collapse to slug "featured-event"). The first writer of a new tag wins its display label; later writers inherit it. update_tag relabels an existing slug; list_tags returns every tag with usage counts. Filter on listAssets/find with \`tags: [...]\` (AND semantics — entries/assets must have ALL listed tags). Tags are surfaced on every Asset/Entry shape via \`tags: [{ slug, label }]\`.
 
 Field types — use these as the "type" discriminator on each field def:
   string, number, boolean, date, slug, enum, asset, references, array, object, vector, markdown, jss, css.
@@ -600,6 +624,95 @@ export function createMcpServer(core: Core): Server {
           required: ['ref', 'parent_version'],
           additionalProperties: false
         }
+      },
+      {
+        name: 'add_asset_tags',
+        description:
+          'Tag an asset. Inputs are free-form strings ("#Featured Event", "featured event", "FEATURED EVENT" all collapse to slug "featured-event"). The first writer of a new tag wins its display label; later writers inherit it. Use `update_tag` to relabel.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Asset id (32-char hex).' },
+            tags: { type: 'array', items: { type: 'string' }, minItems: 1 }
+          },
+          required: ['id', 'tags'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'remove_asset_tags',
+        description: 'Remove tags from an asset by slug match (case/whitespace insensitive). Returns the count removed.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            tags: { type: 'array', items: { type: 'string' }, minItems: 1 }
+          },
+          required: ['id', 'tags'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'add_entry_tags',
+        description: 'Tag an entry. Same normalization rules as add_asset_tags.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            ref: {
+              type: 'object',
+              properties: {
+                type: { type: 'string' },
+                slug: { type: 'string' }
+              },
+              required: ['type', 'slug'],
+              additionalProperties: false
+            },
+            tags: { type: 'array', items: { type: 'string' }, minItems: 1 }
+          },
+          required: ['ref', 'tags'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'remove_entry_tags',
+        description: 'Remove tags from an entry by slug match.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            ref: {
+              type: 'object',
+              properties: {
+                type: { type: 'string' },
+                slug: { type: 'string' }
+              },
+              required: ['type', 'slug'],
+              additionalProperties: false
+            },
+            tags: { type: 'array', items: { type: 'string' }, minItems: 1 }
+          },
+          required: ['ref', 'tags'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'list_tags',
+        description:
+          'Every tag in the env, ordered by total uses (asset_uses + entry_uses) desc, then label asc. Returns [{ slug, label, asset_uses, entry_uses }].',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+      },
+      {
+        name: 'update_tag',
+        description:
+          "Relabel a tag. The slug is the stable identity and never changes — passing a new label whose slug would differ still keeps the original slug. Returns null when no tag with that slug exists.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            slug: { type: 'string', description: 'Canonical slug of the tag to relabel.' },
+            label: { type: 'string', description: 'New display label.' }
+          },
+          required: ['slug', 'label'],
+          additionalProperties: false
+        }
       }
     ]
   }));
@@ -698,6 +811,35 @@ export function createMcpServer(core: Core): Server {
           return {
             content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
           };
+        }
+        case 'add_asset_tags': {
+          const parsed = AssetTagsArgsSchema.parse(args ?? {});
+          const result = await core.addAssetTags(parsed.id, parsed.tags);
+          return { content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }] };
+        }
+        case 'remove_asset_tags': {
+          const parsed = AssetTagsArgsSchema.parse(args ?? {});
+          const result = await core.removeAssetTags(parsed.id, parsed.tags);
+          return { content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }] };
+        }
+        case 'add_entry_tags': {
+          const parsed = EntryTagsArgsSchema.parse(args ?? {});
+          const result = await core.addEntryTags(parsed.ref, parsed.tags);
+          return { content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }] };
+        }
+        case 'remove_entry_tags': {
+          const parsed = EntryTagsArgsSchema.parse(args ?? {});
+          const result = await core.removeEntryTags(parsed.ref, parsed.tags);
+          return { content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }] };
+        }
+        case 'list_tags': {
+          const result = await core.listTags();
+          return { content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }] };
+        }
+        case 'update_tag': {
+          const parsed = UpdateTagArgsSchema.parse(args ?? {});
+          const result = await core.updateTag(parsed.slug, parsed.label);
+          return { content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }] };
         }
         case 'get_asset': {
           const parsed = GetAssetArgsSchema.parse(args ?? {});

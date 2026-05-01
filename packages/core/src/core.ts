@@ -13,7 +13,9 @@ import type {
   AssetSummary,
   AssetWrite,
   ListAssetsInput,
-  ListAssetsResult
+  ListAssetsResult,
+  TagInfo,
+  TagWithCounts
 } from '@ledric/storage';
 import { normalizeTypeDef } from './normalize.js';
 import { deriveContent } from './derive.js';
@@ -95,6 +97,8 @@ export interface DraftInput {
   ref?: EntryRef;
   parent_version?: number;
   author?: string;
+  /** Initial tags for new entries. Ignored when updating an existing entry. */
+  tags?: readonly string[];
 }
 
 export interface DraftResult extends EntryWrite {
@@ -201,6 +205,8 @@ export interface UploadAssetInput {
   bytes: Uint8Array;
   meta?: AssetMeta;
   author?: string;
+  /** Initial tags. Free-form strings; normalized server-side. */
+  tags?: readonly string[];
 }
 
 export interface GetAssetInput {
@@ -450,7 +456,8 @@ export class Core {
       content: validated.value,
       schema_version: typeDetail.current_version,
       ...(input.author !== undefined ? { author: input.author } : {}),
-      ...(localeSlugs !== undefined ? { locale_slugs: localeSlugs } : {})
+      ...(localeSlugs !== undefined ? { locale_slugs: localeSlugs } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {})
     });
     return { ...write, status: 'draft', content: validated.value, warnings };
   }
@@ -584,6 +591,52 @@ export class Core {
     };
   }
 
+  // -------------------- Tags --------------------
+
+  /** Resolve an entry ref to its uuid bytes. Throws NOT_FOUND if missing. */
+  private async resolveEntryId(ref: EntryRef): Promise<Uint8Array> {
+    const entry = await this.storage.readEntry(ref);
+    if (!entry) throw new Error(`NOT_FOUND: entry "${ref.type}/${ref.slug}"`);
+    return entry.id;
+  }
+
+  /** Hex-decode an asset id (32-char hex) to its uuid bytes. */
+  private decodeAssetId(idHex: string): Uint8Array {
+    const buf = Buffer.from(idHex, 'hex');
+    if (buf.byteLength !== 16) {
+      throw new Error(`Invalid asset id "${idHex}" (expected 32-char hex)`);
+    }
+    return new Uint8Array(buf);
+  }
+
+  async addAssetTags(idHex: string, tags: readonly string[]): Promise<TagInfo[]> {
+    return this.storage.addAssetTags(this.decodeAssetId(idHex), tags);
+  }
+
+  async removeAssetTags(idHex: string, tags: readonly string[]): Promise<{ removed: number }> {
+    const removed = await this.storage.removeAssetTags(this.decodeAssetId(idHex), tags);
+    return { removed };
+  }
+
+  async addEntryTags(ref: EntryRef, tags: readonly string[]): Promise<TagInfo[]> {
+    const id = await this.resolveEntryId(ref);
+    return this.storage.addEntryTags(id, tags);
+  }
+
+  async removeEntryTags(ref: EntryRef, tags: readonly string[]): Promise<{ removed: number }> {
+    const id = await this.resolveEntryId(ref);
+    const removed = await this.storage.removeEntryTags(id, tags);
+    return { removed };
+  }
+
+  async listTags(): Promise<TagWithCounts[]> {
+    return this.storage.listTags();
+  }
+
+  async updateTag(slug: string, label: string): Promise<TagInfo | null> {
+    return this.storage.updateTag(slug, label);
+  }
+
   async publish(input: PublishInput): Promise<PublishResult> {
     // Re-check structural refs and refuse to publish if any are dangling
     // or wrong-typed. Warnings on draft become errors here — that's the
@@ -617,7 +670,8 @@ export class Core {
       kind: input.kind,
       bytes: input.bytes,
       ...(input.meta !== undefined ? { meta: input.meta } : {}),
-      ...(input.author !== undefined ? { author: input.author } : {})
+      ...(input.author !== undefined ? { author: input.author } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {})
     });
   }
 

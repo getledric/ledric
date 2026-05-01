@@ -40,6 +40,10 @@ export const lsCommand = defineCommand({
     locale: {
       type: 'string',
       description: 'Project each entry into this locale.'
+    },
+    tag: {
+      type: 'string',
+      description: 'Comma-separated tag filter (AND semantics).'
     }
   },
   async run({ args }) {
@@ -74,11 +78,15 @@ export const lsCommand = defineCommand({
       }
       const summaryFields = typeDetail.definition.summary_fields ?? [];
 
+      const tags = (typeof args.tag === 'string' && args.tag.length > 0)
+        ? args.tag.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+        : [];
       const result = await core.find({
         type: args.type,
         limit: parseInt(args.limit, 10),
         offset: parseInt(args.offset, 10),
-        ...(args.locale !== undefined ? { locale: args.locale } : {})
+        ...(args.locale !== undefined ? { locale: args.locale } : {}),
+        ...(tags.length > 0 ? { tags } : {})
       });
 
       const rows = result.results.map((r) => {
@@ -90,7 +98,8 @@ export const lsCommand = defineCommand({
           slug: r.slug,
           version: r.current_version,
           published_version: r.published_version,
-          fields
+          fields,
+          tags: r.tags
         };
       });
 

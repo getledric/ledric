@@ -180,5 +180,41 @@ export const migrations: Migration[] = [
 
       CREATE UNIQUE INDEX idx_asset_versions_ref_key ON asset_versions (ref_key);
     `
+  },
+  {
+    id: 7,
+    name: '0007_tags',
+    sql: `
+      -- Shared tag table. Slug is the canonical, lowercased, URL-safe
+      -- form used for matching and filtering. Label preserves whatever
+      -- case the first author wrote ("Featured Event"). update_tag
+      -- relabels in place; the slug is the stable identity.
+      CREATE TABLE tags (
+        id          BLOB    PRIMARY KEY,
+        env_id      BLOB    NOT NULL REFERENCES envs(id),
+        slug        TEXT    NOT NULL,
+        label       TEXT    NOT NULL,
+        created_at  INTEGER NOT NULL,
+        UNIQUE (env_id, slug)
+      ) STRICT;
+
+      CREATE TABLE asset_tags (
+        env_id    BLOB NOT NULL REFERENCES envs(id),
+        asset_id  BLOB NOT NULL REFERENCES assets(id),
+        tag_id    BLOB NOT NULL REFERENCES tags(id),
+        PRIMARY KEY (env_id, asset_id, tag_id)
+      ) STRICT;
+
+      CREATE INDEX idx_asset_tags_tag ON asset_tags (env_id, tag_id);
+
+      CREATE TABLE entry_tags (
+        env_id    BLOB NOT NULL REFERENCES envs(id),
+        entry_id  BLOB NOT NULL REFERENCES entries(id),
+        tag_id    BLOB NOT NULL REFERENCES tags(id),
+        PRIMARY KEY (env_id, entry_id, tag_id)
+      ) STRICT;
+
+      CREATE INDEX idx_entry_tags_tag ON entry_tags (env_id, tag_id);
+    `
   }
 ];

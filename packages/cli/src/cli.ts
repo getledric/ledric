@@ -8,6 +8,7 @@ import { assetCommand } from './commands/asset.js';
 import { renameCommand } from './commands/rename.js';
 import { refsCommand } from './commands/refs.js';
 import { keysCommand } from './commands/keys.js';
+import { tagCommand, untagCommand, tagsCommand } from './commands/tag.js';
 
 const CONFIG_HELP = `
 ledric — MCP/LLM-native self-hosted CMS
@@ -73,7 +74,10 @@ const main = defineCommand({
     asset: assetCommand,
     rename: renameCommand,
     refs: refsCommand,
-    keys: keysCommand
+    keys: keysCommand,
+    tag: tagCommand,
+    untag: untagCommand,
+    tags: tagsCommand
   },
   run() {
     // Citty invokes the parent's `run` even when a subcommand matches; only

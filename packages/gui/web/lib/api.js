@@ -82,14 +82,19 @@ async function jsonOrThrow(res) {
   return body;
 }
 
-function qs(params) {
+function qs(params, repeatable = []) {
   const p = new URLSearchParams();
+  const repeats = new Set(repeatable);
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === false) continue;
     if (v === true) {
       p.set(k, '1');
     } else if (Array.isArray(v)) {
-      p.set(k, v.join(','));
+      if (repeats.has(k)) {
+        for (const item of v) p.append(k, String(item));
+      } else {
+        p.set(k, v.join(','));
+      }
     } else {
       p.set(k, String(v));
     }
@@ -107,7 +112,12 @@ export const api = {
     authedFetch(`${ROOT}/types/${encodeURIComponent(name)}`).then(jsonOrThrow),
 
   find: (type, opts = {}) =>
-    authedFetch(`${ROOT}/entries/${encodeURIComponent(type)}${qs(opts)}`).then(jsonOrThrow),
+    authedFetch(
+      `${ROOT}/entries/${encodeURIComponent(type)}${qs(
+        { ...opts, tag: opts.tags },
+        ['tag']
+      )}`
+    ).then(jsonOrThrow),
 
   read: (type, slug, opts = {}) =>
     authedFetch(
@@ -120,7 +130,19 @@ export const api = {
     ).then(jsonOrThrow),
 
   assets: (opts = {}) =>
-    authedFetch(`${ROOT}/assets${qs(opts)}`).then(jsonOrThrow),
+    authedFetch(
+      `${ROOT}/assets${qs({ ...opts, tag: opts.tags }, ['tag'])}`
+    ).then(jsonOrThrow),
+
+  tags: () => authedFetch(`${ROOT}/tags`).then(jsonOrThrow),
+
+  addEntryTags: (type, slug, tags) =>
+    api.rpc('add_entry_tags', { ref: { type, slug }, tags }),
+  removeEntryTags: (type, slug, tags) =>
+    api.rpc('remove_entry_tags', { ref: { type, slug }, tags }),
+  addAssetTags: (id, tags) => api.rpc('add_asset_tags', { id, tags }),
+  removeAssetTags: (id, tags) => api.rpc('remove_asset_tags', { id, tags }),
+  updateTag: (slug, label) => api.rpc('update_tag', { slug, label }),
 
   asset: (id) =>
     authedFetch(`${ROOT}/assets/${encodeURIComponent(id)}/meta`).then(jsonOrThrow),

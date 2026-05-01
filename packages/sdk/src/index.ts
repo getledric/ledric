@@ -19,6 +19,8 @@ export type {
   AssetSummary,
   AssetMeta,
   AssetTransformOptions,
+  TagInfo,
+  TagWithCounts,
   ListAssetsResult,
   ListAssetsOptions,
   ResolvedRef,
