@@ -1,0 +1,11 @@
+packages:
+  - 'packages/*'
+  - 'examples/*'
+
+# Native deps that need their build scripts to run (compile native bindings
+# at install time). pnpm 10+ skips all install scripts unless explicitly
+# allow-listed.
+onlyBuiltDependencies:
+  - better-sqlite3
+  - esbuild
+  - sharp

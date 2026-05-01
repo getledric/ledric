@@ -107,5 +107,5 @@ composer test
 
 16 unit tests against a mock HTTP layer cover the surface. Integration
 against a running ledric is straightforward — point `LedricClient` at
-the live HTTP server (`yarn cli http` from the monorepo) and call the
+the live HTTP server (`pnpm cli http` from the monorepo) and call the
 methods directly.

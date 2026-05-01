@@ -11,7 +11,7 @@ from ledric?"
 From the repo root, in one terminal:
 
 ```bash
-yarn cli http
+pnpm cli http
 ```
 
 That starts the HTTP server on `http://localhost:3000` against

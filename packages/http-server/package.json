@@ -34,5 +34,8 @@
     "@ledric/core": "workspace:*",
     "@ledric/storage": "workspace:*",
     "fastify": "^5.1.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
   }
 }

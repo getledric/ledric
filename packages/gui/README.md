@@ -23,7 +23,7 @@ served verbatim by `@fastify/static`.
 ## Running it
 
 ```bash
-yarn cli http --gui
+pnpm cli http --gui
 # admin GUI at http://127.0.0.1:3000/admin
 ```
 

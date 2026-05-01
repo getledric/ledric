@@ -17,10 +17,10 @@ From the repo root, in two terminals:
 
 ```bash
 # 1. ledric API
-yarn cli http
+pnpm cli http
 
 # 2. astro dev server
-yarn workspace @ledric/example-astro-blog dev
+pnpm --filter @ledric/example-astro-blog dev
 ```
 
 Then visit `http://localhost:4321`.
@@ -28,7 +28,7 @@ Then visit `http://localhost:4321`.
 ## Pointing at a different API
 
 ```bash
-LEDRIC_API=http://192.168.1.10:3000 yarn workspace @ledric/example-astro-blog dev
+LEDRIC_API=http://192.168.1.10:3000 pnpm --filter @ledric/example-astro-blog dev
 ```
 
 ## How it talks to ledric
@@ -42,8 +42,8 @@ HTTP server, which streams bytes with `Cache-Control: immutable`.
 ## Build for production
 
 ```bash
-yarn workspace @ledric/example-astro-blog build
-yarn workspace @ledric/example-astro-blog start
+pnpm --filter @ledric/example-astro-blog build
+pnpm --filter @ledric/example-astro-blog start
 ```
 
 The site runs as a standalone Node server (via `@astrojs/node`).

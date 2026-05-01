@@ -2,7 +2,7 @@
 
 > An MCP/LLM-native, self-hosted CMS. Content engine with a well-documented MCP surface; the LLM is a client, not a server-side dependency.
 
-**Changes from v0.1:** schemas are now DB-resident first-class entities (not code-first); storage is a type-agnostic object store (no per-type tables); one process hosts the HTTP API and the MCP server side-by-side over a shared Core (no separate management API — token scopes do the split); stack decisions made concrete (Node 22+, Yarn 4, Drizzle, Fastify, `better-sqlite3`, Citty, Zod, cosmiconfig, tsup); environments and branching explicitly deferred but the data model leaves the door open.
+**Changes from v0.1:** schemas are now DB-resident first-class entities (not code-first); storage is a type-agnostic object store (no per-type tables); one process hosts the HTTP API and the MCP server side-by-side over a shared Core (no separate management API — token scopes do the split); stack decisions made concrete (Node 22+, pnpm, Drizzle, Fastify, `better-sqlite3`, Citty, Zod, cosmiconfig, tsup); environments and branching explicitly deferred but the data model leaves the door open.
 
 ---
 
@@ -571,7 +571,7 @@ Consistent across all tools:
 
 **Runtime / tooling**
 - Node 22+ (`better-sqlite3` in v1 for the battle-tested sync API; stable `node:sqlite` is a later option).
-- Yarn 4 workspaces. Changesets for publishing.
+- pnpm workspaces. Changesets for publishing.
 - Drizzle as the query layer; SQLite and Postgres both first-class through the same adapter.
 - Fastify for HTTP.
 - `@modelcontextprotocol/sdk` for MCP plumbing (stdio + HTTP+SSE transports).
@@ -612,8 +612,8 @@ The PHP SDK is a separate repo when it lands.
 
 **Dev loop**
 
-- `yarn dev` — watch build + `ledric serve` against `./ledric.db`.
-- `yarn test` — vitest.
+- `pnpm dev` — watch build + `ledric serve` against `./ledric.db`.
+- `pnpm test` — vitest.
 - Seeded sample project under `examples/` for smoke tests.
 
 ## 13. Problems this explicitly solves vs Contentful

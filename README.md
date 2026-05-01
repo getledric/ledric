@@ -39,14 +39,14 @@ ledric sits in the middle and gets out of the way.
 ## Two minutes to running
 
 ```bash
-# Node 22+ and Yarn 4 (via corepack)
+# Node 22+ and pnpm (via corepack)
 corepack enable
-yarn install
-yarn build
+pnpm install
+pnpm build
 
 # Pick your shape:
-yarn cli serve                # MCP stdio only — perfect for Claude Desktop
-yarn cli serve --gui          # also: HTTP API + admin GUI at http://127.0.0.1:3000/admin
+pnpm cli serve                # MCP stdio only — perfect for Claude Desktop
+pnpm cli serve --gui          # also: HTTP API + admin GUI at http://127.0.0.1:3000/admin
 ```
 
 That's it. A `./ledric.db` file just appeared next to you. With `--gui`, ledric also generates an admin key and a reader key on first boot and prints them once to stderr — copy them somewhere safe.
@@ -71,10 +71,10 @@ If you want the admin UI in your browser, paste the printed admin key into the p
 ## See your content from the outside
 
 ```bash
-yarn cli ls                              # what types do I have?
-yarn cli ls blog_post                    # what posts?
-yarn cli get blog_post/hello-world       # one post, in the shape a website would render
-yarn cli asset upload hero.jpg           # store an image
+pnpm cli ls                              # what types do I have?
+pnpm cli ls blog_post                    # what posts?
+pnpm cli get blog_post/hello-world       # one post, in the shape a website would render
+pnpm cli asset upload hero.jpg           # store an image
 ```
 
 ## Inside the box
