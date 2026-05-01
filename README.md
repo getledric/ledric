@@ -104,10 +104,10 @@ matches what you're trying to do.
 | **[MCP tools](./docs/mcp-tools.md)** | The full 20-tool surface — args, returns, examples. Same surface as `POST /rpc` over HTTP. |
 | **[HTTP API](./docs/http-api.md)** | REST routes for reads, multipart upload, generic `POST /rpc`, image transforms, slug redirects, error codes. |
 | **[Inline editor](./docs/inline-editor.md)** | `<script>` install, `data-ledric-ref` / `data-ledric-field` attributes, `refAttrs()` helpers in both SDKs, auth, behaviour. |
-| _coming_ | Assets, transforms, ref-key model |
-| _coming_ | API keys + auth |
-| _coming_ | TypeScript and PHP SDK usage |
-| _coming_ | Localization |
+| **[Assets](./docs/assets.md)** | The id / ref_key split, db vs local backends, uploads, image transforms, in-place bytes replacement, the transforms cache. |
+| **[Auth](./docs/auth.md)** | Roles, key minting via `init` / first boot, header formats, closed-reads mode, listing / creating / revoking, rotation, env-var override. |
+| **[SDKs](./docs/sdks.md)** | `@ledric/sdk` (TypeScript) and `Ledric\LedricClient` (PHP) — methods, options, errors, inline-editor `refAttrs()`. |
+| **[Localization](./docs/localization.md)** | Per-type locales, `localized: true` fields, the `_locale` sidecar, fallback chains, locale-specific slugs, recipes. |
 
 ## The design philosophy
 
