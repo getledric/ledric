@@ -322,4 +322,30 @@ describe('defineType', () => {
       })
     ).toThrow(/aspect_ratio must be a "W:H" string/);
   });
+
+  // searchable flag — schema-side validation
+  it('accepts searchable:true on string and markdown fields', () => {
+    const t = defineType('post', {
+      title: field.string({ required: true, searchable: true }),
+      body: field.markdown({ required: true, searchable: true })
+    });
+    expect((t.fields.title as { searchable?: boolean }).searchable).toBe(true);
+    expect((t.fields.body as { searchable?: boolean }).searchable).toBe(true);
+  });
+
+  it('rejects searchable:true on non-text field types', () => {
+    expect(() =>
+      defineType('post', {
+        title: field.string({ required: true }),
+        score: field.number({ searchable: true } as never)
+      })
+    ).toThrow(/searchable:true is only allowed on string or markdown/);
+
+    expect(() =>
+      defineType('post', {
+        title: field.string({ required: true }),
+        tags: field.array({ of: field.string(), searchable: true } as never)
+      })
+    ).toThrow(/searchable:true is only allowed on string or markdown/);
+  });
 });

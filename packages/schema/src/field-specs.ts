@@ -38,7 +38,7 @@ export const FIELD_TYPE_SPECS: Record<FieldType, FieldTypeSpec> = {
   string: {
     description: 'Plain text. Stored as TEXT.',
     required: [],
-    optional: ['min', 'max', 'pattern', 'unique', ...COMMON_OPTIONAL],
+    optional: ['min', 'max', 'pattern', 'unique', 'searchable', ...COMMON_OPTIONAL],
     example: { type: 'string', required: true, max: 120 }
   },
   number: {
@@ -76,7 +76,7 @@ export const FIELD_TYPE_SPECS: Record<FieldType, FieldTypeSpec> = {
     description:
       'Rich text as Markdown (string). Per-field HTML policy; defaults to "sanitize".',
     required: [],
-    optional: ['html', 'max', ...COMMON_OPTIONAL],
+    optional: ['html', 'max', 'searchable', ...COMMON_OPTIONAL],
     example: { type: 'markdown', required: true }
   },
   asset: {

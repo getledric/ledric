@@ -33,6 +33,12 @@ export interface FieldString extends FieldCommon {
    * fail with code: 'UNIQUE_VIOLATION'. Cannot be combined with localized:true.
    */
   unique?: boolean;
+  /**
+   * Include this field's value in the cross-type FTS index. Only allowed
+   * on string and markdown fields. Combined with localized:true, every
+   * locale's value is indexed separately so search is locale-aware.
+   */
+  searchable?: boolean;
 }
 
 export interface FieldNumber extends FieldCommon {
@@ -64,6 +70,8 @@ export interface FieldMarkdown extends FieldCommon {
   type: 'markdown';
   html?: 'allow' | 'sanitize' | 'forbid';
   max?: number;
+  /** See FieldString.searchable. */
+  searchable?: boolean;
 }
 
 export interface FieldAsset extends FieldCommon {

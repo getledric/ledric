@@ -75,6 +75,19 @@ function validateFieldDef(
         `Per-locale uniqueness isn't supported yet.`
     );
   }
+  // `searchable` is only meaningful on text fields. FTS tokenisers care
+  // about word breaks; numbers / booleans / dates / refs / vectors don't
+  // have any. Reject explicitly so misuse fails at defineType, not at
+  // first write.
+  if (
+    (field as { searchable?: unknown }).searchable === true &&
+    !(field.type === 'string' || field.type === 'markdown')
+  ) {
+    vfail(
+      `${pathLabel}: field "${fieldName}" (type "${field.type}") cannot be searchable. ` +
+        `searchable:true is only allowed on string or markdown fields.`
+    );
+  }
   // Recurse into nested object/array fields so deep schemas validate too.
   if (field.type === 'object') {
     if (field.fields === null || typeof field.fields !== 'object' || Array.isArray(field.fields)) {
