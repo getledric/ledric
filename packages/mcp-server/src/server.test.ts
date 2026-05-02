@@ -184,8 +184,8 @@ describe('MCP server (in-memory round trip)', () => {
       ).content
     ));
     expect(drafted.slug).toBe('hello-world');
-    expect(drafted.content._locale.fr.slug).toBe('bonjour-le-monde');
-    expect(drafted.content._locale.de.slug).toBe('hallo-welt');
+    expect(drafted.fields._locale.fr.slug).toBe('bonjour-le-monde');
+    expect(drafted.fields._locale.de.slug).toBe('hallo-welt');
 
     // Default-locale read: top-level fields, _locale stripped.
     const en = JSON.parse(firstText(
@@ -196,8 +196,8 @@ describe('MCP server (in-memory round trip)', () => {
         })
       ).content
     ));
-    expect(en.content.title).toBe('Hello World');
-    expect(en.content._locale).toBeUndefined();
+    expect(en.fields.title).toBe('Hello World');
+    expect(en.fields._locale).toBeUndefined();
 
     // FR read by FR slug — gets FR projection.
     const fr = JSON.parse(firstText(
@@ -211,8 +211,8 @@ describe('MCP server (in-memory round trip)', () => {
         })
       ).content
     ));
-    expect(fr.content.title).toBe('Bonjour le monde');
-    expect(fr.content.body).toBe('## salut');
+    expect(fr.fields.title).toBe('Bonjour le monde');
+    expect(fr.fields.body).toBe('## salut');
 
     // DE read — title from de, body falls through de → fr (per fallback).
     const de = JSON.parse(firstText(
@@ -226,8 +226,8 @@ describe('MCP server (in-memory round trip)', () => {
         })
       ).content
     ));
-    expect(de.content.title).toBe('Hallo Welt');
-    expect(de.content.body).toBe('## salut');
+    expect(de.fields.title).toBe('Hallo Welt');
+    expect(de.fields.body).toBe('## salut');
 
     // Rename FR slug — old FR slug should redirect.
     const renamed = JSON.parse(firstText(
@@ -439,7 +439,7 @@ describe('MCP server (in-memory round trip)', () => {
         })
       ).content
     ));
-    expect(read.content.tags).toEqual(['a', 'migrated']);
+    expect(read.fields.tags).toEqual(['a', 'migrated']);
     expect(read.current_version).toBe(2);
   });
 
@@ -482,7 +482,7 @@ describe('MCP server (in-memory round trip)', () => {
         })
       ).content
     ));
-    expect(read.content.title).toBe('First');
+    expect(read.fields.title).toBe('First');
     expect(read.current_version).toBe(1);
   });
 
@@ -704,8 +704,8 @@ describe('MCP server (in-memory round trip)', () => {
       )
     );
     expect(read.current_version).toBe(1);
-    expect(read.content.title).toBe('Hello World');
-    expect(read.content.body).toBe('## hi');
+    expect(read.fields.title).toBe('Hello World');
+    expect(read.fields.body).toBe('## hi');
 
     const found = JSON.parse(
       firstText(

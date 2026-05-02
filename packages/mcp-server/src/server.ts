@@ -781,7 +781,16 @@ export function createMcpServer(core: Core): Server {
           const parsed = DraftArgsSchema.parse(args ?? {});
           const result = await core.draft(parsed);
           return {
-            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  toJsonSafe(entryToWireShape(result as unknown as Record<string, unknown>)),
+                  null,
+                  2
+                )
+              }
+            ]
           };
         }
         case 'read': {
@@ -793,7 +802,11 @@ export function createMcpServer(core: Core): Server {
                 type: 'text',
                 text: result === null
                   ? `not_found: ${parsed.ref.type}/${parsed.ref.slug}`
-                  : JSON.stringify(toJsonSafe(result), null, 2)
+                  : JSON.stringify(
+                      toJsonSafe(entryToWireShape(result as unknown as Record<string, unknown>)),
+                      null,
+                      2
+                    )
               }
             ]
           };
@@ -801,8 +814,14 @@ export function createMcpServer(core: Core): Server {
         case 'find': {
           const parsed = FindArgsSchema.parse(args ?? {});
           const result = await core.find(parsed);
+          const wire = {
+            ...result,
+            results: result.results.map((r) =>
+              entryToWireShape(r as unknown as Record<string, unknown>)
+            )
+          };
           return {
-            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(result), null, 2) }]
+            content: [{ type: 'text', text: JSON.stringify(toJsonSafe(wire), null, 2) }]
           };
         }
         case 'publish': {
@@ -988,6 +1007,27 @@ function isJsonScalar(v: unknown): boolean {
     typeof v === 'boolean' ||
     v === null
   );
+}
+
+/**
+ * Map an EntryDetail to the wire shape consumers should see — with the
+ * field-content map under the key `fields`, matching the HTTP routes'
+ * shape. Internally EntryDetail names that property `content` (matches
+ * the storage column), but the public API and HTTP responses both use
+ * `fields`. Without this mapping, MCP and HTTP returned different
+ * shapes for the same data, which broke any client that targeted both
+ * surfaces.
+ *
+ * Other fields are preserved so MCP keeps surfacing things HTTP omits
+ * (schema_version, content_hash, current_version) — those are useful
+ * for agents introspecting versioning and content identity.
+ */
+function entryToWireShape(entry: Record<string, unknown>): Record<string, unknown> {
+  if (!('content' in entry)) return entry;
+  const { content, ...rest } = entry as Record<string, unknown> & {
+    content?: unknown;
+  };
+  return { ...rest, fields: content };
 }
 
 function toJsonSafe(value: unknown): unknown {
