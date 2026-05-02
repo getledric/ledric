@@ -167,6 +167,19 @@ export interface FindEntriesInput {
   includeDeleted?: boolean;
   /** Filter to entries that have ALL of these tags (matched by slug). */
   tags?: readonly string[];
+  /**
+   * Full-text search query. When set, results are restricted to entries
+   * matching the query across their searchable:true fields and ordered
+   * by relevance rank (overriding `order` unless `order` is supplied
+   * explicitly).
+   */
+  q?: string;
+  /**
+   * Locale to scope FTS matches to. When set with `q`, only matches in
+   * that locale's row plus rows with locale='' (non-localized fields)
+   * count. When omitted, all locales contribute.
+   */
+  locale?: string;
 }
 
 export interface FindEntriesResult {

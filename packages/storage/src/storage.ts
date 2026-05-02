@@ -410,6 +410,8 @@ export class LedricStorage implements Storage {
         const resolved = await this.resolveOrCreateTags(tx, envId, initialTags);
         await this.attachEntryTags(tx, envId, Buffer.from(entryId), resolved.map((r) => r.id));
       }
+
+      await this.syncFtsRows(tx, Buffer.from(entryId), input.type, typeRow.id, input.content);
     });
 
     return { id: entryId, type: input.type, slug: input.slug, version: 1 };
@@ -481,6 +483,8 @@ export class LedricStorage implements Storage {
           await tx.insertInto('entries_slugs').values(rows).execute();
         }
       }
+
+      await this.syncFtsRows(tx, entryIdBuf, input.ref.type, typeRow.id, input.content);
     });
 
     return {
@@ -718,6 +722,21 @@ export class LedricStorage implements Storage {
   }
 
   async findEntries(input: FindEntriesInput): Promise<FindEntriesResult> {
+    // When a full-text query is supplied, delegate to searchEntries.
+    // v1: we ignore `where` and `order` in this path — FTS rank is the
+    // ordering, and tags + locale carry the structural filtering load.
+    if (typeof input.q === 'string' && input.q.length > 0) {
+      return this.searchEntries({
+        q: input.q,
+        type: input.type,
+        ...(input.tags !== undefined ? { tags: input.tags } : {}),
+        ...(input.locale !== undefined ? { locale: input.locale } : {}),
+        ...(input.limit !== undefined ? { limit: input.limit } : {}),
+        ...(input.offset !== undefined ? { offset: input.offset } : {}),
+        ...(input.includeDeleted !== undefined ? { includeDeleted: input.includeDeleted } : {})
+      });
+    }
+
     const typeRow = await this.requireTypeId(input.type);
     const envId = this.envIdBuf();
     const limit = input.limit ?? 20;
@@ -1686,6 +1705,302 @@ export class LedricStorage implements Storage {
       .executeTakeFirst();
     if (Number(result.numUpdatedRows ?? 0) === 0) return null;
     return { slug, label: newLabel.label };
+  }
+
+  // ───────────────── full-text search ─────────────────
+
+  /**
+   * Load the current TypeDef from type_versions for the given type_id.
+   * Used by the FTS sync hooks to discover which fields are searchable.
+   * Returns null when the type is missing — callers fall through to a
+   * no-op rather than failing the whole entry write on a stale FK race.
+   */
+  private async loadCurrentTypeDef(
+    tx: Kysely<Database>,
+    typeId: Buffer
+  ): Promise<TypeDef | null> {
+    const row = await tx
+      .selectFrom('types as t')
+      .innerJoin('type_versions as tv', (join) =>
+        join.onRef('tv.type_id', '=', 't.id').onRef('tv.version', '=', 't.current_version')
+      )
+      .select(['tv.definition'])
+      .where('t.id', '=', typeId)
+      .executeTakeFirst();
+    if (!row) return null;
+    try {
+      return JSON.parse(row.definition) as TypeDef;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Walk the type's fields and the entry's content, returning one
+   * fts_entries row per (searchable field, locale). Pure function — no
+   * DB calls. The default-locale value gets locale='' so non-locale-
+   * scoped queries always find it; per-locale overrides on a localized
+   * field get their tag verbatim.
+   *
+   * v1 limitation: only top-level string/markdown fields are indexed.
+   * searchable:true on a field nested inside an array or object is
+   * accepted at defineType but ignored here.
+   */
+  private extractFtsRows(
+    typeDef: TypeDef,
+    content: Record<string, unknown>
+  ): Array<{ field_name: string; locale: string; value: string }> {
+    const out: Array<{ field_name: string; locale: string; value: string }> = [];
+    const localeOverrides = (content._locale ?? {}) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    for (const [fieldName, fieldDef] of Object.entries(typeDef.fields)) {
+      if ((fieldDef as { searchable?: boolean }).searchable !== true) continue;
+      if (fieldDef.type !== 'string' && fieldDef.type !== 'markdown') continue;
+      const baseValue = content[fieldName];
+      if (typeof baseValue === 'string' && baseValue.length > 0) {
+        out.push({ field_name: fieldName, locale: '', value: baseValue });
+      }
+      if (fieldDef.localized === true) {
+        for (const [locale, fieldsByLocale] of Object.entries(localeOverrides)) {
+          if (fieldsByLocale === null || typeof fieldsByLocale !== 'object') continue;
+          const v = (fieldsByLocale as Record<string, unknown>)[fieldName];
+          if (typeof v === 'string' && v.length > 0) {
+            out.push({ field_name: fieldName, locale, value: v });
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Replace the FTS rows for an entry. Always called in the same
+   * transaction as the parent entry write so an aborted entry write
+   * leaves no partial index. Empty content (no searchable fields, no
+   * values) is fine — we just delete and don't re-insert.
+   */
+  private async syncFtsRows(
+    tx: Kysely<Database>,
+    entryId: Buffer,
+    typeName: string,
+    typeId: Buffer,
+    content: Record<string, unknown>
+  ): Promise<void> {
+    await tx.deleteFrom('fts_entries').where('entry_id', '=', entryId).execute();
+    const typeDef = await this.loadCurrentTypeDef(tx, typeId);
+    if (!typeDef) return;
+    const rows = this.extractFtsRows(typeDef, content);
+    if (rows.length === 0) return;
+    await tx
+      .insertInto('fts_entries')
+      .values(
+        rows.map((r) => ({
+          entry_id: entryId,
+          type: typeName,
+          field_name: r.field_name,
+          locale: r.locale,
+          value: r.value
+        }))
+      )
+      .execute();
+  }
+
+  /**
+   * Full-text search across one type (or all types when type is omitted).
+   * Dialect-specific FTS syntax — sqlite uses MATCH on the FTS5 virtual
+   * table, postgres uses tsvector @@ tsquery, mysql uses MATCH...AGAINST.
+   * Rank ordering is normalised: results come back highest-relevance
+   * first regardless of dialect.
+   */
+  async searchEntries(input: {
+    q: string;
+    type?: string;
+    tags?: readonly string[];
+    locale?: string;
+    limit?: number;
+    offset?: number;
+    includeDeleted?: boolean;
+  }): Promise<{ results: EntryDetail[]; total: number; offset: number }> {
+    const envId = this.envIdBuf();
+    const limit = input.limit ?? 20;
+    const offset = input.offset ?? 0;
+    const tagSlugs = input.tags ? normalizeTags(input.tags).map((t) => t.slug) : [];
+
+    // Dialect-specific match + rank expressions. We collapse multi-field
+    // matches to one row per entry by GROUP BY + the highest rank seen.
+    // matchExpr is typed `sql<boolean>` so Kysely's .where() accepts it
+    // as an OperandExpression<SqlBool>.
+    let matchExpr: ReturnType<typeof sql<boolean>>;
+    let rankExpr: ReturnType<typeof sql<number>>;
+    let rankDir: 'asc' | 'desc';
+    switch (this.dialect) {
+      case 'sqlite':
+        // SQLite FTS5: bm25() is an auxiliary function. It takes the
+        // FTS5 table reference but parses the argument as a column ref
+        // unless the table appears UNALIASED in FROM. So we leave
+        // fts_entries un-aliased throughout this query.
+        matchExpr = sql<boolean>`fts_entries.value MATCH ${input.q}`;
+        rankExpr = sql<number>`bm25(fts_entries)`;
+        rankDir = 'asc';
+        break;
+      case 'postgres':
+        matchExpr = sql<boolean>`fts_entries.ts @@ plainto_tsquery('simple', ${input.q})`;
+        rankExpr = sql<number>`ts_rank(fts_entries.ts, plainto_tsquery('simple', ${input.q}))`;
+        rankDir = 'desc';
+        break;
+      case 'mysql':
+        matchExpr = sql<boolean>`MATCH(fts_entries.value) AGAINST (${input.q} IN NATURAL LANGUAGE MODE)`;
+        rankExpr = sql<number>`MATCH(fts_entries.value) AGAINST (${input.q} IN NATURAL LANGUAGE MODE)`;
+        rankDir = 'desc';
+        break;
+    }
+
+    // Two-step approach: pull matching FTS rows first, then filter and
+    // paginate in JS. Cleaner across dialects than fighting SQLite FTS5's
+    // restrictions on bm25 inside aggregate functions, and the result
+    // sets for FTS queries are typically small enough that in-memory
+    // dedupe is fine for v1.
+
+    // Step 1: dialect-specific FTS-only query — returns (entry_id, rank).
+    // Filtered by locale here too because fts_entries.locale lives on
+    // this table; everything else (env / type / tags / deleted_at)
+    // happens against the entries table in step 2.
+    const ftsMatches = await this.db
+      .selectFrom('fts_entries')
+      .where(matchExpr)
+      .$if(input.locale !== undefined, (qb) => {
+        const loc = input.locale as string;
+        return qb.where((eb) =>
+          eb.or([eb('fts_entries.locale', '=', loc), eb('fts_entries.locale', '=', '')])
+        );
+      })
+      .select(['fts_entries.entry_id as entry_id', rankExpr.as('rank')])
+      .execute();
+
+    if (ftsMatches.length === 0) {
+      return { results: [], total: 0, offset };
+    }
+
+    // Step 2: collapse to one rank per entry_id (best rank wins).
+    const bestRank = new Map<string, { id: Buffer; rank: number }>();
+    for (const m of ftsMatches) {
+      const key = (m.entry_id as Buffer).toString('hex');
+      const existing = bestRank.get(key);
+      if (existing === undefined) {
+        bestRank.set(key, { id: m.entry_id as Buffer, rank: Number(m.rank) });
+        continue;
+      }
+      const better =
+        rankDir === 'asc' ? Number(m.rank) < existing.rank : Number(m.rank) > existing.rank;
+      if (better) existing.rank = Number(m.rank);
+    }
+
+    // Step 3: filter the matched ids through the entries table to apply
+    // env / type / tags / deleted_at. Returns the subset of ids that
+    // survive — order doesn't matter here since we re-sort by rank below.
+    let filterQuery = this.db
+      .selectFrom('entries as e')
+      .where('e.env_id', '=', envId)
+      .where(
+        'e.id',
+        'in',
+        Array.from(bestRank.values()).map((v) => v.id)
+      );
+    if (input.includeDeleted !== true) {
+      filterQuery = filterQuery.where('e.deleted_at', 'is', null);
+    }
+    if (input.type !== undefined) {
+      const typeRow = await this.requireTypeId(input.type);
+      filterQuery = filterQuery.where('e.type_id', '=', typeRow.id);
+    }
+    if (tagSlugs.length > 0) {
+      const tagSubquery = this.db
+        .selectFrom('entry_tags as et')
+        .innerJoin('tags as t', 't.id', 'et.tag_id')
+        .select((eb) => eb.ref('et.entry_id').as('entry_id'))
+        .where('et.env_id', '=', envId)
+        .where('t.slug', 'in', tagSlugs)
+        .groupBy('et.entry_id')
+        .having((eb) => eb.fn.count('t.slug').distinct(), '=', tagSlugs.length);
+      filterQuery = filterQuery.where('e.id', 'in', tagSubquery);
+    }
+    const allowedRows = await filterQuery.select(['e.id as id']).execute();
+    const allowed = new Set(allowedRows.map((r) => (r.id as Buffer).toString('hex')));
+
+    // Step 4: order by rank, paginate.
+    const sorted = Array.from(bestRank.values())
+      .filter((v) => allowed.has(v.id.toString('hex')))
+      .sort((a, b) => (rankDir === 'asc' ? a.rank - b.rank : b.rank - a.rank));
+    const total = sorted.length;
+    const page = sorted.slice(offset, offset + limit);
+
+    if (page.length === 0) {
+      return { results: [], total, offset };
+    }
+
+    const ranked = page.map((p) => ({ id: p.id, rank: p.rank }));
+
+    if (ranked.length === 0) {
+      return { results: [], total, offset };
+    }
+
+    // Hydrate full EntryDetail rows. Ordering preserved via a Map.
+    const idOrder = ranked.map((r) => r.id);
+    const orderById = new Map<string, number>();
+    idOrder.forEach((id, i) => orderById.set(id.toString('hex'), i));
+
+    const detailRows = await this.db
+      .selectFrom('entries as e')
+      .innerJoin('types as t', 't.id', 'e.type_id')
+      .innerJoin('entry_versions as ev', (join) =>
+        join.onRef('ev.entry_id', '=', 'e.id').onRef('ev.version', '=', 'e.current_version')
+      )
+      .select([
+        'e.id as id',
+        't.name as type',
+        'e.slug as slug',
+        'e.current_version as current_version',
+        'e.published_version as published_version',
+        'e.deleted_at as deleted_at',
+        'ev.version as version',
+        'ev.content as content',
+        'ev.schema_version as schema_version',
+        'ev.content_hash as content_hash',
+        'ev.created_at as created_at'
+      ])
+      .where(
+        'e.id',
+        'in',
+        idOrder.map((id) => Buffer.from(id))
+      )
+      .execute();
+
+    const tagMap = await this.fetchEntryTags(envId, idOrder.map((id) => Buffer.from(id)));
+
+    const results: EntryDetail[] = detailRows
+      .map((r) => ({
+        id: new Uint8Array(r.id),
+        type: r.type,
+        slug: r.slug,
+        current_version: r.current_version,
+        published_version: r.published_version,
+        deleted_at: r.deleted_at,
+        version: r.version,
+        content: JSON.parse(r.content) as Record<string, unknown>,
+        schema_version: r.schema_version,
+        content_hash: new Uint8Array(r.content_hash),
+        created_at: r.created_at,
+        tags: tagMap.get(Buffer.from(r.id).toString('hex')) ?? []
+      }))
+      .sort(
+        (a, b) =>
+          (orderById.get(Buffer.from(a.id).toString('hex')) ?? 0) -
+          (orderById.get(Buffer.from(b.id).toString('hex')) ?? 0)
+      );
+
+    return { results, total, offset };
   }
 
   async close(): Promise<void> {

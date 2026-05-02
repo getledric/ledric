@@ -515,4 +515,82 @@ describe('LedricStorage (sqlite)', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  describe('full-text search', () => {
+    async function setupSearchableBlog() {
+      const post = defineType(
+        'post',
+        {
+          title: field.string({ required: true, searchable: true }),
+          slug: field.slug({ required: true, from: 'title' }),
+          body: field.markdown({ required: true, searchable: true })
+        },
+        { identifier_field: 'slug', display_field: 'title' }
+      );
+      await storage.createType({ definition: post });
+    }
+
+    it('finds an entry by a token from a searchable field', async () => {
+      await setupSearchableBlog();
+      await storage.createEntry({
+        type: 'post',
+        slug: 'kysely-migration',
+        content: {
+          title: 'Why I switched to Kysely',
+          slug: 'kysely-migration',
+          body: 'It was time. Raw SQL stopped scaling.'
+        },
+        schema_version: 1
+      });
+      await storage.createEntry({
+        type: 'post',
+        slug: 'about-coffee',
+        content: {
+          title: 'About coffee',
+          slug: 'about-coffee',
+          body: 'A morning routine essay.'
+        },
+        schema_version: 1
+      });
+
+      const result = await storage.findEntries({ type: 'post', q: 'kysely' });
+      expect(result.total).toBe(1);
+      expect(result.results[0]?.slug).toBe('kysely-migration');
+
+      // Match in body, not title.
+      const bodyMatch = await storage.findEntries({ type: 'post', q: 'morning' });
+      expect(bodyMatch.results.map((r) => r.slug)).toEqual(['about-coffee']);
+
+      // No match.
+      const empty = await storage.findEntries({ type: 'post', q: 'unicorn' });
+      expect(empty.total).toBe(0);
+      expect(empty.results).toEqual([]);
+    });
+
+    it('updates the index when an entry is updated', async () => {
+      await setupSearchableBlog();
+      const created = await storage.createEntry({
+        type: 'post',
+        slug: 'first',
+        content: { title: 'Original title', slug: 'first', body: 'Body about kittens.' },
+        schema_version: 1
+      });
+      // Searchable for the original keyword.
+      let r = await storage.findEntries({ type: 'post', q: 'kittens' });
+      expect(r.total).toBe(1);
+
+      // Update the body — old keyword should no longer match.
+      await storage.updateEntry({
+        ref: { type: 'post', slug: 'first' },
+        parent_version: created.version,
+        schema_version: 1,
+        content: { title: 'Original title', slug: 'first', body: 'Body about giraffes.' }
+      });
+
+      r = await storage.findEntries({ type: 'post', q: 'kittens' });
+      expect(r.total).toBe(0);
+      r = await storage.findEntries({ type: 'post', q: 'giraffes' });
+      expect(r.total).toBe(1);
+    });
+  });
 });
