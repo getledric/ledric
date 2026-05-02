@@ -1,6 +1,6 @@
 {
   "name": "@ledric/storage",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ledric storage: Kysely-based dialect adapters. SQLite (better-sqlite3) default; MySQL and Postgres also supported.",
   "license": "Apache-2.0",
   "repository": {
