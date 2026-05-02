@@ -2,6 +2,12 @@
 
 **A CMS that speaks AI.**
 
+[![ledric on npm](https://img.shields.io/npm/v/ledric?label=ledric&color=cb3837)](https://www.npmjs.com/package/ledric)
+[![@ledric/sdk on npm](https://img.shields.io/npm/v/%40ledric%2Fsdk?label=%40ledric%2Fsdk&color=cb3837)](https://www.npmjs.com/package/@ledric/sdk)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org/)
+[![Status: alpha](https://img.shields.io/badge/status-alpha-orange)](#status)
+
 A small, self-hosted content engine built from the ground up for the age of agents. It runs from one binary, stores everything in one file, and ships with a proper MCP interface so Claude (or anything else that speaks the Model Context Protocol) can read, write, and evolve your content model — with the same validation, history, and safety rails you'd get from a clicky admin panel.
 
 ## The pitch
@@ -10,63 +16,17 @@ You've got content. You've got AI tools. In a sane world they'd just talk to eac
 
 ledric sits in the middle and gets out of the way.
 
-## Why
+Concretely: ledric is a Node 22+ process you run in a content directory. It exposes an MCP server over stdio for desktop clients (Claude Desktop, Cursor, Claude Code), an HTTP API that includes the same tool surface at `POST /rpc`, and an admin SPA at `/admin`. Content lives in a single `ledric.db` file (SQLite by default; Postgres and MySQL also supported). Your consumer site is a separate process that fetches over HTTP via `@ledric/sdk` (TypeScript) or `ledric/sdk` (Composer/PHP).
 
-This is a personal project first. After 25 years of building bespoke content management systems for clients (pre-headless CMS days) and working with the major players since, and being annoyed by most of them, ledric is my attempt at the one I'd actually want to use. A few things to be upfront about:
+## Contents
 
-- It's probably confusing in places.
-- It definitely has gaps.
-- Does AI make headless CMSes redundant? Maybe. I'm shipping this anyway.
-- It was clearly coded quickly using AI. That's exactly what has happened here. It's in no way production-tested.
-
-If you want a battle-tested CMS, this isn't it yet. If you like the shape of the bet — that the schema is the API, that agents deserve a real interface, that one SQLite file is enough — give it a try and tell me what's wrong with it.
-
-## What you get
-
-**Set up your schema by chat.** "I want a blog with posts, authors, and tags" — Claude writes the canonical types for you and calls `create_type`. (Coders who still code get `defineType()` from `@ledric/schema` for the autocomplete vibes — same canonical output, same row in the DB.) No separate admin UI, no weird drift between your code and your "real" schema.
-
-**Your content is just Markdown** (with some embedding magic when you need it). Rich-text fields are Markdown strings — diff them in git, paste them into Slack, open them in any editor. Need to embed a section, asset, or another entry inline? Drop `:::ref{to="section/hero"}:::` in the body and ledric resolves it on read. No "oh, you need *our* SDK to render that" moments.
-
-**History on every edit.** Every save writes a new version. Nothing is ever silently overwritten. You can read any historical version by number.
-
-**Draft, then publish.** A post doesn't go live until you say so. Publishing is a pointer move — instant. Unpublishing is the same move in reverse.
-
-**BYO preferred storage, or just roll with the built-in.** Your content lives in a SQLite file you can commit, scp, or `cp` like any other file. Assets? Same story — we'll store and serve the bytes for you (in the DB, or on disk, your call), or point us at your S3 / R2 / whatever bucket if you'd rather bring your own.
-
-**Localization without the footguns.** Write once, translate per-field or per-entry, fall back cleanly, and let agents draft translations in place — all under the same versioning, publish, and history flow as the original.
-
-**Renames don't break the web.** Change a post's slug and the old URL keeps resolving forever. Every retired slug is remembered. Your old tweets and Google juice stay valid.
-
-**Edit on the page itself.** Drop one `<script>` tag on your rendered site and a floating pencil appears next to anything you tag with `data-ledric-ref`. Click → a drawer slides in with the right form → save → the page reloads with the new content. The full `/admin` SPA is there too if you want a grid-and-form view of everything at once.
-
-**Imgix-compatible image transforms, no SaaS bill.** Asset URLs accept the usual `w`, `h`, `fit`, `q`, `fm`, `auto=format`, `dpr` — libvips does the work, transformed bytes are cached on disk. URLs are version-pinned, so browser and CDN caches stay correct even when you replace the source image in place.
-
-**Auth without ceremony.** `ledric init` mints an admin key and a reader key on the way through; if you skip init, the first HTTP boot does it instead. Either way they're printed once and the auth gate turns on. By default writes need the admin key; reads stay open. Flip `--require-reader-key` for closed-reads mode. Rotate with `ledric keys create --role admin --raw | pbcopy` and revoke the old one.
-
-**Agents are properly invited.** Connect Claude Desktop, Cursor, or anything else that speaks MCP. Your AI gets the same surface you do — with validation, with version history, with structured errors — so it can draft posts, publish them, and evolve the content model without you holding its hand.
-
-**Tokens are sacred.** Responses are flat, not wrapped in metadata envelopes. Lists come in three budgets (`list`, `summary`, `full`) so you pay only for what you asked for.
-
-## How I actually use it
-
-Most pages I build aren't just "title, body, hero image." They're collections of sections — a hero with desktop and mobile backgrounds, a pricing table that gets reused on three pages, a testimonials block, a CTA, a feature grid — sometimes with prose flowing around them, sometimes entirely composed of them.
-
-The shape of the work I kept doing on every project:
-
-1. Design and copy land in Figma.
-2. I shuttle assets and content to the CMS, structure it as best as the CMS lets me.
-3. I build a rendering / template engine on top of the headless CMS that turns those content rows back into pages — section ordering, asset variants per breakpoint, linked blocks, fallbacks for missing fields, the cache layer, the lot.
-4. The rendering engine becomes the actual CMS, with its own template-module system. The "real" CMS is just a poorly-shaped ORM underneath. Non-technical maintainers can't touch any of it.
-
-I've built that pile too many times. ledric is what the data layer wants to look like *before* the rendering engine grows tentacles: sections are first-class entries you can compose into a page (top-level via `references`, inline via `:::ref{to="section/hero"}:::` in any markdown field), assets are version-pinned with imgix-style transforms baked in, and the inline editor lets a non-technical maintainer change what they see without owning the rendering pipeline.
-
-A typical session against the MCP server now looks like:
-
-1. *"Go through this page design in Figma and prepare all required asset exports."*
-2. *"Import all assets into ledric, tagging them appropriately."*
-3. *"Build out the required sections, and roll them into a page."*
-
-Without ledric in the loop, Claude could write static HTML and call it a day. ledric exists because I want my marketing team to roll out updates without me — and I want them to be able to wire up their own LLM tools to the same content store.
+- [Quickstart](#two-minutes-to-running)
+- [What you get](#what-you-get)
+- [MCP tools](#the-20-mcp-tools)
+- [How I actually use it](#how-i-actually-use-it)
+- [Docs](#docs)
+- [Build from source](#from-source)
+- [Status](#status)
 
 ## Two minutes to running
 
@@ -113,9 +73,9 @@ Manual Claude Desktop config:
 
 `cwd` matters — `ledric.db` lives in the working directory.
 
-Restart the client. Ask Claude to call `describe_model`. Watch it read your (empty) content model. Ask it to set up a blog. Draft a post. Publish it. You're shipping.
+Restart your MCP client. In Claude, ask: *"Call `describe_model`, then set up a blog with posts and authors."* Watch it call `create_type` twice, then ask it to draft and publish a post. That's the entire onboarding path — there is no separate admin tutorial to read.
 
-## See your content from the outside
+### See your content from the outside
 
 ```bash
 npx ledric ls                              # what types do I have?
@@ -124,10 +84,94 @@ npx ledric get blog_post/hello-world       # one post, in the shape a website wo
 npx ledric asset upload hero.jpg           # store an image
 ```
 
+## What you get
+
+### For agents
+
+A first-class surface so an LLM can do real work without burning context.
+
+- **`describe_model`** returns the entire content model — every type's fields, summary fields, hand-written example, plus the runtime capabilities of this instance — in one call. No separate docs to keep in sync.
+- **Structured errors.** Validation failures come back as machine-parseable objects with field paths and codes, not prose strings the model has to re-parse.
+- **Token-cheap responses.** Lists come in three budgets (full, summary, list); responses are flat, not wrapped in `sys`/`fields`/`metadata` envelopes.
+- **Draft → publish primitives.** `draft`, `publish`, `rename_entry`, `delete_entry` — all with `parent_version` optimistic concurrency so an agent can't silently clobber a concurrent edit.
+- **Version history is readable over MCP.** Every save writes a new version; pass `version: N` to `read` to fetch any historical version.
+
+### For humans
+
+Two places to edit, both built in.
+
+- **Admin GUI** at `/admin` — types list, entry forms, asset library, keys management. Paste the admin key once, you're in.
+- **Inline editor.** Drop one `<script>` tag on your rendered site and a floating pencil appears next to anything you tag with `data-ledric-ref`. Click → drawer slides in with the right form → save → page reloads with the new content.
+- **Schema by chat.** "I want a blog with posts, authors, and tags" — Claude writes the canonical types and calls `create_type`. Coders who still code get `defineType()` from `@ledric/schema` for the autocomplete vibes — same canonical output, same row in the DB.
+- **Drafts don't leak.** Publishing is a pointer move — instant. Unpublishing is the same move in reverse.
+
+### For ops
+
+Boring on purpose.
+
+- **One file by default.** Your content lives in a SQLite file you can commit, scp, or `cp` like any other file. Postgres and MySQL are first-class options when you outgrow that.
+- **Slug-history redirects.** Rename a post and the old URL keeps resolving forever. Every retired slug is remembered; reads of the old slug return the entry with `_redirect` pointing at the new one.
+- **Imgix-compatible image transforms, no SaaS bill.** Asset URLs accept the usual `w`, `h`, `fit` (`clip`/`crop`), `q`, `fm` (`jpg`/`png`/`webp`/`avif`), `auto=format`, `dpr` — `sharp` (libvips) does the work, transformed bytes are cached on disk. URLs are version-pinned, so browser and CDN caches stay correct even when you replace the source image in place. Example: `/assets/<ref_key>?w=800&fit=crop&auto=format`.
+- **Localization.** Per-type locales, `localized: true` fields, fallback chains, locale-specific slugs — all under the same versioning, publish, and history flow as the original.
+- **Auth without ceremony.** `ledric init` mints an admin key and a reader key on the way through; if you skip init, the first HTTP boot does it instead. By default writes need the admin key; reads stay open. Flip `--require-reader-key` for closed-reads mode. Rotate with `ledric keys create --role admin --raw | pbcopy` and revoke the old one.
+- **Asset bytes go in the DB or on disk** — your call. (External-bucket adapters for S3 / R2 are on the roadmap.)
+
+### For your codebase
+
+The shapes you'll actually import.
+
+- **`@ledric/sdk`** (TypeScript) — read client, inline-editor `refAttrs()` helpers, types generated from your schema.
+- **`Ledric\LedricClient`** (PHP, Composer package `ledric/sdk`) — read client, same wire format.
+- **`ledric` CLI** — `init`, `serve`, `ls`, `get`, `asset upload`, `keys create`, etc.
+- **HTTP `POST /rpc`** — every MCP tool exposed as plain JSON over HTTP for non-MCP callers, with the same auth split (reader vs admin) as the MCP server.
+- **Markdown rich text with embedding magic.** Rich-text fields are Markdown strings — diff them in git, paste them into Slack, open them in any editor. Embed a section, asset, or another entry inline with `:::ref{to="section/hero"}:::` and ledric resolves it on read.
+
+## The 20 MCP tools
+
+| Reads | Writes | Schema | Assets | Tags |
+|---|---|---|---|---|
+| `describe_model` `read` `find` | `draft` `publish` `rename_entry` `delete_entry` `migrate_entries` | `create_type` `alter_type` `delete_type` | `get_asset` `list_assets` `update_asset` | `list_tags` `update_tag` `add_entry_tags` `remove_entry_tags` `add_asset_tags` `remove_asset_tags` |
+
+Asset *uploads* and bytes-fetching are HTTP-only by design — `POST /assets` (multipart) and `GET /assets/<ref_key>` — they don't go through MCP.
+
+Full reference: [`docs/mcp-tools.md`](docs/mcp-tools.md).
+
+## How I actually use it
+
+This is a personal project first. After 25 years of building bespoke content management systems for clients (pre-headless CMS days) and working with the major players since, and being annoyed by most of them, ledric is my attempt at the one I'd actually want to use.
+
+Most pages I build aren't just "title, body, hero image." They're collections of sections — a hero with desktop and mobile backgrounds, a pricing table that gets reused on three pages, a testimonials block, a CTA, a feature grid — sometimes with prose flowing around them, sometimes entirely composed of them.
+
+The shape of the work I kept doing on every project:
+
+1. Design and copy land in Figma.
+2. I shuttle assets and content to the CMS, structure it as best as the CMS lets me.
+3. I build a rendering / template engine on top of the headless CMS that turns those content rows back into pages — section ordering, asset variants per breakpoint, linked blocks, fallbacks for missing fields, the cache layer, the lot.
+4. The rendering engine becomes the actual CMS, with its own template-module system. The "real" CMS is just a poorly-shaped ORM underneath. Non-technical maintainers can't touch any of it.
+
+I've built that pile too many times. ledric is what the data layer wants to look like *before* the rendering engine grows tentacles: sections are first-class entries you can compose into a page (top-level via `references`, inline via `:::ref{to="section/hero"}:::` in any markdown field), assets are version-pinned with imgix-style transforms baked in, and the inline editor lets a non-technical maintainer change what they see without owning the rendering pipeline.
+
+A typical session against the MCP server now looks like:
+
+1. *"Go through this page design in Figma and prepare all required asset exports."*
+2. *"Import all assets into ledric, tagging them appropriately."*
+3. *"Build out the required sections, and roll them into a page."*
+
+Without ledric in the loop, Claude could write static HTML and call it a day. ledric exists because I want my marketing team to roll out updates without me — and I want them to be able to wire up their own LLM tools to the same content store.
+
+## The design philosophy
+
+Three constraints we don't break:
+
+1. **Tokens are the new bandwidth.** Every default is tuned for minimal agent-side overhead.
+2. **Agents edit differently than humans.** They batch, they diff, they need dry-runs and structured errors. The API is shaped for both.
+3. **The schema is the API.** `describe_model` tells an LLM everything it needs in one call. No separate docs to keep in sync.
+
+Everything else in this project is a consequence of those three.
+
 ## Docs
 
-Pages are short, scoped, and self-contained — pick the one that
-matches what you're trying to do.
+Pages are short, scoped, and self-contained — pick the one that matches what you're trying to do.
 
 | | |
 |---|---|
@@ -142,16 +186,6 @@ matches what you're trying to do.
 | **[SDKs](./docs/sdks.md)** | `@ledric/sdk` (TypeScript) and `Ledric\LedricClient` (PHP) — methods, options, errors, inline-editor `refAttrs()`. |
 | **[Localization](./docs/localization.md)** | Per-type locales, `localized: true` fields, the `_locale` sidecar, fallback chains, locale-specific slugs, recipes. |
 | **[Deployment](./docs/deployment.md)** | Production shape: CDN in front of `/assets/<ref_key>`, reverse proxy + TLS, env-supplied API keys, backups, Postgres / MySQL deploys, what to handle outside of ledric. |
-
-## The design philosophy
-
-Three constraints we don't break:
-
-1. **Tokens are the new bandwidth.** Every default is tuned for minimal agent-side overhead.
-2. **Agents edit differently than humans.** They batch, they diff, they need dry-runs and structured errors. The API is shaped for both.
-3. **The schema is the API.** `describe_model` tells an LLM everything it needs in one call. No separate docs to keep in sync.
-
-Everything else in this project is a consequence of those three.
 
 ## From source
 
@@ -169,6 +203,21 @@ pnpm cli serve --gui             # same as `npx ledric serve --gui`, but against
 ## Status
 
 Alpha. The core works end-to-end, shapes will shift before v1. AI did most of the typing and it's in no way production-tested yet. If you try it and something breaks, open an issue — I'll see it.
+
+A few things to be upfront about:
+
+- It's probably confusing in places.
+- It definitely has gaps.
+- Does AI make headless CMSes redundant? Maybe. I'm shipping this anyway.
+- It was clearly coded quickly using AI. That's exactly what has happened here. It's in no way production-tested.
+
+If you want a battle-tested CMS, this isn't it yet. If you like the shape of the bet — that the schema is the API, that agents deserve a real interface, that one SQLite file is enough — give it a try and tell me what's wrong with it.
+
+### What's planned
+
+- **External asset backends** — S3 / R2 / generic-bucket adapters for asset bytes. The backend interface is in place; the implementations aren't.
+- **Vector / embeddings.** The `vector` field type is wired through the schema and validator, but there is no similarity-search query path yet. Don't rely on it.
+- **Multi-environment branching.** The storage schema reserves environment columns (`env_id`, `parent_env`); the API to fork, edit, and merge environments isn't exposed yet.
 
 ## License
 
