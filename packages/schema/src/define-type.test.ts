@@ -223,4 +223,44 @@ describe('defineType', () => {
       /reserved for content sidecars/
     );
   });
+
+  // unique constraint — schema-side validation
+  it('accepts unique:true on string, number, and date fields', () => {
+    const t = defineType('product', {
+      sku: field.string({ required: true, unique: true }),
+      stock: field.number({ unique: true }),
+      released_on: field.date({ unique: true })
+    });
+    expect((t.fields.sku as { unique?: boolean }).unique).toBe(true);
+    expect((t.fields.stock as { unique?: boolean }).unique).toBe(true);
+    expect((t.fields.released_on as { unique?: boolean }).unique).toBe(true);
+  });
+
+  it('rejects unique:true on non-scalar field types', () => {
+    expect(() =>
+      defineType('product', {
+        title: field.string({ required: true }),
+        body: field.markdown({ unique: true } as never)
+      })
+    ).toThrow(/unique:true is only allowed on string, number, or date/);
+
+    expect(() =>
+      defineType('product', {
+        title: field.string({ required: true }),
+        gallery: field.array({ of: field.string(), unique: true } as never)
+      })
+    ).toThrow(/unique:true is only allowed on string, number, or date/);
+  });
+
+  it('rejects unique combined with localized:true', () => {
+    expect(() =>
+      defineType(
+        'product',
+        {
+          sku: field.string({ required: true, unique: true, localized: true })
+        },
+        { locales: ['en', 'fr'], default_locale: 'en' }
+      )
+    ).toThrow(/cannot be both unique and localized/);
+  });
 });

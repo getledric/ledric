@@ -72,6 +72,20 @@ export class NotFoundError extends Error {
   }
 }
 
+export class UniqueViolationError extends Error {
+  readonly code = 'UNIQUE_VIOLATION';
+  constructor(
+    public readonly type: string,
+    public readonly field: string,
+    public readonly value: unknown,
+    public readonly conflicting_slug: string
+  ) {
+    super(
+      `UNIQUE_VIOLATION: ${type}.${field} value collides with existing entry "${conflicting_slug}"`
+    );
+  }
+}
+
 export class TypeNotEmptyError extends Error {
   readonly code = 'TYPE_NOT_EMPTY';
   constructor(

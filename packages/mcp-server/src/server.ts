@@ -905,6 +905,9 @@ function serializeToolError(err: unknown): Record<string, unknown> {
     kind?: unknown;
     ref?: unknown;
     entry_count?: unknown;
+    field?: unknown;
+    value?: unknown;
+    conflicting_slug?: unknown;
   };
   // Default to INTERNAL so unhandled JS errors (TypeError,
   // ReferenceError, anything without an explicit `code`) are clearly
@@ -933,7 +936,19 @@ function serializeToolError(err: unknown): Record<string, unknown> {
   if (typeof e.kind === 'string') out.kind = e.kind;
   if (typeof e.ref === 'string') out.ref = e.ref;
   if (typeof e.entry_count === 'number') out.entry_count = e.entry_count;
+  if (typeof e.field === 'string') out.field = e.field;
+  if (e.value !== undefined && isJsonScalar(e.value)) out.value = e.value;
+  if (typeof e.conflicting_slug === 'string') out.conflicting_slug = e.conflicting_slug;
   return out;
+}
+
+function isJsonScalar(v: unknown): boolean {
+  return (
+    typeof v === 'string' ||
+    typeof v === 'number' ||
+    typeof v === 'boolean' ||
+    v === null
+  );
 }
 
 function toJsonSafe(value: unknown): unknown {

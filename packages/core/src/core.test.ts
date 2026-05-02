@@ -112,6 +112,56 @@ describe('Core', () => {
       core.createType({ name: 'product', fields: { a: field.string() } })
     ).rejects.toThrow(/already exists/);
   });
+
+  it('enforces unique:true on draft create — second entry with same value is rejected', async () => {
+    await core.createType({
+      name: 'product',
+      fields: {
+        sku: field.string({ required: true, unique: true }),
+        title: field.string({ required: true })
+      },
+      opts: { identifier_field: 'sku', display_field: 'title' }
+    });
+    await core.draft({
+      type: 'product',
+      fields: { sku: 'WIDGET-1', title: 'Widget' }
+    });
+    await expect(
+      core.draft({
+        type: 'product',
+        fields: { sku: 'WIDGET-1', title: 'Widget Pro' }
+      })
+    ).rejects.toMatchObject({
+      code: 'UNIQUE_VIOLATION',
+      type: 'product',
+      field: 'sku',
+      value: 'WIDGET-1',
+      conflicting_slug: 'WIDGET-1'
+    });
+  });
+
+  it('allows updating an entry without tripping its own unique value', async () => {
+    await core.createType({
+      name: 'product',
+      fields: {
+        sku: field.string({ required: true, unique: true }),
+        title: field.string({ required: true })
+      },
+      opts: { identifier_field: 'sku', display_field: 'title' }
+    });
+    const created = await core.draft({
+      type: 'product',
+      fields: { sku: 'WIDGET-1', title: 'Widget' }
+    });
+    // Updating the same row with the same unique value must not collide.
+    const updated = await core.draft({
+      type: 'product',
+      ref: { type: 'product', slug: 'WIDGET-1' },
+      parent_version: created.version,
+      fields: { sku: 'WIDGET-1', title: 'Widget Mk II' }
+    });
+    expect(updated.version).toBe(2);
+  });
 });
 
 describe('Core.getTransformedAsset', () => {

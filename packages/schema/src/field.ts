@@ -38,6 +38,8 @@ export const field = {
     ...opts
   }),
 
+
+
   slug: (opts: OptsFor<FieldSlug> = {}): FieldSlug => ({
     type: 'slug',
     ...opts

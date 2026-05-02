@@ -37,13 +37,13 @@ export const FIELD_TYPE_SPECS: Record<FieldType, FieldTypeSpec> = {
   string: {
     description: 'Plain text. Stored as TEXT.',
     required: [],
-    optional: ['min', 'max', 'pattern', ...COMMON_OPTIONAL],
+    optional: ['min', 'max', 'pattern', 'unique', ...COMMON_OPTIONAL],
     example: { type: 'string', required: true, max: 120 }
   },
   number: {
     description: 'Numeric. Stored as REAL (or INTEGER when integer:true).',
     required: [],
-    optional: ['min', 'max', 'integer', ...COMMON_OPTIONAL],
+    optional: ['min', 'max', 'integer', 'unique', ...COMMON_OPTIONAL],
     example: { type: 'number', min: 0, max: 100 }
   },
   boolean: {
@@ -55,7 +55,7 @@ export const FIELD_TYPE_SPECS: Record<FieldType, FieldTypeSpec> = {
   date: {
     description: 'ISO 8601 date string (YYYY-MM-DD) or datetime.',
     required: [],
-    optional: [...COMMON_OPTIONAL],
+    optional: ['unique', ...COMMON_OPTIONAL],
     example: { type: 'date' }
   },
   slug: {

@@ -58,7 +58,8 @@ export {
   LedricStorage,
   VersionConflictError,
   NotFoundError,
-  TypeNotEmptyError
+  TypeNotEmptyError,
+  UniqueViolationError
 } from './storage.js';
 export type { AssetsConfig } from './storage.js';
 

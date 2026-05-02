@@ -52,6 +52,29 @@ function validateFieldDef(
       `${pathLabel}: field "${fieldName}" has a default value that doesn't match its declared type "${field.type}"`
     );
   }
+  // `unique` is permitted on scalar primitives only. On arrays / objects /
+  // markdown / vectors / etc. it's either expensive (long-text equality
+  // scans), meaningless (you can't compare arrays for value equality
+  // cheaply), or a footgun. Keep the surface small; revisit per-type as
+  // needs arise.
+  if (
+    (field as { unique?: unknown }).unique === true &&
+    !(field.type === 'string' || field.type === 'number' || field.type === 'date')
+  ) {
+    vfail(
+      `${pathLabel}: field "${fieldName}" (type "${field.type}") cannot be unique. ` +
+        `unique:true is only allowed on string, number, or date fields.`
+    );
+  }
+  if (
+    (field as { unique?: unknown }).unique === true &&
+    field.localized === true
+  ) {
+    vfail(
+      `${pathLabel}: field "${fieldName}" cannot be both unique and localized. ` +
+        `Per-locale uniqueness isn't supported yet.`
+    );
+  }
   // Recurse into nested object/array fields so deep schemas validate too.
   if (field.type === 'object') {
     if (field.fields === null || typeof field.fields !== 'object' || Array.isArray(field.fields)) {

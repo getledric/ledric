@@ -18,6 +18,12 @@ export interface FieldString extends FieldCommon {
   min?: number;
   max?: number;
   pattern?: string;
+  /**
+   * When true, no two non-deleted entries of this type may have the same
+   * value for this field. Enforced at draft / publish; conflicting writes
+   * fail with code: 'UNIQUE_VIOLATION'. Cannot be combined with localized:true.
+   */
+  unique?: boolean;
 }
 
 export interface FieldNumber extends FieldCommon {
@@ -25,6 +31,8 @@ export interface FieldNumber extends FieldCommon {
   min?: number;
   max?: number;
   integer?: boolean;
+  /** See FieldString.unique. */
+  unique?: boolean;
 }
 
 export interface FieldBoolean extends FieldCommon {
@@ -33,6 +41,8 @@ export interface FieldBoolean extends FieldCommon {
 
 export interface FieldDate extends FieldCommon {
   type: 'date';
+  /** See FieldString.unique. */
+  unique?: boolean;
 }
 
 export interface FieldSlug extends FieldCommon {

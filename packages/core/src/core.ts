@@ -23,6 +23,7 @@ import type {
   TagInfo,
   TagWithCounts
 } from '@ledric/storage';
+import { UniqueViolationError } from '@ledric/storage';
 import { normalizeTypeDef } from './normalize.js';
 import { deriveContent } from './derive.js';
 import { validateContent, type ValidationError } from './validate.js';
@@ -461,6 +462,14 @@ export class Core {
       this.storage
     );
 
+    // Uniqueness — fail fast at draft so the conflict is reported before
+    // the storage write rather than as a SQL constraint violation later.
+    await this.checkUniqueFields(
+      typeDetail.definition,
+      validated.value,
+      input.ref
+    );
+
     if (input.ref !== undefined) {
       if (input.ref.slug !== slug) {
         throw new ValidationFailedError([
@@ -639,6 +648,35 @@ export class Core {
     const entry = await this.storage.readEntry(ref);
     if (!entry) throw new Error(`NOT_FOUND: entry "${ref.type}/${ref.slug}"`);
     return entry.id;
+  }
+
+  /**
+   * For every top-level field declared with `unique: true`, query for any
+   * other live entry of the same type that already has the same value.
+   * `excludeRef` is the entry being updated (so it doesn't match itself).
+   * Throws UniqueViolationError on the first collision found.
+   */
+  private async checkUniqueFields(
+    typeDef: TypeDef,
+    content: Record<string, unknown>,
+    excludeRef: EntryRef | undefined
+  ): Promise<void> {
+    for (const [fieldName, fieldDef] of Object.entries(typeDef.fields)) {
+      if ((fieldDef as { unique?: boolean }).unique !== true) continue;
+      const value = content[fieldName];
+      if (value === undefined || value === null) continue;
+      const result = await this.storage.findEntries({
+        type: typeDef.name,
+        where: { [fieldName]: value },
+        limit: 2
+      });
+      const conflict = result.results.find(
+        (r) => excludeRef === undefined || r.slug !== excludeRef.slug
+      );
+      if (conflict) {
+        throw new UniqueViolationError(typeDef.name, fieldName, value, conflict.slug);
+      }
+    }
   }
 
   /** Hex-decode an asset id (32-char hex) to its uuid bytes. */
