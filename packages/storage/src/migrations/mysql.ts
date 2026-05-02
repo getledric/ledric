@@ -186,5 +186,26 @@ export const mysqlMigrations: Migration[] = [
         INDEX idx_entry_tags_tag (env_id, tag_id)
       );
     `
+  },
+  {
+    id: 2,
+    name: '0002_fts',
+    sql: `
+      -- See sqlite.ts for the model. MySQL FULLTEXT index gives us the
+      -- query path. The PK can't include a TEXT/MEDIUMTEXT column, so
+      -- field_name and locale are VARCHAR with prefix-safe lengths.
+      -- value stays MEDIUMTEXT — full body text can be large.
+      CREATE TABLE fts_entries (
+        entry_id   VARBINARY(16) NOT NULL,
+        type       VARCHAR(191) NOT NULL,
+        field_name VARCHAR(191) NOT NULL,
+        locale     VARCHAR(35)  NOT NULL DEFAULT '',
+        value      MEDIUMTEXT   NOT NULL,
+        PRIMARY KEY (entry_id, field_name, locale),
+        FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+        INDEX idx_fts_entries_type (type),
+        FULLTEXT INDEX ftx_fts_entries_value (value)
+      ) ENGINE=InnoDB;
+    `
   }
 ];

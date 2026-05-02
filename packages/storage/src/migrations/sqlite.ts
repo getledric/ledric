@@ -172,5 +172,29 @@ export const sqliteMigrations: Migration[] = [
 
       CREATE INDEX idx_entry_tags_tag ON entry_tags (env_id, tag_id);
     `
+  },
+  {
+    id: 2,
+    name: '0002_fts',
+    sql: `
+      -- Full-text search index. One row per (entry, searchable field, locale).
+      -- locale is the empty string '' for non-localized fields and the
+      -- default-locale row of localized fields; for additional locales of
+      -- a localized field, we insert extra rows with the locale tag set.
+      -- '' as sentinel keeps the same shape across SQLite / Postgres /
+      -- MySQL, where Postgres won't allow NULL in a primary key.
+      --
+      -- entry_id / type / field_name / locale are UNINDEXED metadata —
+      -- FTS5 only tokenises 'value'. Querying back to entries goes
+      -- through entry_id.
+      CREATE VIRTUAL TABLE fts_entries USING fts5(
+        entry_id UNINDEXED,
+        type UNINDEXED,
+        field_name UNINDEXED,
+        locale UNINDEXED,
+        value,
+        tokenize = 'porter unicode61 remove_diacritics 2'
+      );
+    `
   }
 ];

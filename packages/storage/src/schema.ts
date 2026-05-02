@@ -138,6 +138,28 @@ export interface MigrationsTable {
   applied_at: number;
 }
 
+/**
+ * Full-text search index. Populated for entry fields opted in via the
+ * `searchable: true` schema option. One row per (entry, field, locale).
+ *
+ * Shape is identical across SQLite (FTS5 virtual table), Postgres
+ * (regular table + generated tsvector + GIN), and MySQL (table +
+ * FULLTEXT). Only the underlying index mechanism differs; the dialect-
+ * specific WHERE clause is built ad-hoc per query in storage.ts.
+ *
+ * `locale` uses the empty string '' as "no specific locale" sentinel
+ * (default-locale row plus every row of a non-localized field). Postgres
+ * won't allow NULL in a primary key column, so the sentinel keeps the
+ * write logic uniform across all three dialects.
+ */
+export interface FtsEntriesTable {
+  entry_id: Buffer;
+  type: string;
+  field_name: string;
+  locale: string;
+  value: string;
+}
+
 export interface Database {
   envs: EnvsTable;
   types: TypesTable;
@@ -153,6 +175,7 @@ export interface Database {
   tags: TagsTable;
   asset_tags: AssetTagsTable;
   entry_tags: EntryTagsTable;
+  fts_entries: FtsEntriesTable;
   _migrations: MigrationsTable;
 }
 

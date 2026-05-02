@@ -73,9 +73,79 @@ export async function runMigrations(
  * literals containing semicolons. Comments are preserved (drivers accept
  * leading whitespace/comments on a statement).
  */
+// Split a multi-statement SQL blob on top-level semicolons. Aware of:
+//   line comments  (-- ... terminated by newline)
+//   block comments (slash-star ... star-slash, no nesting)
+//   single-quoted string literals (with '' as the embedded-quote escape)
+// A ';' inside any of those is part of the literal/comment, not a
+// statement separator. Trailing whitespace and comment-only chunks
+// are stripped so we never hand sqlite an empty statement.
 function splitStatements(sqlBlob: string): string[] {
-  return sqlBlob
-    .split(';')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const out: string[] = [];
+  let buf = '';
+  let i = 0;
+  const n = sqlBlob.length;
+  while (i < n) {
+    const c = sqlBlob[i]!;
+    const next = i + 1 < n ? sqlBlob[i + 1] : '';
+
+    if (c === '-' && next === '-') {
+      // line comment: consume through end-of-line (keep in buf so the
+      // statement chunk still has it for readability when surfacing
+      // errors; sqlite tolerates leading comments)
+      const eol = sqlBlob.indexOf('\n', i);
+      const end = eol === -1 ? n : eol + 1;
+      buf += sqlBlob.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      const close = sqlBlob.indexOf('*/', i + 2);
+      const end = close === -1 ? n : close + 2;
+      buf += sqlBlob.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (c === "'") {
+      // single-quoted literal; '' is the escape for an embedded quote.
+      buf += c;
+      i += 1;
+      while (i < n) {
+        const ch = sqlBlob[i]!;
+        buf += ch;
+        if (ch === "'") {
+          if (sqlBlob[i + 1] === "'") {
+            buf += sqlBlob[i + 1];
+            i += 2;
+            continue;
+          }
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      continue;
+    }
+    if (c === ';') {
+      const stripped = stripComments(buf).trim();
+      if (stripped.length > 0) out.push(buf.trim());
+      buf = '';
+      i += 1;
+      continue;
+    }
+    buf += c;
+    i += 1;
+  }
+  const tail = stripComments(buf).trim();
+  if (tail.length > 0) out.push(buf.trim());
+  return out;
+}
+
+// Strip line and block comments from a SQL fragment. Used only to decide
+// whether a chunk has any executable content — the version we hand sqlite
+// keeps the comments intact so stack traces stay legible.
+function stripComments(s: string): string {
+  return s
+    .replace(/--[^\n]*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
 }

@@ -171,5 +171,27 @@ export const postgresMigrations: Migration[] = [
 
       CREATE INDEX idx_entry_tags_tag ON entry_tags (env_id, tag_id);
     `
+  },
+  {
+    id: 2,
+    name: '0002_fts',
+    sql: `
+      -- See sqlite.ts for the model. tsvector + GIN gives us FTS without
+      -- a separate virtual table. The 'simple' config is dictionary-free
+      -- (no stemming) — fine for v1; per-locale dictionaries are a
+      -- follow-up where we'd switch on the row's locale column.
+      CREATE TABLE fts_entries (
+        entry_id   BYTEA NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+        type       TEXT  NOT NULL,
+        field_name TEXT  NOT NULL,
+        locale     TEXT  NOT NULL DEFAULT '',
+        value      TEXT  NOT NULL,
+        ts         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
+        PRIMARY KEY (entry_id, field_name, locale)
+      );
+
+      CREATE INDEX idx_fts_entries_ts ON fts_entries USING GIN (ts);
+      CREATE INDEX idx_fts_entries_type ON fts_entries (type);
+    `
   }
 ];
