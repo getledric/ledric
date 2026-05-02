@@ -1569,7 +1569,6 @@ export class LedricStorage implements Storage {
 
   async addAssetTags(assetId: Uint8Array, inputs: readonly string[]): Promise<TagInfo[]> {
     const normalized = normalizeTags(inputs);
-    if (normalized.length === 0) return [];
     const envId = this.envIdBuf();
     const idBuf = Buffer.from(assetId);
 
@@ -1584,9 +1583,19 @@ export class LedricStorage implements Storage {
       if (!exists) {
         throw new NotFoundError('asset', Buffer.from(assetId).toString('hex'));
       }
-      const tags = await this.resolveOrCreateTags(tx, envId, normalized);
-      await this.attachAssetTags(tx, envId, idBuf, tags.map((t) => t.id));
-      return tags.map((t) => ({ slug: t.slug, label: t.label }));
+      if (normalized.length > 0) {
+        const tags = await this.resolveOrCreateTags(tx, envId, normalized);
+        await this.attachAssetTags(tx, envId, idBuf, tags.map((t) => t.id));
+      }
+      const rows = await tx
+        .selectFrom('asset_tags as at')
+        .innerJoin('tags as t', 't.id', 'at.tag_id')
+        .select(['t.slug as slug', 't.label as label'])
+        .where('at.env_id', '=', envId)
+        .where('at.asset_id', '=', idBuf)
+        .orderBy(caseInsensitive(sql.ref('t.label')), 'asc')
+        .execute();
+      return rows.map((r) => ({ slug: r.slug, label: r.label }));
     });
   }
 
@@ -1613,7 +1622,6 @@ export class LedricStorage implements Storage {
 
   async addEntryTags(entryId: Uint8Array, inputs: readonly string[]): Promise<TagInfo[]> {
     const normalized = normalizeTags(inputs);
-    if (normalized.length === 0) return [];
     const envId = this.envIdBuf();
     const idBuf = Buffer.from(entryId);
 
@@ -1628,9 +1636,19 @@ export class LedricStorage implements Storage {
       if (!exists) {
         throw new NotFoundError('entry', Buffer.from(entryId).toString('hex'));
       }
-      const tags = await this.resolveOrCreateTags(tx, envId, normalized);
-      await this.attachEntryTags(tx, envId, idBuf, tags.map((t) => t.id));
-      return tags.map((t) => ({ slug: t.slug, label: t.label }));
+      if (normalized.length > 0) {
+        const tags = await this.resolveOrCreateTags(tx, envId, normalized);
+        await this.attachEntryTags(tx, envId, idBuf, tags.map((t) => t.id));
+      }
+      const rows = await tx
+        .selectFrom('entry_tags as et')
+        .innerJoin('tags as t', 't.id', 'et.tag_id')
+        .select(['t.slug as slug', 't.label as label'])
+        .where('et.env_id', '=', envId)
+        .where('et.entry_id', '=', idBuf)
+        .orderBy(caseInsensitive(sql.ref('t.label')), 'asc')
+        .execute();
+      return rows.map((r) => ({ slug: r.slug, label: r.label }));
     });
   }
 

@@ -201,6 +201,26 @@ describe('LedricStorage (sqlite)', () => {
       const tags = await storage.listTags();
       expect(tags.find((t) => t.slug === 'featured-event')?.entry_uses).toBe(1);
     });
+
+    it('addEntryTags / addAssetTags return the full updated tag list', async () => {
+      const def = (await import('@ledric/schema')).defineType('p2', {
+        title: (await import('@ledric/schema')).field.string({ required: true })
+      });
+      await storage.createType({ definition: def });
+      const e = await storage.createEntry({
+        type: 'p2', slug: 'x', content: { title: 'X' }, schema_version: 1
+      });
+
+      const r1 = await storage.addEntryTags(e.id, ['hero']);
+      expect(r1.map((t) => t.slug)).toEqual(['hero']);
+      const r2 = await storage.addEntryTags(e.id, ['featured']);
+      expect(r2.map((t) => t.slug).sort()).toEqual(['featured', 'hero']);
+
+      const a = await storage.createAsset({ kind: 'image', bytes: Buffer.from([1]) });
+      await storage.addAssetTags(a.id, ['hero']);
+      const aTags = await storage.addAssetTags(a.id, ['featured']);
+      expect(aTags.map((t) => t.slug).sort()).toEqual(['featured', 'hero']);
+    });
   });
 
   describe('updateAsset / findAssetByRefKey', () => {
