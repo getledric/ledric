@@ -37,7 +37,7 @@ export function AuthGate({ children }) {
   }, []);
 
   if (state.kind === 'loading') {
-    return html`<div className="min-h-screen flex items-center justify-center text-zinc-600 text-sm">checking auth…</div>`;
+    return html`<div className="min-h-screen flex items-center justify-center text-zinc-400 text-sm">checking auth…</div>`;
   }
   if (state.kind === 'prompt') {
     return html`<${KeyPrompt}
@@ -63,7 +63,7 @@ function KeyPrompt({ error, onSave }) {
   }
 
   return html`
-    <div className="min-h-screen flex items-center justify-center px-6 bg-zinc-950 text-zinc-100">
+    <div className="min-h-screen flex items-center justify-center px-6 bg-zinc-50 text-zinc-900">
       <form onSubmit=${submit} className="w-full max-w-md space-y-4">
         <div className="space-y-1">
           <h1 className="text-lg font-semibold tracking-tight">ledric admin</h1>
@@ -83,21 +83,21 @@ function KeyPrompt({ error, onSave }) {
             value=${value}
             onChange=${(e) => setValue(e.target.value)}
             placeholder="lka_…"
-            className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 outline-none rounded px-3 py-2 text-sm font-mono"
+            className="w-full bg-zinc-100 border border-zinc-200 focus:border-zinc-400 outline-none rounded px-3 py-2 text-sm font-mono"
           />
         </div>
         ${error && html`
-          <p className="text-xs text-red-400 border border-red-900/50 bg-red-950/20 rounded px-3 py-2">
+          <p className="text-xs text-red-700 border border-red-200 bg-red-50 rounded px-3 py-2">
             ${error}
           </p>`}
         <button
           type="submit"
           disabled=${!looksOk}
-          className="w-full bg-amber-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-zinc-950 hover:bg-amber-400 transition px-4 py-2 rounded text-sm font-medium"
+          className="w-full bg-amber-500 disabled:bg-zinc-300 disabled:text-zinc-500 text-zinc-950 hover:bg-amber-400 transition px-4 py-2 rounded text-sm font-medium"
         >save & continue</button>
         <details className="text-xs text-zinc-500">
-          <summary className="cursor-pointer hover:text-zinc-300">don't have a key?</summary>
-          <pre className="bg-zinc-900 border border-zinc-800 rounded p-3 mt-2 overflow-auto text-zinc-300">ledric keys create --role admin --raw</pre>
+          <summary className="cursor-pointer hover:text-zinc-700">don't have a key?</summary>
+          <pre className="bg-zinc-100 border border-zinc-200 rounded p-3 mt-2 overflow-auto text-zinc-700">ledric keys create --role admin --raw</pre>
           <p className="mt-2">
             Stored in your browser's localStorage. Sign out from the nav to clear it.
           </p>

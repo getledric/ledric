@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { html } from 'htm/react';
 import { marked } from 'marked';
 import { api } from '../lib/api.js';
@@ -23,17 +23,17 @@ function slugify(s) {
 
 const labelClass = 'block text-xs uppercase tracking-widest text-zinc-500 mb-1';
 const inputClass =
-  'w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-600 outline-none rounded px-3 py-2 text-sm';
+  'w-full bg-zinc-100 border border-zinc-200 focus:border-zinc-400 outline-none rounded px-3 py-2 text-sm';
 
 function FieldShell({ name, def, children, hint }) {
   return html`
     <div className="mb-4">
       <label className=${labelClass}>
-        ${name}${def.required && html`<span className="text-amber-500"> *</span>`}
-        ${def.localized && html`<span className="ml-2 text-zinc-600 normal-case tracking-normal text-xs">localized</span>`}
+        ${name}${def.required && html`<span className="text-amber-600"> *</span>`}
+        ${def.localized && html`<span className="ml-2 text-zinc-400 normal-case tracking-normal text-xs">localized</span>`}
       </label>
       ${children}
-      ${hint && html`<p className="text-xs text-zinc-600 mt-1">${hint}</p>`}
+      ${hint && html`<p className="text-xs text-zinc-400 mt-1">${hint}</p>`}
       ${def.description && html`<p className="text-xs text-zinc-500 mt-1">${def.description}</p>`}
     </div>
   `;
@@ -67,7 +67,7 @@ function SlugField({ name, def, value, onChange, content }) {
           <button
             type="button"
             onClick=${() => onChange(slugify(source))}
-            className="text-xs px-2 py-1 border border-zinc-800 hover:border-zinc-600 rounded text-zinc-400 hover:text-zinc-100"
+            className="text-xs px-2 py-1 border border-zinc-200 hover:border-zinc-400 rounded text-zinc-600 hover:text-zinc-900"
           >derive</button>
         `}
       </div>
@@ -103,7 +103,7 @@ function BooleanField({ name, def, value, onChange }) {
           checked=${value === true}
           onChange=${(e) => onChange(e.target.checked)}
         />
-        <span className="text-zinc-300">${name}${def.required && html`<span className="text-amber-500"> *</span>`}</span>
+        <span className="text-zinc-700">${name}${def.required && html`<span className="text-amber-600"> *</span>`}</span>
       </label>
       ${def.description && html`<p className="text-xs text-zinc-500 mt-1 ml-6">${def.description}</p>`}
     </div>
@@ -128,7 +128,7 @@ function DateField({ name, def, value, onChange }) {
 function ToolbarButton({ onClick, title, children, disabled, bold, italic, mono }) {
   const cls = [
     'text-xs px-2 py-1 rounded transition select-none',
-    'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800',
+    'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200',
     'disabled:opacity-40 disabled:hover:bg-transparent',
     bold ? 'font-bold' : '',
     italic ? 'italic' : '',
@@ -237,25 +237,25 @@ function MarkdownField({ name, def, value, onChange }) {
   const tabBtnClass = (active) =>
     `text-xs px-2 py-0.5 rounded transition ${
       active
-        ? 'bg-zinc-800 text-zinc-100'
-        : 'text-zinc-500 hover:text-zinc-200'
+        ? 'bg-zinc-200 text-zinc-900'
+        : 'text-zinc-500 hover:text-zinc-800'
     }`;
 
   return html`
     <${FieldShell} name=${name} def=${def} hint=${def.html ? `HTML policy: ${def.html}` : null}>
-      <div className="border border-zinc-800 rounded overflow-hidden bg-zinc-900">
-        <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-zinc-800 bg-zinc-950/50 flex-wrap">
+      <div className="border border-zinc-200 rounded overflow-hidden bg-zinc-100">
+        <div className="flex items-center gap-0.5 px-1.5 py-1 border-b border-zinc-200 bg-zinc-50/50 flex-wrap">
           <${ToolbarButton} onClick=${() => wrap('**')} title="Bold (⌘B)" bold>B</${ToolbarButton}>
           <${ToolbarButton} onClick=${() => wrap('_')} title="Italic (⌘I)" italic>I</${ToolbarButton}>
-          <span className="w-px h-4 bg-zinc-800 mx-1"></span>
+          <span className="w-px h-4 bg-zinc-200 mx-1"></span>
           <${ToolbarButton} onClick=${() => linePrefix('## ')} title="Heading 2">H2</${ToolbarButton}>
           <${ToolbarButton} onClick=${() => linePrefix('### ')} title="Heading 3">H3</${ToolbarButton}>
-          <span className="w-px h-4 bg-zinc-800 mx-1"></span>
+          <span className="w-px h-4 bg-zinc-200 mx-1"></span>
           <${ToolbarButton} onClick=${onLink} title="Link (⌘K)">link</${ToolbarButton}>
           <${ToolbarButton} onClick=${() => wrap('\`')} title="Inline code" mono>code</${ToolbarButton}>
           <${ToolbarButton} onClick=${() => linePrefix('> ')} title="Quote">quote</${ToolbarButton}>
           <${ToolbarButton} onClick=${() => linePrefix('- ')} title="Bulleted list">list</${ToolbarButton}>
-          <span className="w-px h-4 bg-zinc-800 mx-1"></span>
+          <span className="w-px h-4 bg-zinc-200 mx-1"></span>
           <input
             ref=${fileRef}
             type="file"
@@ -282,7 +282,7 @@ function MarkdownField({ name, def, value, onChange }) {
         ${tab === 'edit' && html`
           <textarea
             ref=${textareaRef}
-            className="w-full bg-zinc-900 outline-none px-3 py-2 text-sm font-mono leading-relaxed resize-y"
+            className="w-full bg-zinc-100 outline-none px-3 py-2 text-sm font-mono leading-relaxed resize-y"
             rows=${12}
             value=${value ?? ''}
             onChange=${(e) => onChange(e.target.value)}
@@ -293,12 +293,12 @@ function MarkdownField({ name, def, value, onChange }) {
         `}
         ${tab === 'preview' && html`
           <div
-            className="prose prose-invert prose-sm max-w-none px-4 py-3 min-h-[12rem] bg-zinc-950"
-            dangerouslySetInnerHTML=${{ __html: previewHtml || '<p class="text-zinc-600">empty</p>' }}
+            className="prose prose-invert prose-sm max-w-none px-4 py-3 min-h-[12rem] bg-zinc-50"
+            dangerouslySetInnerHTML=${{ __html: previewHtml || '<p class="text-zinc-400">empty</p>' }}
           />
         `}
       </div>
-      ${uploadError && html`<p className="text-xs text-red-400 mt-1">${uploadError}</p>`}
+      ${uploadError && html`<p className="text-xs text-red-700 mt-1">${uploadError}</p>`}
     </${FieldShell}>
   `;
 }
@@ -346,19 +346,19 @@ function AssetField({ name, def, value, onChange }) {
     <${FieldShell} name=${name} def=${def} hint=${def.kinds ? `Allowed kinds: ${def.kinds.join(', ')}` : null}>
       ${isHexId && html`
         <div className="flex items-start gap-3 mb-2">
-          <img src=${api.assetUrl(value)} alt="" className="w-24 h-16 object-cover rounded border border-zinc-800" />
+          <img src=${api.assetUrl(value)} alt="" className="w-24 h-16 object-cover rounded border border-zinc-200" />
           <div className="flex-1 text-xs text-zinc-500">
             <div className="font-mono break-all">${value}</div>
           </div>
           <button
             type="button"
             onClick=${() => onChange(undefined)}
-            className="text-xs px-2 py-1 border border-zinc-800 hover:border-red-900 hover:text-red-400 rounded text-zinc-500"
+            className="text-xs px-2 py-1 border border-zinc-200 hover:border-red-300 hover:text-red-700 rounded text-zinc-500"
           >clear</button>
         </div>
       `}
       ${isPlaceholder && html`
-        <div className="mb-2 text-xs text-amber-500 border border-amber-900/50 bg-amber-950/20 rounded px-3 py-2">
+        <div className="mb-2 text-xs text-amber-600 border border-amber-200 bg-amber-50 rounded px-3 py-2">
           Placeholder string: <code className="font-mono">${value}</code> · upload a real asset to replace.
         </div>
       `}
@@ -368,24 +368,188 @@ function AssetField({ name, def, value, onChange }) {
           type="file"
           accept=${def.kinds && def.kinds.includes('image') ? 'image/*' : undefined}
           onChange=${onFile}
-          className="text-xs text-zinc-400 file:mr-3 file:px-3 file:py-1.5 file:text-xs file:border file:border-zinc-800 file:bg-zinc-900 file:text-zinc-200 file:hover:bg-zinc-800 file:rounded file:cursor-pointer file:transition"
+          className="text-xs text-zinc-600 file:mr-3 file:px-3 file:py-1.5 file:text-xs file:border file:border-zinc-200 file:bg-zinc-100 file:text-zinc-800 file:hover:bg-zinc-200 file:rounded file:cursor-pointer file:transition"
         />
         ${uploading && html`<span className="text-xs text-zinc-500">uploading…</span>`}
       </div>
-      ${error && html`<p className="text-xs text-red-400 mt-1">${error}</p>`}
+      ${error && html`<p className="text-xs text-red-700 mt-1">${error}</p>`}
     </${FieldShell}>
   `;
 }
 
-function ReferencesField({ name, def, value }) {
+function refLabel(entry) {
+  const f = entry.fields ?? {};
+  return f.title || f.name || f.label || f.headline || entry.slug;
+}
+
+function ReferencesField({ name, def, value, onChange }) {
   const arr = Array.isArray(value) ? value : [];
+  const allowedTypes = Array.isArray(def.to) ? def.to : [];
+  const [input, setInput] = useState('');
+  const [open, setOpen] = useState(false);
+  const [pool, setPool] = useState([]);
+  const [resolved, setResolved] = useState({});
+  const [loading, setLoading] = useState(false);
+  const max = def.max;
+  const atMax = max !== undefined && arr.length >= max;
+  const readOnly = !onChange;
+
+  useEffect(() => {
+    if (allowedTypes.length === 0) return;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const lists = await Promise.all(
+        allowedTypes.map((t) => api.find(t, { limit: 100 }).catch(() => null))
+      );
+      if (cancelled) return;
+      const flat = [];
+      for (let i = 0; i < allowedTypes.length; i++) {
+        const list = lists[i];
+        if (!list?.results) continue;
+        for (const e of list.results) {
+          flat.push({
+            type: allowedTypes[i],
+            slug: e.slug,
+            label: refLabel(e)
+          });
+        }
+      }
+      setPool(flat);
+      const map = {};
+      for (const item of flat) map[`${item.type}/${item.slug}`] = item;
+      setResolved((prev) => ({ ...map, ...prev }));
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [allowedTypes.join(',')]);
+
+  const term = input.trim().toLowerCase();
+  const selectedKeys = new Set(arr.map((s) => String(s).split('@')[0]));
+  const candidates = pool
+    .filter((c) => !selectedKeys.has(`${c.type}/${c.slug}`))
+    .filter(
+      (c) =>
+        term === '' ||
+        c.label.toLowerCase().includes(term) ||
+        c.slug.toLowerCase().includes(term) ||
+        c.type.toLowerCase().includes(term)
+    )
+    .slice(0, 12);
+
+  function add(c) {
+    if (atMax) return;
+    onChange([...arr, `${c.type}/${c.slug}`]);
+    setResolved((prev) => ({ ...prev, [`${c.type}/${c.slug}`]: c }));
+    setInput('');
+    setOpen(false);
+  }
+  function removeAt(i) {
+    onChange(arr.filter((_, j) => j !== i));
+  }
+
+  function refKey(ref) {
+    return String(ref).split('@')[0];
+  }
+  function displayFor(ref) {
+    const key = refKey(ref);
+    const r = resolved[key];
+    if (r) return { label: r.label, type: r.type, slug: r.slug, missing: false };
+    const slash = key.indexOf('/');
+    if (slash > 0) {
+      return {
+        type: key.slice(0, slash),
+        slug: key.slice(slash + 1),
+        label: key.slice(slash + 1),
+        missing: pool.length > 0
+      };
+    }
+    return { type: '?', slug: key, label: key, missing: true };
+  }
+
   return html`
-    <${FieldShell} name=${name} def=${def} hint=${`References to ${def.to.join(', ')} (read-only in v1)`}>
-      ${arr.length === 0
-        ? html`<div className="text-xs text-zinc-500">none</div>`
-        : html`<ul className="text-xs font-mono space-y-1">
-            ${arr.map((id, i) => html`<li key=${i} className="text-zinc-400">${String(id)}</li>`)}
-          </ul>`}
+    <${FieldShell}
+      name=${name}
+      def=${def}
+      hint=${allowedTypes.length === 0
+        ? 'No allowed types declared on this field.'
+        : `References to ${allowedTypes.join(' / ')}${max !== undefined ? ` · up to ${max}` : ''}`}
+    >
+      <div className="flex flex-wrap gap-1.5 items-center mb-2">
+        ${arr.map((ref, i) => {
+          const d = displayFor(ref);
+          return html`
+            <span
+              key=${i}
+              className=${`inline-flex items-center gap-1.5 text-xs rounded px-2 py-1 border ${d.missing
+                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                : 'border-zinc-200 bg-zinc-100 text-zinc-800'}`}
+              title=${`${d.type}/${d.slug}`}
+            >
+              <span className="font-mono text-[10px] text-zinc-500 uppercase tracking-wider">${d.type}</span>
+              <span>${d.label}</span>
+              ${!readOnly &&
+              html`<button
+                type="button"
+                onClick=${() => removeAt(i)}
+                className="text-zinc-500 hover:text-red-700 leading-none"
+                title="Remove"
+              >×</button>`}
+            </span>
+          `;
+        })}
+        ${arr.length === 0 && readOnly && html`<span className="text-xs text-zinc-500">none</span>`}
+      </div>
+      ${!readOnly &&
+      html`<div className="relative">
+        <input
+          type="text"
+          className=${`${inputClass} ${atMax ? 'opacity-50 cursor-not-allowed' : ''}`}
+          value=${input}
+          placeholder=${atMax
+            ? `Maximum of ${max} reached`
+            : allowedTypes.length === 0
+              ? 'No allowed types'
+              : `Pick a ${allowedTypes.join(' or ')}…`}
+          disabled=${atMax || allowedTypes.length === 0}
+          onChange=${(e) => {
+            setInput(e.target.value);
+            setOpen(true);
+          }}
+          onFocus=${() => setOpen(true)}
+          onBlur=${() => setTimeout(() => setOpen(false), 150)}
+        />
+        ${open &&
+        !atMax &&
+        html`<div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-zinc-200 rounded shadow-lg max-h-72 overflow-y-auto">
+          ${loading && pool.length === 0
+            ? html`<div className="px-3 py-2 text-xs text-zinc-500">loading…</div>`
+            : candidates.length === 0
+              ? html`<div className="px-3 py-2 text-xs text-zinc-500">${
+                  pool.length === 0 ? 'No entries yet for these types.' : 'No matches.'
+                }</div>`
+              : candidates.map(
+                  (c) => html`
+                    <button
+                      key=${`${c.type}/${c.slug}`}
+                      type="button"
+                      onMouseDown=${(e) => {
+                        e.preventDefault();
+                        add(c);
+                      }}
+                      className="flex items-baseline gap-2 w-full text-left text-xs px-3 py-1.5 hover:bg-zinc-100"
+                    >
+                      <span className="font-mono text-[10px] text-zinc-500 uppercase tracking-wider">${c.type}</span>
+                      <span className="text-zinc-800 flex-1 truncate">${c.label}</span>
+                      ${c.label !== c.slug &&
+                      html`<span className="text-zinc-400 font-mono">${c.slug}</span>`}
+                    </button>
+                  `
+                )}
+        </div>`}
+      </div>`}
     </${FieldShell}>
   `;
 }
@@ -405,12 +569,12 @@ function ArrayOfStringField({ name, def, value, onChange }) {
     <${FieldShell} name=${name} def=${def}>
       <div className="flex flex-wrap gap-1 mb-2">
         ${arr.map((v, i) => html`
-          <span key=${i} className="inline-flex items-center gap-1 text-xs bg-zinc-900 border border-zinc-800 rounded-full px-2 py-1">
+          <span key=${i} className="inline-flex items-center gap-1 text-xs bg-zinc-100 border border-zinc-200 rounded-full px-2 py-1">
             ${v}
             <button
               type="button"
               onClick=${() => onChange(arr.filter((_, j) => j !== i))}
-              className="text-zinc-500 hover:text-red-400"
+              className="text-zinc-500 hover:text-red-700"
             >×</button>
           </span>
         `)}
@@ -432,7 +596,7 @@ function ArrayOfStringField({ name, def, value, onChange }) {
         <button
           type="button"
           onClick=${add}
-          className="text-xs px-3 py-1 border border-zinc-800 hover:border-zinc-600 rounded text-zinc-400"
+          className="text-xs px-3 py-1 border border-zinc-200 hover:border-zinc-400 rounded text-zinc-600"
         >add</button>
       </div>
     </${FieldShell}>
@@ -442,7 +606,7 @@ function ArrayOfStringField({ name, def, value, onChange }) {
 function FallbackField({ name, def, value }) {
   return html`
     <${FieldShell} name=${name} def=${def} hint=${`Field type "${def.type}" — read-only in this admin UI for now.`}>
-      <pre className="text-xs bg-zinc-900 border border-zinc-800 rounded p-3 overflow-auto">${JSON.stringify(value, null, 2)}</pre>
+      <pre className="text-xs bg-zinc-100 border border-zinc-200 rounded p-3 overflow-auto">${JSON.stringify(value, null, 2)}</pre>
     </${FieldShell}>
   `;
 }
@@ -511,9 +675,9 @@ function JssField({ name, def, value, onChange }) {
 
   return html`
     <${FieldShell} name=${name} def=${def} hint="CSS-in-JS object. @apply: \"...\" composes Tailwind utilities at the consumer.">
-      <div className="border border-zinc-800 rounded overflow-hidden bg-zinc-900">
-        <div className="flex items-center gap-2 px-2 py-1 border-b border-zinc-800 bg-zinc-950/50">
-          <span className=${`text-xs ${parseError ? 'text-red-400' : 'text-green-500'}`}>
+      <div className="border border-zinc-200 rounded overflow-hidden bg-zinc-100">
+        <div className="flex items-center gap-2 px-2 py-1 border-b border-zinc-200 bg-zinc-50/50">
+          <span className=${`text-xs ${parseError ? 'text-red-700' : 'text-green-600'}`}>
             ${draft.trim() === '' ? 'empty' : parseError ? 'invalid JSON' : 'valid JSON'}
           </span>
           <div className="flex-1"></div>
@@ -521,19 +685,19 @@ function JssField({ name, def, value, onChange }) {
             type="button"
             onClick=${format}
             disabled=${draft.trim() === ''}
-            className="text-xs px-2 py-0.5 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+            className="text-xs px-2 py-0.5 rounded text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200 disabled:opacity-40"
             title="Pretty-print"
           >format</button>
           <button
             type="button"
             onClick=${minify}
             disabled=${draft.trim() === ''}
-            className="text-xs px-2 py-0.5 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+            className="text-xs px-2 py-0.5 rounded text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200 disabled:opacity-40"
             title="Minify"
           >minify</button>
         </div>
         <textarea
-          className="w-full bg-zinc-900 outline-none px-3 py-2 text-xs font-mono leading-relaxed resize-y"
+          className="w-full bg-zinc-100 outline-none px-3 py-2 text-xs font-mono leading-relaxed resize-y"
           rows=${10}
           spellCheck=${false}
           value=${draft}
@@ -541,7 +705,7 @@ function JssField({ name, def, value, onChange }) {
           placeholder=${'{\n  ".hero": {\n    "@apply": "text-2xl font-bold",\n    "color": "var(--brand)"\n  }\n}'}
         />
       </div>
-      ${parseError && html`<p className="text-xs text-red-400 mt-1 font-mono">${parseError}</p>`}
+      ${parseError && html`<p className="text-xs text-red-700 mt-1 font-mono">${parseError}</p>`}
     </${FieldShell}>
   `;
 }
@@ -561,7 +725,7 @@ function CssField({ name, def, value, onChange }) {
         maxLength=${def.max}
       />
       ${def.max !== undefined && html`
-        <div className=${`text-xs mt-1 text-right ${overLimit ? 'text-red-400' : 'text-zinc-600'}`}>
+        <div className=${`text-xs mt-1 text-right ${overLimit ? 'text-red-700' : 'text-zinc-400'}`}>
           ${v.length} / ${def.max}
         </div>
       `}

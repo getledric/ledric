@@ -53,14 +53,14 @@ export function TagChips({ tags = [], onAdd, onRemove, allTags = [], disabled = 
         (t) => html`
           <span
             key=${t.slug}
-            className="inline-flex items-center gap-1 bg-zinc-800 text-zinc-200 text-xs px-2 py-0.5 rounded-full border border-zinc-700"
+            className="inline-flex items-center gap-1 bg-zinc-200 text-zinc-800 text-xs px-2 py-0.5 rounded-full border border-zinc-300"
           >
             ${t.label}
             ${!disabled &&
             html`<button
               type="button"
               onClick=${() => onRemove(t.slug)}
-              className="text-zinc-500 hover:text-zinc-200 leading-none ml-0.5"
+              className="text-zinc-500 hover:text-zinc-800 leading-none ml-0.5"
             >×</button>`}
           </span>
         `
@@ -79,18 +79,18 @@ export function TagChips({ tags = [], onAdd, onRemove, allTags = [], disabled = 
           onFocus=${() => setOpen(true)}
           onBlur=${() => setTimeout(() => setOpen(false), 150)}
           onKeyDown=${handleKeyDown}
-          className="bg-transparent text-xs text-zinc-300 placeholder-zinc-600 border-b border-zinc-700 focus:border-amber-500 outline-none w-28 py-0.5"
+          className="bg-transparent text-xs text-zinc-700 placeholder-zinc-400 border-b border-zinc-300 focus:border-amber-500 outline-none w-28 py-0.5"
         />
         ${open &&
         candidates.length > 0 &&
-        html`<div className="absolute left-0 top-full mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded shadow-lg min-w-max">
+        html`<div className="absolute left-0 top-full mt-1 z-50 bg-zinc-100 border border-zinc-300 rounded shadow-lg min-w-max">
           ${candidates.map(
             (t) => html`
               <button
                 key=${t.slug}
                 type="button"
                 onMouseDown=${() => pick(t.label)}
-                className="block w-full text-left text-xs px-3 py-1.5 text-zinc-300 hover:bg-zinc-800"
+                className="block w-full text-left text-xs px-3 py-1.5 text-zinc-700 hover:bg-zinc-200"
               >${t.label}</button>
             `
           )}

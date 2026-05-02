@@ -29,7 +29,7 @@ export function TypeList() {
   }, []);
 
   if (error) {
-    return html`<div className="text-red-400 border border-red-900 rounded p-4">${error.message}</div>`;
+    return html`<div className="text-red-700 border border-red-200 rounded p-4">${error.message}</div>`;
   }
   if (!model) {
     return html`<div className="text-zinc-500">loading…</div>`;
@@ -37,7 +37,7 @@ export function TypeList() {
 
   const types = Object.entries(model.types);
   if (types.length === 0) {
-    return html`<div className="text-zinc-500">No types yet. Create one via MCP or with <code className="text-amber-400">create_type</code>.</div>`;
+    return html`<div className="text-zinc-500">No types yet. Create one via MCP or with <code className="text-amber-600">create_type</code>.</div>`;
   }
 
   return html`
@@ -52,7 +52,7 @@ export function TypeList() {
             <li key=${name}>
               <${Link}
                 to=${`/types/${name}`}
-                className="block border border-zinc-800 hover:border-zinc-600 rounded p-4 transition"
+                className="block border border-zinc-200 hover:border-zinc-400 rounded p-4 transition"
               >
                 <div className="flex items-baseline justify-between">
                   <h2 className="text-lg font-medium tracking-tight">${name}</h2>
@@ -61,7 +61,7 @@ export function TypeList() {
                   </span>
                 </div>
                 ${t.description &&
-                  html`<p className="text-sm text-zinc-400 mt-1">${t.description}</p>`}
+                  html`<p className="text-sm text-zinc-600 mt-1">${t.description}</p>`}
               </${Link}>
             </li>
           `

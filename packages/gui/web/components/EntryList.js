@@ -52,7 +52,7 @@ export function EntryList() {
   }, [type, tagFilter]);
 
   if (error) {
-    return html`<div className="text-red-400 border border-red-900 rounded p-4">${error.message}</div>`;
+    return html`<div className="text-red-700 border border-red-200 rounded p-4">${error.message}</div>`;
   }
   if (!typeDef || !list) {
     return html`<div className="text-zinc-500">loading…</div>`;
@@ -66,7 +66,7 @@ export function EntryList() {
     <div>
       <div className="flex items-baseline justify-between mb-2">
         <div className="flex items-baseline gap-3">
-          <${Link} to="/types" className="text-sm text-zinc-500 hover:text-zinc-300">←</${Link}>
+          <${Link} to="/types" className="text-sm text-zinc-500 hover:text-zinc-700">←</${Link}>
           <h1 className="text-2xl font-semibold">${type}</h1>
           <span className="text-xs text-zinc-500 tracking-widest uppercase">v${typeDef.version}</span>
         </div>
@@ -76,7 +76,7 @@ export function EntryList() {
         >+ new ${type}</${Link}>
       </div>
       ${typeDef.description &&
-        html`<p className="text-sm text-zinc-400 mb-4">${typeDef.description}</p>`}
+        html`<p className="text-sm text-zinc-600 mb-4">${typeDef.description}</p>`}
 
       ${allTags.length > 0 && html`
         <div className="flex items-center gap-2 mb-4">
@@ -84,7 +84,7 @@ export function EntryList() {
           <select
             value=${tagFilter}
             onChange=${(e) => setTagFilter(e.target.value)}
-            className="bg-zinc-900 border border-zinc-700 text-zinc-300 text-xs rounded px-2 py-1 focus:border-amber-500 outline-none"
+            className="bg-zinc-100 border border-zinc-300 text-zinc-700 text-xs rounded px-2 py-1 focus:border-amber-500 outline-none"
           >
             <option value="">all tags</option>
             ${allTags.map((t) => html`<option key=${t.slug} value=${t.slug}>${t.label}</option>`)}
@@ -93,20 +93,20 @@ export function EntryList() {
             <button
               type="button"
               onClick=${() => setTagFilter('')}
-              className="text-xs text-zinc-500 hover:text-zinc-300"
+              className="text-xs text-zinc-500 hover:text-zinc-700"
             >clear</button>
           `}
         </div>
       `}
 
       ${list.results.length === 0
-        ? html`<div className="text-zinc-500 border border-zinc-800 rounded p-8 text-center">
+        ? html`<div className="text-zinc-500 border border-zinc-200 rounded p-8 text-center">
             No entries yet.
           </div>`
         : html`
-          <div className="border border-zinc-800 rounded overflow-hidden">
+          <div className="border border-zinc-200 rounded overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-zinc-900 text-zinc-400 uppercase tracking-widest text-xs">
+              <thead className="bg-zinc-100 text-zinc-600 uppercase tracking-widest text-xs">
                 <tr>
                   ${summary.map((f) => html`<th key=${f} className="text-left font-medium px-4 py-2">${f}</th>`)}
                   <th className="px-4 py-2 w-20 text-right">version</th>
@@ -115,12 +115,12 @@ export function EntryList() {
               <tbody>
                 ${list.results.map((entry) =>
                   html`
-                    <tr key=${entry.id} className="border-t border-zinc-800 hover:bg-zinc-900/50">
+                    <tr key=${entry.id} className="border-t border-zinc-200 hover:bg-zinc-100/50">
                       ${summary.map((f, i) => {
                         const val = fieldPreview(entry.fields[f], typeDef.fields[f]);
                         const link = i === 0;
                         const cell = link
-                          ? html`<${Link} to=${`/types/${type}/${entry.slug}`} className="text-amber-400 hover:text-amber-300">${val}</${Link}>`
+                          ? html`<${Link} to=${`/types/${type}/${entry.slug}`} className="text-amber-600 hover:text-amber-700">${val}</${Link}>`
                           : val;
                         return html`<td key=${f} className="px-4 py-2 align-middle">${cell}</td>`;
                       })}

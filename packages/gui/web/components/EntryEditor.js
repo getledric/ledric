@@ -142,7 +142,7 @@ export function EntryEditor({ mode }) {
     return html`<div className="text-zinc-500">loading…</div>`;
   }
   if (error && !typeDef) {
-    return html`<div className="text-red-400 border border-red-900 rounded p-4">${error.message}</div>`;
+    return html`<div className="text-red-700 border border-red-200 rounded p-4">${error.message}</div>`;
   }
   if (!typeDef) return null;
 
@@ -152,18 +152,18 @@ export function EntryEditor({ mode }) {
   return html`
     <div className="max-w-3xl">
       <div className="flex items-baseline gap-3 mb-1">
-        <${Link} to=${`/types/${type}`} className="text-sm text-zinc-500 hover:text-zinc-300">←</${Link}>
+        <${Link} to=${`/types/${type}`} className="text-sm text-zinc-500 hover:text-zinc-700">←</${Link}>
         <h1 className="text-2xl font-semibold">${mode === 'new' ? `New ${type}` : (content[typeDef.display_field ?? 'title'] || slug)}</h1>
       </div>
       <div className="text-xs text-zinc-500 tracking-widest uppercase mb-6">
         ${type}${mode === 'edit' && parentVersion ? ` · v${parentVersion}` : ''}
         ${publishedVersion !== null ? ` · published v${publishedVersion}` : ''}
-        ${hasUnpublished && html`<span className="ml-2 text-amber-500 normal-case tracking-normal">unpublished changes</span>`}
-        ${isPublished && html`<span className="ml-2 text-green-500 normal-case tracking-normal">live</span>`}
+        ${hasUnpublished && html`<span className="ml-2 text-amber-600 normal-case tracking-normal">unpublished changes</span>`}
+        ${isPublished && html`<span className="ml-2 text-green-600 normal-case tracking-normal">live</span>`}
       </div>
 
-      ${info && html`<div className="text-sm text-green-400 border border-green-900/50 bg-green-950/20 rounded px-3 py-2 mb-4">${info}</div>`}
-      ${error && html`<div className="text-sm text-red-400 border border-red-900/50 bg-red-950/20 rounded px-3 py-2 mb-4">${error.message}</div>`}
+      ${info && html`<div className="text-sm text-green-700 border border-green-200 bg-green-50 rounded px-3 py-2 mb-4">${info}</div>`}
+      ${error && html`<div className="text-sm text-red-700 border border-red-200 bg-red-50 rounded px-3 py-2 mb-4">${error.message}</div>`}
 
       <form
         onSubmit=${(e) => {
@@ -195,18 +195,18 @@ export function EntryEditor({ mode }) {
           </div>
         `}
 
-        <div className="flex items-center gap-3 pt-4 border-t border-zinc-800">
+        <div className="flex items-center gap-3 pt-4 border-t border-zinc-200">
           <button
             type="submit"
             disabled=${saving}
-            className="bg-amber-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-zinc-950 hover:bg-amber-400 transition px-4 py-2 rounded text-sm font-medium"
+            className="bg-amber-500 disabled:bg-zinc-300 disabled:text-zinc-500 text-zinc-950 hover:bg-amber-400 transition px-4 py-2 rounded text-sm font-medium"
           >${saving ? 'saving…' : (mode === 'new' ? 'create draft' : 'save draft')}</button>
           ${mode === 'edit' && html`
             <button
               type="button"
               onClick=${publish}
               disabled=${saving || isPublished}
-              className="border border-zinc-800 disabled:text-zinc-600 hover:border-zinc-600 transition px-4 py-2 rounded text-sm text-zinc-200"
+              className="border border-zinc-200 disabled:text-zinc-400 hover:border-zinc-400 transition px-4 py-2 rounded text-sm text-zinc-800"
             >${isPublished ? 'published' : 'publish'}</button>
           `}
         </div>

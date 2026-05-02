@@ -48,26 +48,26 @@ function Layout({ children }) {
   const hasKey = Boolean(auth.key);
   return html`
     <div className="min-h-screen flex flex-col">
-      <nav className="px-6 py-4 border-b border-zinc-800 flex items-baseline gap-6">
-        <span className="font-semibold tracking-widest text-zinc-400">LEDRIC · ADMIN</span>
-        <${Link} to="/types" className="text-sm text-zinc-400 hover:text-zinc-100 transition">Types</${Link}>
-        <span className="ml-auto flex items-baseline gap-3 text-xs text-zinc-600">
-          <span>connected to <code className="text-zinc-400">${window.location.host}</code></span>
+      <nav className="px-6 py-4 border-b border-zinc-200 flex items-baseline gap-6">
+        <span className="font-semibold tracking-widest text-zinc-600">LEDRIC · ADMIN</span>
+        <${Link} to="/types" className="text-sm text-zinc-600 hover:text-zinc-900 transition">Types</${Link}>
+        <span className="ml-auto flex items-baseline gap-3 text-xs text-zinc-400">
+          <span>connected to <code className="text-zinc-600">${window.location.host}</code></span>
           ${hasKey && html`
             <button
               type="button"
               onClick=${signOut}
-              className="text-zinc-500 hover:text-amber-400 transition"
+              className="text-zinc-500 hover:text-amber-600 transition"
               title="Clear stored admin key"
             >sign out</button>
           `}
         </span>
       </nav>
       <main className="flex-1 px-6 py-8 max-w-6xl w-full mx-auto">${children}</main>
-      <footer className="px-6 py-4 border-t border-zinc-800 text-xs text-zinc-600">
+      <footer className="px-6 py-4 border-t border-zinc-200 text-xs text-zinc-400">
         ${hasKey
-          ? html`Authenticated. Key stored in this browser. <a className="text-zinc-400 hover:text-amber-400" href="/" target="_blank">API root</a>`
-          : html`Auth-off mode (no admin key required). <a className="text-zinc-400 hover:text-amber-400" href="/" target="_blank">API root</a>`}
+          ? html`Authenticated. Key stored in this browser. <a className="text-zinc-600 hover:text-amber-600" href="/" target="_blank">API root</a>`
+          : html`Auth-off mode (no admin key required). <a className="text-zinc-600 hover:text-amber-600" href="/" target="_blank">API root</a>`}
       </footer>
     </div>
   `;

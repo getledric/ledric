@@ -154,22 +154,22 @@ export function InlineDrawer() {
   };
 
   return html`
-    <div className="flex flex-col h-screen bg-zinc-950 text-zinc-100">
-      <header className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800 shrink-0">
+    <div className="flex flex-col h-screen bg-zinc-50 text-zinc-900">
+      <header className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200 shrink-0">
         <span className="text-xs uppercase tracking-widest text-zinc-500">${type}</span>
         <span className="text-sm font-medium truncate flex-1">${headerTitle}</span>
         <button
           type="button"
           onClick=${close}
           aria-label="Close"
-          className="text-zinc-500 hover:text-zinc-100 px-2 py-1 rounded transition"
+          className="text-zinc-500 hover:text-zinc-900 px-2 py-1 rounded transition"
         >✕</button>
       </header>
 
       <main className="flex-1 overflow-y-auto px-4 py-4">
         ${loading && html`<div className="text-zinc-500 text-sm">loading…</div>`}
         ${!loading && error && !typeDef && html`
-          <div className="text-sm text-red-400 border border-red-900/50 bg-red-950/20 rounded px-3 py-2">
+          <div className="text-sm text-red-700 border border-red-200 bg-red-50 rounded px-3 py-2">
             ${formatError(error)}
           </div>`}
         ${!loading && typeDef && html`
@@ -196,29 +196,29 @@ export function InlineDrawer() {
       </main>
 
       ${typeDef && html`
-        <footer className="border-t border-zinc-800 px-4 py-3 shrink-0 space-y-2">
+        <footer className="border-t border-zinc-200 px-4 py-3 shrink-0 space-y-2">
           ${error && html`
-            <div className="text-xs text-red-400 border border-red-900/50 bg-red-950/20 rounded px-3 py-2">
+            <div className="text-xs text-red-700 border border-red-200 bg-red-50 rounded px-3 py-2">
               ${formatError(error)}
             </div>`}
           <div className="flex items-center gap-2 text-xs text-zinc-500">
             <span>v${parentVersion ?? '?'}</span>
             ${publishedVersion !== null && parentVersion === publishedVersion && html`
-              <span className="text-green-500">live</span>`}
+              <span className="text-green-600">live</span>`}
             ${publishedVersion !== null && parentVersion !== publishedVersion && html`
-              <span className="text-amber-500">unpublished draft</span>`}
+              <span className="text-amber-600">unpublished draft</span>`}
             <div className="flex-1"></div>
             <button
               type="button"
               onClick=${close}
               disabled=${saving}
-              className="px-3 py-1.5 text-zinc-300 hover:text-zinc-100 transition"
+              className="px-3 py-1.5 text-zinc-700 hover:text-zinc-900 transition"
             >cancel</button>
             <button
               type="button"
               onClick=${save}
               disabled=${saving}
-              className="bg-amber-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-zinc-950 hover:bg-amber-400 transition px-4 py-1.5 rounded text-sm font-medium"
+              className="bg-amber-500 disabled:bg-zinc-300 disabled:text-zinc-500 text-zinc-950 hover:bg-amber-400 transition px-4 py-1.5 rounded text-sm font-medium"
             >${saving ? 'saving…' : 'save & publish'}</button>
           </div>
         </footer>
