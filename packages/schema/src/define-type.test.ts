@@ -152,4 +152,75 @@ describe('defineType', () => {
       })
     ).toThrow(/default value that doesn't match/);
   });
+
+  // Required-key presence: tags every error with code "VALIDATION" so the
+  // MCP boundary returns a structured response instead of a TOOL_ERROR
+  // wrapping a raw JS TypeError.
+
+  it('rejects an array field missing "of" with a path-prefixed message', () => {
+    expect(() =>
+      defineType('page', {
+        tags: { type: 'array', items: { type: 'string' } } as never
+      })
+    ).toThrow(/page.*field "tags" \(type "array"\) is missing required property "of"/);
+  });
+
+  it('rejects an object field missing "fields"', () => {
+    expect(() =>
+      defineType('page', {
+        meta: { type: 'object' } as never
+      })
+    ).toThrow(/page.*field "meta" \(type "object"\) is missing required property "fields"/);
+  });
+
+  it('rejects an enum without "values"', () => {
+    expect(() =>
+      defineType('page', {
+        status: { type: 'enum' } as never
+      })
+    ).toThrow(/page.*field "status" \(type "enum"\) is missing required property "values"/);
+  });
+
+  it('rejects an empty enum values array', () => {
+    expect(() =>
+      defineType('page', {
+        status: { type: 'enum', values: [] } as never
+      })
+    ).toThrow(/non-empty array of strings/);
+  });
+
+  it('rejects a references field without "to"', () => {
+    expect(() =>
+      defineType('page', {
+        related: { type: 'references' } as never
+      })
+    ).toThrow(/page.*field "related" \(type "references"\) is missing required property "to"/);
+  });
+
+  it('rejects a vector field without "dims"', () => {
+    expect(() =>
+      defineType('page', {
+        embedding: { type: 'vector' } as never
+      })
+    ).toThrow(/page.*field "embedding" \(type "vector"\) is missing required property "dims"/);
+  });
+
+  it('tags validation errors with code "VALIDATION"', () => {
+    let captured: unknown;
+    try {
+      defineType('page', {
+        tags: { type: 'array', items: { type: 'string' } } as never
+      });
+    } catch (e) {
+      captured = e;
+    }
+    expect(captured).toBeInstanceOf(Error);
+    expect((captured as Error & { code?: string }).code).toBe('VALIDATION');
+  });
+
+  it('rejects a leading-underscore type name with a sidecar reason', () => {
+    expect(() => defineType('_probe', { title: field.string() })).toThrow(
+      /reserved for content sidecars/
+    );
+  });
 });

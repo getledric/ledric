@@ -1,5 +1,11 @@
-import { defineType, FIELD_TYPES } from '@ledric/schema';
-import type { FieldDef, TypeDef, TypeDefOptions } from '@ledric/schema';
+import {
+  defineType,
+  FIELD_TYPES,
+  FIELD_TYPE_SPECS,
+  NAME_PATTERN,
+  RESERVED_CONTENT_KEYS
+} from '@ledric/schema';
+import type { FieldDef, FieldTypeSpec, TypeDef, TypeDefOptions } from '@ledric/schema';
 import type {
   Storage,
   ChangeClass,
@@ -55,12 +61,39 @@ export interface Capabilities {
    * older servers don't ship newer types.
    */
   fieldTypes: readonly string[];
+  /**
+   * Per-discriminator catalogue: required keys, optional keys, and a
+   * complete example. Lets an agent constructing a new type pick the
+   * right keys for `array.of`, `object.fields`, `references.to`, etc.
+   * without trial-and-error or doc-hunting.
+   */
+  fieldTypeSpecs: Record<string, FieldTypeSpec>;
+}
+
+/**
+ * Naming rules and reserved keys an agent should respect when
+ * constructing types or content. Surfaced in describeModel so the
+ * "leading underscore is reserved" rule is discoverable inline rather
+ * than hidden in error messages.
+ */
+export interface Conventions {
+  /** Regex (string form) every type and field name must satisfy. */
+  name_pattern: string;
+  /**
+   * Top-level content keys ledric uses for sidecars (locale overrides,
+   * slug-rename redirects, ref resolution, warnings). Field names must
+   * not collide with these. Anything starting with `_` is reserved.
+   */
+  reserved_content_keys: readonly string[];
+  /** Plain-language explanation, in case the rules above need context. */
+  notes: string;
 }
 
 export interface DescribeModelResult {
   schema_version: number;
   types: Record<string, TypeDescription>;
   capabilities: Capabilities;
+  conventions: Conventions;
 }
 
 export interface TypeDescription extends TypeDef {
@@ -299,7 +332,15 @@ export class Core {
         fts: 'fts5',
         imageTransforms: true,
         refValidation: true,
-        fieldTypes: FIELD_TYPES
+        fieldTypes: FIELD_TYPES,
+        fieldTypeSpecs: FIELD_TYPE_SPECS as unknown as Record<string, FieldTypeSpec>
+      },
+      conventions: {
+        name_pattern: NAME_PATTERN,
+        reserved_content_keys: RESERVED_CONTENT_KEYS,
+        notes:
+          'Type and field names match name_pattern (lowercase, must start with a letter, underscores allowed mid-name). ' +
+          'A leading underscore is NEVER allowed — that prefix is reserved for content sidecars (_locale, _redirect, _refs, _warnings) so we can add new ones without breaking existing schemas.'
       }
     };
   }

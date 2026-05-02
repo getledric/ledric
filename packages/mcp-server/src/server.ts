@@ -887,13 +887,14 @@ export function createMcpServer(core: Core): Server {
 }
 
 function serializeToolError(err: unknown): Record<string, unknown> {
+  // Strings, numbers, plain objects — wrap as INTERNAL because the
+  // throw site shouldn't have been a non-Error in the first place.
   if (!(err instanceof Error)) {
-    return { code: 'TOOL_ERROR', message: String(err) };
+    return {
+      code: 'INTERNAL',
+      message: `non-Error thrown: ${String(err)}`
+    };
   }
-  const out: Record<string, unknown> = {
-    code: 'TOOL_ERROR',
-    message: err.message
-  };
   const e = err as Error & {
     code?: unknown;
     errors?: unknown;
@@ -905,7 +906,23 @@ function serializeToolError(err: unknown): Record<string, unknown> {
     ref?: unknown;
     entry_count?: unknown;
   };
-  if (typeof e.code === 'string') out.code = e.code;
+  // Default to INTERNAL so unhandled JS errors (TypeError,
+  // ReferenceError, anything without an explicit `code`) are clearly
+  // distinguishable from typed validation / version-conflict / not-
+  // found errors. The previous default of TOOL_ERROR conflated the
+  // two and made agents assume retryable validation issues when the
+  // real cause was a server-side bug.
+  const code = typeof e.code === 'string' ? e.code : 'INTERNAL';
+  const out: Record<string, unknown> = {
+    code,
+    message: err.message
+  };
+  // INTERNAL errors sometimes need a hint that they're not the
+  // caller's fault — flag the original error class so an agent
+  // doesn't waste turns "fixing" its input.
+  if (code === 'INTERNAL' && err.constructor.name !== 'Error') {
+    out.error_class = err.constructor.name;
+  }
   if (Array.isArray(e.errors)) out.errors = e.errors;
   if (typeof e.current_version === 'number') out.current_version = e.current_version;
   if (typeof e.your_parent_version === 'number') {

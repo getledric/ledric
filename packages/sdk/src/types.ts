@@ -80,12 +80,31 @@ export interface Capabilities {
   refValidation?: boolean;
   /** Field type discriminators understood by this server. */
   fieldTypes?: readonly string[];
+  /**
+   * Per-discriminator catalogue of required/optional keys + a complete
+   * example. Lets callers build new field defs without trial-and-error.
+   */
+  fieldTypeSpecs?: Record<string, FieldTypeSpec>;
+}
+
+export interface FieldTypeSpec {
+  description: string;
+  required: readonly string[];
+  optional: readonly string[];
+  example: Record<string, unknown>;
+}
+
+export interface Conventions {
+  name_pattern: string;
+  reserved_content_keys: readonly string[];
+  notes: string;
 }
 
 export interface DescribeModel {
   schema_version: number;
   types: Record<string, TypeDescription>;
   capabilities: Capabilities;
+  conventions?: Conventions;
 }
 
 export interface AssetMeta {

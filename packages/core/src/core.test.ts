@@ -38,6 +38,30 @@ describe('Core', () => {
     expect(result.capabilities.fieldTypes).toContain('markdown');
   });
 
+  it('describeModel ships a structured field-type catalogue with required keys + examples', async () => {
+    const result = await core.describeModel();
+    const specs = result.capabilities.fieldTypeSpecs;
+    expect(specs.array).toBeDefined();
+    expect(specs.array?.required).toContain('of');
+    expect(specs.array?.example).toMatchObject({ type: 'array', of: { type: 'string' } });
+    expect(specs.object?.required).toContain('fields');
+    expect(specs.references?.required).toContain('to');
+    expect(specs.vector?.required).toContain('dims');
+    expect(specs.enum?.required).toContain('values');
+    // Plain types have no required keys beyond the discriminator.
+    expect(specs.string?.required).toEqual([]);
+    expect(specs.number?.required).toEqual([]);
+  });
+
+  it('describeModel surfaces the naming conventions and reserved sidecar keys', async () => {
+    const result = await core.describeModel();
+    expect(result.conventions.name_pattern).toBe('^[a-z][a-z0-9_]*$');
+    expect(result.conventions.reserved_content_keys).toEqual(
+      expect.arrayContaining(['_locale', '_redirect', '_refs', '_warnings'])
+    );
+    expect(result.conventions.notes).toMatch(/leading underscore/i);
+  });
+
   it('createType validates via defineType and persists', async () => {
     const result = await core.createType({
       name: 'product',
