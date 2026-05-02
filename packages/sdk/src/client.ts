@@ -11,7 +11,8 @@ import type {
   ListAssetsOptions,
   AssetTransformOptions,
   TagInfo,
-  TagWithCounts
+  TagWithCounts,
+  LedricEntries
 } from './types.js';
 
 export interface LedricClientOptions {
@@ -96,11 +97,26 @@ export class LedricClient {
     this._headers = { Accept: 'application/json', ...(opts.headers ?? {}) };
   }
 
-  /** GET /entries/:type/:slug — returns null on 404, follows redirects transparently. */
+  /**
+   * GET /entries/:type/:slug — returns null on 404, follows redirects transparently.
+   *
+   * When `LedricEntries` has been augmented (via `ledric types
+   * --augment-sdk`) and the caller passes a known type-name string,
+   * the return type is inferred to that interface. Otherwise the
+   * caller can pass an explicit field-shape generic.
+   */
+  async read<T extends keyof LedricEntries & string>(
+    ref: `${T}/${string}` | { type: T; slug: string },
+    opts?: ReadOptions
+  ): Promise<Entry<LedricEntries[T]> | null>;
   async read<F = Record<string, unknown>>(
     ref: EntryRef,
+    opts?: ReadOptions
+  ): Promise<Entry<F> | null>;
+  async read(
+    ref: EntryRef,
     opts: ReadOptions = {}
-  ): Promise<Entry<F> | null> {
+  ): Promise<Entry<Record<string, unknown>> | null> {
     const { type, slug } = parseRef(ref);
     const params = new URLSearchParams();
     if (opts.version !== undefined) params.set('version', String(opts.version));
@@ -119,14 +135,29 @@ export class LedricClient {
     const res = await this._fetch(url, { headers: this._headers });
     if (res.status === 404) return null;
     if (!res.ok) await this._raise(res, url);
-    return (await res.json()) as Entry<F>;
+    return (await res.json()) as Entry<Record<string, unknown>>;
   }
 
-  /** GET /entries/:type — returns the find result. */
+  /**
+   * GET /entries/:type — returns the find result.
+   *
+   * As with `read`, when `LedricEntries` has been augmented and the
+   * caller passes a known type-name string, the return type is
+   * inferred to that interface. Otherwise pass an explicit
+   * field-shape generic.
+   */
+  async find<T extends keyof LedricEntries & string>(
+    type: T,
+    opts?: FindOptions
+  ): Promise<FindResult<LedricEntries[T]>>;
   async find<F = Record<string, unknown>>(
     type: string,
+    opts?: FindOptions
+  ): Promise<FindResult<F>>;
+  async find(
+    type: string,
     opts: FindOptions = {}
-  ): Promise<FindResult<F>> {
+  ): Promise<FindResult<Record<string, unknown>>> {
     const params = new URLSearchParams();
     if (opts.limit !== undefined) params.set('limit', String(opts.limit));
     if (opts.offset !== undefined) params.set('offset', String(opts.offset));
@@ -147,7 +178,7 @@ export class LedricClient {
     const url = `${this.baseUrl}/entries/${encodeURIComponent(type)}${qs}`;
     const res = await this._fetch(url, { headers: this._headers });
     if (!res.ok) await this._raise(res, url);
-    return (await res.json()) as FindResult<F>;
+    return (await res.json()) as FindResult<Record<string, unknown>>;
   }
 
   /** GET /types — full content model. */

@@ -1,6 +1,19 @@
 // SDK-side wire types. Independent of @ledric/core internals so the SDK
 // has zero monorepo coupling and can be published / consumed standalone.
 
+/**
+ * Augmentation seam for `ledric types --augment-sdk`. The generated
+ * `ledric.types.ts` extends this interface with one key per content
+ * type, so consumer code that imports the generated file gets full
+ * type-safety on `client.read<'blog_post'>('hello')` etc. without us
+ * shipping schema-aware code in the SDK itself.
+ *
+ * Empty by default — consumers who don't run codegen pass an explicit
+ * field-shape generic instead.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface LedricEntries {}
+
 export interface ResolvedRef {
   to: string;
   found: boolean;

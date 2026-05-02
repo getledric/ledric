@@ -26,3 +26,5 @@ export type {
   ResolvedRef,
   ValidationWarning
 } from './types.js';
+
+export type { LedricEntries } from './types.js';

@@ -53,6 +53,9 @@ importers:
       '@ledric/mcp-server':
         specifier: workspace:*
         version: link:../mcp-server
+      '@ledric/schema':
+        specifier: workspace:*
+        version: link:../schema
       '@ledric/storage':
         specifier: workspace:*
         version: link:../storage

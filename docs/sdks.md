@@ -7,6 +7,7 @@ editors. Editing happens through the admin GUI, the inline editor,
 or an MCP-connected agent.
 
 - [`@ledric/sdk` (TypeScript)](#ledricsdk-typescript)
+- [Generate types from the live schema](#generate-types-from-the-live-schema)
 - [`Ledric\LedricClient` (PHP)](#ledriclledricclient-php)
 - [Inline editor helpers](#inline-editor-helpers)
 
@@ -75,6 +76,40 @@ const { results, total, offset } = await client.find('blog_post', {
   locale: 'fr',
   expandAssets: true
 });
+```
+
+### Generate types from the live schema
+
+`ledric types` reads your schema and writes a `ledric.types.ts` file
+next to your `ledric.config.json`. Re-run after any `create_type` /
+`alter_type` to keep consumer code in sync — every content type
+becomes an interface, every `references` field a typed `EntryRef<T>[]`,
+every `asset` a branded `AssetId`, every `date` a `DateString`.
+
+```bash
+ledric types                        # writes ./ledric.types.ts (reads local DB)
+ledric types --from http://127.0.0.1:3000   # … via HTTP against a remote ledric
+ledric types --augment-sdk          # … plus a declare-module block so
+                                    # client.read<'blog_post'>('hello')
+                                    # picks up your shapes automatically
+ledric types --stdout               # … print to stdout instead of writing
+```
+
+Use the generated types either by passing the interface as a generic:
+
+```ts
+import type { BlogPost, Entries } from './ledric.types';
+
+const post = await client.read<BlogPost>('blog_post/why-kysely');
+post?.fields.title;                 // string — typed
+```
+
+…or, with `--augment-sdk` enabled, by letting the type-name string
+drive inference:
+
+```ts
+const post = await client.read<'blog_post'>('blog_post/why-kysely');
+// post.fields.title — typed automatically
 ```
 
 ### Types
