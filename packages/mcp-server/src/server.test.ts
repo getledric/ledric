@@ -946,4 +946,58 @@ describe('MCP server (in-memory round trip)', () => {
     expect(json.ref_key).toMatch(/^[0-9a-f]{32}$/);
     expect(json.meta.size).toBe('replacement-bytes'.length);
   });
+
+  it('find with q runs FTS across searchable fields', async () => {
+    await client.callTool({
+      name: 'create_type',
+      arguments: {
+        name: 'post',
+        fields: {
+          title: { type: 'string', required: true, searchable: true },
+          slug: { type: 'slug', from: 'title' },
+          body: { type: 'markdown', required: true, searchable: true }
+        },
+        opts: { identifier_field: 'slug', display_field: 'title' }
+      }
+    });
+    await client.callTool({
+      name: 'draft',
+      arguments: {
+        type: 'post',
+        fields: { title: 'Switching to Kysely', body: 'A note about the migration.' }
+      }
+    });
+    await client.callTool({
+      name: 'draft',
+      arguments: {
+        type: 'post',
+        fields: { title: 'Coffee notes', body: 'Morning ritual.' }
+      }
+    });
+
+    const result = JSON.parse(
+      firstText(
+        (
+          await client.callTool({
+            name: 'find',
+            arguments: { type: 'post', q: 'kysely' }
+          })
+        ).content
+      )
+    );
+    expect(result.total).toBe(1);
+    expect(result.results[0].slug).toBe('switching-to-kysely');
+
+    const empty = JSON.parse(
+      firstText(
+        (
+          await client.callTool({
+            name: 'find',
+            arguments: { type: 'post', q: 'unicorn' }
+          })
+        ).content
+      )
+    );
+    expect(empty.total).toBe(0);
+  });
 });

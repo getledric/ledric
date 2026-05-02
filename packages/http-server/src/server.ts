@@ -282,6 +282,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       resolve_refs?: string;
       include_private?: string;
       tag?: string | string[];
+      q?: string;
     };
   }>('/entries/:type', async (req) => {
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
@@ -291,6 +292,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     const includePrivate =
       req.query.include_private === '1' || req.query.include_private === 'true';
     const tags = collectTagParam(req.query.tag);
+    const q = typeof req.query.q === 'string' && req.query.q.length > 0 ? req.query.q : undefined;
     const result = await core.find({
       type: req.params.type,
       ...(limit !== undefined ? { limit } : {}),
@@ -299,7 +301,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       ...(expandAssets !== undefined ? { expand_assets: expandAssets } : {}),
       ...(resolveRefs ? { resolve_refs: true } : {}),
       ...(includePrivate ? { include_private: true } : {}),
-      ...(tags.length > 0 ? { tags } : {})
+      ...(tags.length > 0 ? { tags } : {}),
+      ...(q !== undefined ? { q } : {})
     });
     return toJsonSafe({
       total: result.total,

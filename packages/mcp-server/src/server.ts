@@ -114,7 +114,9 @@ const FindArgsSchema = z
     locale: z.string().optional(),
     expand_assets: ExpandAssetsSchema,
     resolve_refs: z.boolean().optional(),
-    include_private: z.boolean().optional()
+    include_private: z.boolean().optional(),
+    q: z.string().optional(),
+    tags: z.array(z.string()).optional()
   })
   .strict();
 
@@ -410,15 +412,24 @@ export function createMcpServer(core: Core): Server {
       {
         name: 'find',
         description:
-          'List entries of a type. `where` supports exact-match filters on top-level fields. `limit` defaults to 20 (max 200). `order` sorts by one or more fields. Pass `locale` to project each result into that locale. Returns { results, total, offset }.',
+          'List entries of a type. `where` supports exact-match filters on top-level fields. `q` runs a full-text search across the type\'s `searchable: true` fields (overrides `order` with relevance rank). `limit` defaults to 20 (max 200). Pass `locale` to project each result into that locale and to scope `q` matches to that locale. Returns { results, total, offset }.',
         inputSchema: {
           type: 'object',
           properties: {
             type: { type: 'string' },
             where: {
               type: 'object',
-              description: 'Map of field name → exact-match value.',
+              description: 'Map of field name → exact-match value. Ignored when `q` is set.',
               additionalProperties: true
+            },
+            q: {
+              type: 'string',
+              description: 'Full-text search query. Matches across the type\'s searchable:true string + markdown fields. Results are ranked by relevance.'
+            },
+            tags: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Filter to entries that have ALL of these tags (AND semantics).'
             },
             limit: { type: 'integer', minimum: 1, maximum: 200 },
             offset: { type: 'integer', minimum: 0 },
