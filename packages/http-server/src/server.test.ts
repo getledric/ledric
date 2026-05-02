@@ -100,6 +100,65 @@ describe('HTTP server', () => {
     expect(body.schema_version).toBeUndefined();
   });
 
+  it('GET /entries/:type?order=field:dir orders results by the named field', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      payload: {
+        tool: 'create_type',
+        args: {
+          name: 'post',
+          fields: {
+            title: { type: 'string', required: true },
+            slug: { type: 'slug', from: 'title' },
+            published_at: { type: 'date', required: true }
+          },
+          opts: { identifier_field: 'slug', display_field: 'title' }
+        }
+      }
+    });
+    // Insert in non-sorted order so the query has to do real work.
+    for (const [title, date] of [
+      ['Middle', '2026-03-15'],
+      ['First', '2026-01-01'],
+      ['Last', '2026-06-30']
+    ] as const) {
+      await app.inject({
+        method: 'POST',
+        url: '/rpc',
+        payload: {
+          tool: 'draft',
+          args: { type: 'post', fields: { title, published_at: date } }
+        }
+      });
+    }
+
+    // ?order=published_at:desc — newest first.
+    const desc = await app.inject({
+      method: 'GET',
+      url: '/entries/post?order=published_at:desc'
+    });
+    expect(desc.statusCode).toBe(200);
+    const descBody = JSON.parse(desc.body);
+    expect(descBody.results.map((r: { slug: string }) => r.slug)).toEqual(['last', 'middle', 'first']);
+
+    // ?order=published_at:asc — oldest first.
+    const asc = await app.inject({
+      method: 'GET',
+      url: '/entries/post?order=published_at:asc'
+    });
+    const ascBody = JSON.parse(asc.body);
+    expect(ascBody.results.map((r: { slug: string }) => r.slug)).toEqual(['first', 'middle', 'last']);
+
+    // Bare field name (no `:dir`) defaults to ascending.
+    const bare = await app.inject({
+      method: 'GET',
+      url: '/entries/post?order=published_at'
+    });
+    const bareBody = JSON.parse(bare.body);
+    expect(bareBody.results.map((r: { slug: string }) => r.slug)).toEqual(['first', 'middle', 'last']);
+  });
+
   it('GET /entries/:type/:slug 404s on missing entry', async () => {
     await app.inject({
       method: 'POST',

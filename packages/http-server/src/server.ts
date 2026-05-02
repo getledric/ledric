@@ -44,6 +44,36 @@ function parseExpandAssets(raw: string | undefined): boolean | string[] | undefi
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+/**
+ * Parse `?order=field:dir,field2:dir` into the `order: [{field, dir}]`
+ * shape `core.find` accepts. Skips malformed entries silently rather
+ * than failing the whole request — agents probing the syntax shouldn't
+ * have a typo bring the route down. Empty input returns [].
+ */
+function parseOrderParam(raw: string | undefined): Array<{ field: string; dir: 'asc' | 'desc' }> {
+  if (raw === undefined || raw === '') return [];
+  const out: Array<{ field: string; dir: 'asc' | 'desc' }> = [];
+  for (const chunk of raw.split(',')) {
+    const trimmed = chunk.trim();
+    if (trimmed.length === 0) continue;
+    const colon = trimmed.indexOf(':');
+    let field: string;
+    let dir: 'asc' | 'desc' = 'asc';
+    if (colon === -1) {
+      field = trimmed;
+    } else {
+      field = trimmed.slice(0, colon).trim();
+      const d = trimmed.slice(colon + 1).trim().toLowerCase();
+      if (d === 'desc') dir = 'desc';
+      else if (d === 'asc' || d === '') dir = 'asc';
+      else continue; // bogus dir → skip
+    }
+    if (field.length === 0) continue;
+    out.push({ field, dir });
+  }
+  return out;
+}
+
 function injectBaseHref(html: string, basePath: string): string {
   const tag = `<base href="${basePath}">`;
   if (/<base\s/i.test(html)) {
@@ -283,6 +313,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       include_private?: string;
       tag?: string | string[];
       q?: string;
+      order?: string;
     };
   }>('/entries/:type', async (req) => {
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
@@ -293,6 +324,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       req.query.include_private === '1' || req.query.include_private === 'true';
     const tags = collectTagParam(req.query.tag);
     const q = typeof req.query.q === 'string' && req.query.q.length > 0 ? req.query.q : undefined;
+    const order = parseOrderParam(req.query.order);
     const result = await core.find({
       type: req.params.type,
       ...(limit !== undefined ? { limit } : {}),
@@ -302,7 +334,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       ...(resolveRefs ? { resolve_refs: true } : {}),
       ...(includePrivate ? { include_private: true } : {}),
       ...(tags.length > 0 ? { tags } : {}),
-      ...(q !== undefined ? { q } : {})
+      ...(q !== undefined ? { q } : {}),
+      ...(order.length > 0 ? { order } : {})
     });
     return toJsonSafe({
       total: result.total,
