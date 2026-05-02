@@ -24,7 +24,7 @@ export { FIELD_TYPES } from './types.js';
 export { field } from './field.js';
 export { defineType } from './define-type.js';
 export { FIELD_TYPE_SPECS } from './field-specs.js';
-export type { FieldTypeSpec } from './field-specs.js';
+export type { FieldTypeSpec, WireShape } from './field-specs.js';
 
 /** Identifier shape for type and field names. Leading underscore is reserved. */
 export const NAME_PATTERN = '^[a-z][a-z0-9_]*$';

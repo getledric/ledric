@@ -131,6 +131,19 @@ export interface FieldTypeSpec {
   required: readonly string[];
   optional: readonly string[];
   example: Record<string, unknown>;
+  /**
+   * Per-field-type wire-shape advertisement. Present only on field
+   * types where the input and output shapes diverge or are non-obvious.
+   */
+  wire_shape?: WireShape;
+}
+
+export interface WireShape {
+  input: string;
+  input_example: unknown;
+  output: string;
+  output_example_resolved?: unknown;
+  notes?: string;
 }
 
 export interface Conventions {

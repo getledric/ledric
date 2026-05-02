@@ -24,7 +24,9 @@ export type {
   ListAssetsResult,
   ListAssetsOptions,
   ResolvedRef,
-  ValidationWarning
+  ValidationWarning,
+  FieldTypeSpec,
+  WireShape
 } from './types.js';
 
 export type { LedricEntries } from './types.js';

@@ -221,7 +221,7 @@ export const SERVER_VERSION = '0.0.0';
 
 export const SERVER_INSTRUCTIONS = `ledric is a self-hosted, MCP-native CMS. You can fully define and evolve the content model AND author content through this MCP — schemas and entries are both first-class data here.
 
-Always start with describe_model. It returns every content type's fields, validation rules, summary_fields projection, runtime capabilities, and a hand-written \`example\` per type. The example is your template — imitate it when drafting and your content will validate cleanly.
+Always start with describe_model. It returns every content type's fields, validation rules, summary_fields projection, runtime capabilities, and a hand-written \`example\` per type. The example is your template — imitate it when drafting and your content will validate cleanly. Each field type's spec in \`capabilities.fieldTypeSpecs\` carries an optional \`wire_shape\` block — read it before writing values for \`asset\`, \`references\`, \`markdown\`, \`date\`, or \`vector\`. The wire shape distinguishes input form from output form (e.g. references write as \`["type/slug"]\` strings even though they read back as resolved objects when \`resolve_references\` is set).
 
 Core workflows:
 - Add a content type: create_type with a name, a fields map (each field has a type discriminator like {"type":"string","required":true,"max":200}), and ideally a hand-written example value.
