@@ -74,8 +74,11 @@ export interface Capabilities {
   vectorSearch: boolean;
   nativePubSub: boolean;
   fts: 'fts5' | 'tsvector';
-  /** Server supports imgix-style URL transforms on /assets/<id>?w=...&fm=... */
-  imageTransforms?: boolean;
+  /**
+   * Server supports imgix-style URL transforms on /assets/<ref_key>.
+   * Object form carries the param catalogue + a worked example.
+   */
+  imageTransforms?: ImageTransformsCapability;
   /** Server enforces structural ref validation (warn on draft, error on publish). */
   refValidation?: boolean;
   /** Field type discriminators understood by this server. */
@@ -93,6 +96,21 @@ export interface Capabilities {
   http_base?: string;
   /** Plain-language guidance for agents wiring up consumer sites. */
   consumer_guidance?: string;
+  /** HTTP auth posture. Absent in pure-stdio MCP mode. */
+  auth?: AuthCapability;
+}
+
+export interface ImageTransformsCapability {
+  enabled: true;
+  params: Record<string, string>;
+  example: string;
+}
+
+export interface AuthCapability {
+  read: 'open' | 'reader';
+  write: 'admin';
+  keys: readonly ('admin' | 'reader')[];
+  header: string;
 }
 
 export interface FieldTypeSpec {
@@ -181,6 +199,19 @@ export interface FindOptions {
   expandAssets?: boolean | string[];
   /** Walk markdown fields for :::ref{} directives, attach _refs sidecar to each result. */
   resolveRefs?: boolean;
+  /**
+   * Restrict to currently-published entries. Drafts are filtered out and
+   * each result projects from its published version (not the head).
+   * The natural default for SSG / SSR consumers.
+   */
+  published?: boolean;
+  /**
+   * Project each result's `fields` to only the type's declared
+   * `summary_fields`. Reserved sidecars (`_locale`, `_refs`) pass
+   * through unchanged. Saves payload size for list views that don't
+   * need the full body.
+   */
+  summary?: boolean;
 }
 
 export interface ListAssetsOptions {

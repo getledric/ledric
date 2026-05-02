@@ -107,9 +107,16 @@ export const httpCommand = defineCommand({
     // describe_model so any MCP client peering at this process knows
     // where the consumer plane is.
     const httpBase = `http://${host}:${portStr}`;
+    const auth = {
+      read: requireReaderKey ? ('reader' as const) : ('open' as const),
+      write: 'admin' as const,
+      keys: ['admin', 'reader'] as const,
+      header: 'Authorization: Bearer <key>'
+    };
     const core = new Core(storage, {
       ...(transformCache !== undefined ? { transformCache } : {}),
-      httpBase
+      httpBase,
+      auth
     });
 
     const envAdminKey = process.env.LEDRIC_ADMIN_KEY;

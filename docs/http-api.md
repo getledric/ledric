@@ -131,11 +131,14 @@ List entries of a type.
 | `q` | Full-text search across `searchable: true` fields. AND-composes with `tag`, overrides `order` with relevance rank. |
 | `tag` | Repeatable. AND semantics — entry must have ALL listed tags. `?tag=featured&tag=2025` |
 | `include_private` | `1` / `true` to include `private: true` fields (admin-only contexts) |
+| `published` | `1` / `true` to restrict to currently-published entries (drafts filtered out; each result projects from its published version, not the head). The natural default for SSG / SSR consumers. |
+| `summary` | `1` / `true` to project each result's `fields` to the type's declared `summary_fields`. Reserved sidecars (`_locale`, `_refs`) pass through unchanged. Saves payload size for list views that don't need the full body. Default: full fields. |
 
 ```bash
 curl 'http://localhost:3000/entries/blog_post?order=published_at:desc&limit=10'
 curl 'http://localhost:3000/entries/blog_post?expand_assets=hero&resolve_references=author'
 curl 'http://localhost:3000/entries/blog_post?q=kysely'
+curl 'http://localhost:3000/entries/blog_post?published=true'
 ```
 
 Response: `{ total, offset, results: Entry[] }` — see the envelope
@@ -232,6 +235,13 @@ correct — caches never serve stale content.
 
 See [Asset URLs and image transforms](#asset-urls-and-image-transforms)
 for the imgix-style query params.
+
+If the path param is the stable asset `id` instead of a `ref_key`,
+the route 302-redirects to the current `ref_key` URL (preserving any
+query string). Entry asset fields store the `id`, so they work as URL
+slugs without `expand_assets`. The redirect itself is short-cached
+(`max-age=300`) since the target ref_key rotates whenever bytes are
+replaced — caches must not pin it.
 
 ### `GET /assets/:key/meta`
 

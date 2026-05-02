@@ -30,12 +30,45 @@ describe('Core', () => {
 
   it('describeModel surfaces feature capabilities and the field-type catalogue', async () => {
     const result = await core.describeModel();
-    expect(result.capabilities.imageTransforms).toBe(true);
+    expect(result.capabilities.imageTransforms.enabled).toBe(true);
+    expect(result.capabilities.imageTransforms.params).toMatchObject({
+      w: expect.any(String),
+      h: expect.any(String),
+      fit: expect.any(String),
+      q: expect.any(String),
+      fm: expect.any(String),
+      auto: expect.any(String),
+      dpr: expect.any(String)
+    });
+    expect(result.capabilities.imageTransforms.example).toContain('/assets/');
     expect(result.capabilities.refValidation).toBe(true);
     expect(result.capabilities.fieldTypes).toContain('jss');
     expect(result.capabilities.fieldTypes).toContain('css');
     expect(result.capabilities.fieldTypes).toContain('object');
     expect(result.capabilities.fieldTypes).toContain('markdown');
+  });
+
+  it('describeModel surfaces auth posture when CoreOptions.auth is provided', async () => {
+    const authedCore = new Core(storage, {
+      auth: {
+        read: 'open',
+        write: 'admin',
+        keys: ['admin', 'reader'],
+        header: 'Authorization: Bearer <key>'
+      }
+    });
+    const result = await authedCore.describeModel();
+    expect(result.capabilities.auth).toEqual({
+      read: 'open',
+      write: 'admin',
+      keys: ['admin', 'reader'],
+      header: 'Authorization: Bearer <key>'
+    });
+  });
+
+  it('describeModel omits auth when not configured (pure-stdio MCP)', async () => {
+    const result = await core.describeModel();
+    expect(result.capabilities.auth).toBeUndefined();
   });
 
   it('describeModel ships a structured field-type catalogue with required keys + examples', async () => {
@@ -339,6 +372,41 @@ describe('Core', () => {
     for (const r of adminList.results) {
       expect((r.content as Record<string, unknown>).internal_notes).toMatch(/-notes$/);
     }
+  });
+
+  it('find({ summary: true }) projects each result to the type\'s summary_fields', async () => {
+    await core.createType({
+      name: 'card',
+      fields: {
+        title: field.string({ required: true }),
+        slug: field.slug({ required: true, from: 'title' }),
+        body: field.string({ required: true }),
+        internal_notes: field.string()
+      },
+      opts: {
+        identifier_field: 'slug',
+        display_field: 'title',
+        summary_fields: ['title', 'slug']
+      }
+    });
+    await core.draft({
+      type: 'card',
+      fields: { title: 'Card A', slug: 'card-a', body: 'long body', internal_notes: 'aside' }
+    });
+
+    const full = await core.find({ type: 'card' });
+    expect(full.results[0]?.content).toMatchObject({
+      title: 'Card A',
+      slug: 'card-a',
+      body: 'long body',
+      internal_notes: 'aside'
+    });
+
+    const summary = await core.find({ type: 'card', summary: true });
+    const c = summary.results[0]?.content as Record<string, unknown>;
+    expect(c).toEqual({ title: 'Card A', slug: 'card-a' });
+    expect(c.body).toBeUndefined();
+    expect(c.internal_notes).toBeUndefined();
   });
 });
 

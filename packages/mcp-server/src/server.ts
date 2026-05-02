@@ -117,6 +117,8 @@ const FindArgsSchema = z
     resolve_references: ExpandAssetsSchema,
     resolve_refs: z.boolean().optional(),
     include_private: z.boolean().optional(),
+    published: z.boolean().optional(),
+    summary: z.boolean().optional(),
     q: z.string().optional(),
     tags: z.array(z.string()).optional()
   })
@@ -427,7 +429,7 @@ export function createMcpServer(core: Core): Server {
       {
         name: 'find',
         description:
-          'List entries of a type. `where` supports exact-match filters on top-level fields. `q` runs a full-text search across the type\'s `searchable: true` fields (overrides `order` with relevance rank). `limit` defaults to 20 (max 200). Pass `locale` to project each result into that locale and to scope `q` matches to that locale. Returns { results, total, offset }.',
+          'List entries of a type. `where` supports exact-match filters on top-level fields. `q` runs a full-text search across the type\'s `searchable: true` fields (overrides `order` with relevance rank). `published: true` returns only currently-published entries (drafts excluded; each result projects from its published version, not the head). `limit` defaults to 20 (max 200). Pass `locale` to project each result into that locale and to scope `q` matches to that locale. Returns { results, total, offset }.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -475,7 +477,15 @@ export function createMcpServer(core: Core): Server {
               ]
             },
             resolve_refs: { type: 'boolean' },
-            include_private: { type: 'boolean' }
+            include_private: { type: 'boolean' },
+            published: {
+              type: 'boolean',
+              description: 'When true, restrict to currently-published entries (drafts filtered out; results project from the published version).'
+            },
+            summary: {
+              type: 'boolean',
+              description: "When true, project each result's `fields` to only the type's declared `summary_fields` — same projection an admin grid view would use. Reserved sidecars (_locale, _refs) pass through unchanged. Saves tokens for list-page renders that don't need the full body."
+            }
           },
           required: ['type'],
           additionalProperties: false
@@ -484,7 +494,7 @@ export function createMcpServer(core: Core): Server {
       {
         name: 'get_asset',
         description:
-          'Read an asset by id (32-char hex UUIDv7). Returns metadata only — bytes are fetched via the CLI (ledric asset bytes <id>) or a future HTTP endpoint. Uploads go through the CLI (ledric asset upload <file>) for the same reason.',
+          "Read an asset by id (32-char hex UUIDv7). Returns metadata + the canonical bytes URL — the bytes themselves don't travel through MCP. Fetch them with the CLI (`ledric asset bytes <id>`) or via HTTP at the returned `url` (`GET /assets/<ref_key>`, with imgix-style transforms). Upload via HTTP (`POST /assets`, multipart) or `ledric asset upload <file>`.",
         inputSchema: {
           type: 'object',
           properties: {

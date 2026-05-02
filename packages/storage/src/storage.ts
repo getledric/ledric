@@ -733,7 +733,8 @@ export class LedricStorage implements Storage {
         ...(input.locale !== undefined ? { locale: input.locale } : {}),
         ...(input.limit !== undefined ? { limit: input.limit } : {}),
         ...(input.offset !== undefined ? { offset: input.offset } : {}),
-        ...(input.includeDeleted !== undefined ? { includeDeleted: input.includeDeleted } : {})
+        ...(input.includeDeleted !== undefined ? { includeDeleted: input.includeDeleted } : {}),
+        ...(input.published !== undefined ? { published: input.published } : {})
       });
     }
 
@@ -745,14 +746,25 @@ export class LedricStorage implements Storage {
 
     const tagSlugs = input.tags ? normalizeTags(input.tags).map((t) => t.slug) : [];
 
+    const publishedOnly = input.published === true;
     const baseQuery = (selectExprs: ReadonlyArray<string> | null) => {
       let q = this.db
         .selectFrom('entries as e')
         .innerJoin('entry_versions as ev', (join) =>
-          join.onRef('ev.entry_id', '=', 'e.id').onRef('ev.version', '=', 'e.current_version')
+          publishedOnly
+            ? join
+                .onRef('ev.entry_id', '=', 'e.id')
+                .onRef('ev.version', '=', 'e.published_version')
+            : join
+                .onRef('ev.entry_id', '=', 'e.id')
+                .onRef('ev.version', '=', 'e.current_version')
         )
         .where('e.env_id', '=', envId)
         .where('e.type_id', '=', typeRow.id);
+
+      if (publishedOnly) {
+        q = q.where('e.published_version', 'is not', null);
+      }
 
       if (input.includeDeleted !== true) {
         q = q.where('e.deleted_at', 'is', null);
@@ -1840,6 +1852,7 @@ export class LedricStorage implements Storage {
     limit?: number;
     offset?: number;
     includeDeleted?: boolean;
+    published?: boolean;
   }): Promise<{ results: EntryDetail[]; total: number; offset: number }> {
     const envId = this.envIdBuf();
     const limit = input.limit ?? 20;
@@ -1941,6 +1954,9 @@ export class LedricStorage implements Storage {
     if (input.includeDeleted !== true) {
       filterQuery = filterQuery.where('e.deleted_at', 'is', null);
     }
+    if (input.published === true) {
+      filterQuery = filterQuery.where('e.published_version', 'is not', null);
+    }
     if (input.type !== undefined) {
       const typeRow = await this.requireTypeId(input.type);
       filterQuery = filterQuery.where('e.type_id', '=', typeRow.id);
@@ -1985,7 +2001,13 @@ export class LedricStorage implements Storage {
       .selectFrom('entries as e')
       .innerJoin('types as t', 't.id', 'e.type_id')
       .innerJoin('entry_versions as ev', (join) =>
-        join.onRef('ev.entry_id', '=', 'e.id').onRef('ev.version', '=', 'e.current_version')
+        input.published === true
+          ? join
+              .onRef('ev.entry_id', '=', 'e.id')
+              .onRef('ev.version', '=', 'e.published_version')
+          : join
+              .onRef('ev.entry_id', '=', 'e.id')
+              .onRef('ev.version', '=', 'e.current_version')
       )
       .select([
         'e.id as id',

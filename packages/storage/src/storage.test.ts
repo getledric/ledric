@@ -435,6 +435,44 @@ describe('LedricStorage (sqlite)', () => {
     });
   });
 
+  describe('findEntries({ published: true })', () => {
+    it('filters out drafts and projects from the published version', async () => {
+      const def = defineType('post', {
+        title: field.string({ required: true }),
+        slug: field.slug({ from: 'title' })
+      });
+      await storage.createType({ definition: def });
+
+      // a: drafted v1, published v1, then drafted v2 — find should still
+      // return v1's content under published=true.
+      const a1 = await storage.createEntry({
+        type: 'post', slug: 'a', content: { title: 'A live', slug: 'a' }, schema_version: 1
+      });
+      await storage.publishEntry({ ref: { type: 'post', slug: 'a' }, version: a1.version });
+      await storage.updateEntry({
+        ref: { type: 'post', slug: 'a' },
+        parent_version: a1.version,
+        schema_version: 1,
+        content: { title: 'A draft v2', slug: 'a' }
+      });
+
+      // b: drafted only — should not appear under published=true.
+      await storage.createEntry({
+        type: 'post', slug: 'b', content: { title: 'B draft', slug: 'b' }, schema_version: 1
+      });
+
+      const all = await storage.findEntries({ type: 'post' });
+      expect(all.total).toBe(2);
+
+      const onlyPublished = await storage.findEntries({ type: 'post', published: true });
+      expect(onlyPublished.total).toBe(1);
+      expect(onlyPublished.results.map((r) => r.slug)).toEqual(['a']);
+      // The projection comes from the published version's content, NOT
+      // the head — drafts should be invisible.
+      expect(onlyPublished.results[0]?.content.title).toBe('A live');
+    });
+  });
+
   describe('api_keys', () => {
     it('starts with no active keys (auth-off mode)', async () => {
       expect(await storage.countActiveApiKeys()).toBe(0);

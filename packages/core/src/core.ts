@@ -50,9 +50,11 @@ export interface Capabilities {
   fts: 'fts5' | 'tsvector';
   /**
    * Asset URLs accept imgix-style query params (w/h/fit/q/fm/auto/dpr).
-   * Always true on this implementation — Core ships with sharp/libvips.
+   * Structured so consumers don't have to hit the API root for the param
+   * list. Truthy as a whole — boolean checks against the prior shape
+   * still work, but new code should read `params` and `example`.
    */
-  imageTransforms: boolean;
+  imageTransforms: ImageTransformsCapability;
   /**
    * Structural ref validation: dangling or wrong-typed refs surface as
    * warnings on draft and as errors on publish. Always true.
@@ -87,6 +89,16 @@ export interface Capabilities {
    * consumer build.
    */
   consumer_guidance: string;
+  /** HTTP auth posture. Absent in pure-stdio MCP mode. */
+  auth?: AuthCapability;
+}
+
+export interface ImageTransformsCapability {
+  enabled: true;
+  /** Param name → human-readable description of accepted values. */
+  params: Record<string, string>;
+  /** Concrete example a consumer can paste. */
+  example: string;
 }
 
 /**
@@ -427,6 +439,24 @@ export interface CoreOptions {
    * command when --http or --gui is on; absent otherwise.
    */
   httpBase?: string;
+  /**
+   * HTTP auth posture, surfaced on describe_model so consumers know which
+   * keys are needed without trial-and-error. Set by the cli/http-server
+   * once keys have been resolved at startup. Absent in pure-stdio MCP
+   * mode where there is no HTTP surface to authenticate against.
+   */
+  auth?: AuthCapability;
+}
+
+export interface AuthCapability {
+  /** What reads need: 'open' (default), or 'reader' under --require-reader-key. */
+  read: 'open' | 'reader';
+  /** What writes need. Currently always 'admin'. */
+  write: 'admin';
+  /** Which key kinds are minted on this server. */
+  keys: readonly ('admin' | 'reader')[];
+  /** Header format consumers must use. */
+  header: string;
 }
 
 /**
@@ -473,10 +503,12 @@ export interface UpdateAssetResult {
 export class Core {
   private readonly transformCache: TransformCache | undefined;
   private readonly httpBase: string | undefined;
+  private readonly auth: AuthCapability | undefined;
 
   constructor(private readonly storage: Storage, opts: CoreOptions = {}) {
     this.transformCache = opts.transformCache;
     this.httpBase = opts.httpBase;
+    this.auth = opts.auth;
   }
 
   async describeModel(): Promise<DescribeModelResult> {
@@ -498,13 +530,31 @@ export class Core {
         vectorSearch: false,
         nativePubSub: false,
         fts: 'fts5',
-        imageTransforms: true,
+        imageTransforms: {
+          enabled: true,
+          params: {
+            w: 'integer — target width in pixels',
+            h: 'integer — target height in pixels',
+            fit: "'clip' | 'crop' (default 'clip') — how to fit when both w and h are set",
+            q: 'integer 1-100 — output quality',
+            fm: "'jpg' | 'png' | 'webp' | 'avif' — output format",
+            auto: "'format' — negotiate output via Accept header (sets Vary: Accept on response)",
+            dpr: 'integer 1-4 — device pixel ratio multiplier on w/h'
+          },
+          example: '/assets/<ref_key>?w=400&fm=webp&q=80&dpr=2'
+        },
         refValidation: true,
         fieldTypes: FIELD_TYPES,
         fieldTypeSpecs: FIELD_TYPE_SPECS as unknown as Record<string, FieldTypeSpec>,
         ...(this.httpBase !== undefined ? { http_base: this.httpBase } : {}),
+        ...(this.auth !== undefined ? { auth: this.auth } : {}),
         consumer_guidance:
-          'ledric is intended to run as a standalone process. Consumer sites (Astro, Next.js, plain HTML, etc.) should reference its HTTP URL via http_base, NOT include ledric as a package dependency — that would drag better-sqlite3 + sharp + libvips into every consumer build (~50MB native binaries). For local dev convenience you can use `npx -y ledric http` from the consumer directory; in production, run ledric somewhere stable (Oracle Cloud free tier, Hetzner VPS, etc.) and point consumers at it via env var. The MCP server describes the admin plane; the HTTP API at http_base is the consumer plane.'
+          'ledric is intended to run as a standalone process. Consumer sites (Astro, Next.js, plain HTML, etc.) should reference its HTTP URL via http_base, NOT include ledric as a package dependency — that would drag better-sqlite3 + sharp + libvips into every consumer build (~50MB native binaries). For local dev convenience you can use `npx -y ledric http` from the consumer directory; in production, run ledric somewhere stable (Oracle Cloud free tier, Hetzner VPS, etc.) and point consumers at it via env var. The MCP server describes the admin plane; the HTTP API at http_base is the consumer plane. ' +
+          'Quick recipes against the HTTP plane: ' +
+          '(1) list with assets+refs inlined — `GET <http_base>/entries/blog_post?expand_assets=true&resolve_references=true&limit=20` returns { total, offset, results: Entry[] }. ' +
+          '(2) read one entry — `GET <http_base>/entries/blog_post/<slug>?expand_assets=true` returns Entry; old slugs 301-redirect to the current one. ' +
+          '(3) image URL with transforms — entry asset fields hold a stable id; either pass `expand_assets=true` (the inlined object carries `url` keyed on ref_key), or just use `<http_base>/assets/<id>?w=400&fm=webp` (the id route 302-redirects to the current ref_key). ' +
+          'Entry envelope: { id, type, slug, version, published_version?, fields, tags? } — your content lives under `fields`. Filter to live content with `?published=true`.'
       },
       conventions: {
         name_pattern: NAME_PATTERN,
@@ -750,11 +800,16 @@ export class Core {
       resolve_references?: boolean | readonly string[];
       resolve_refs?: boolean;
       include_private?: boolean;
+      summary?: boolean;
     }
   ): Promise<FindEntriesResult> {
     const result = await this.storage.findEntries(input);
     const typeDetail = await this.storage.getType(input.type);
     if (!typeDetail) return result;
+    const summaryFields =
+      input.summary === true && Array.isArray(typeDetail.definition.summary_fields)
+        ? new Set(typeDetail.definition.summary_fields)
+        : null;
     const projected: typeof result.results = [];
     for (const r of result.results) {
       const localeProjected = projectForLocale(
@@ -783,9 +838,19 @@ export class Core {
         typeDetail.definition,
         input.include_private === true
       );
+      // summary projection drops fields the type author marked as
+      // non-summary. _-prefixed sidecars (_locale, _refs, _warnings)
+      // pass through regardless — they're not user-defined fields.
+      const finalContent = summaryFields
+        ? Object.fromEntries(
+            Object.entries(visible).filter(
+              ([k]) => k.startsWith('_') || summaryFields.has(k)
+            )
+          )
+        : visible;
       projected.push({
         ...r,
-        content: visible,
+        content: finalContent,
         ...(refs !== undefined ? { _refs: refs } : {})
       });
     }

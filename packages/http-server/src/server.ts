@@ -348,6 +348,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       tag?: string | string[];
       q?: string;
       order?: string;
+      published?: string;
+      summary?: string;
     };
   }>('/entries/:type', async (req) => {
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
@@ -357,6 +359,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     const resolveRefs = req.query.resolve_refs === '1' || req.query.resolve_refs === 'true';
     const includePrivate =
       req.query.include_private === '1' || req.query.include_private === 'true';
+    const published = req.query.published === '1' || req.query.published === 'true';
+    const summary = req.query.summary === '1' || req.query.summary === 'true';
     const tags = collectTagParam(req.query.tag);
     const q = typeof req.query.q === 'string' && req.query.q.length > 0 ? req.query.q : undefined;
     const order = parseOrderParam(req.query.order);
@@ -369,6 +373,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       ...(resolveReferences !== undefined ? { resolve_references: resolveReferences } : {}),
       ...(resolveRefs ? { resolve_refs: true } : {}),
       ...(includePrivate ? { include_private: true } : {}),
+      ...(published ? { published: true } : {}),
+      ...(summary ? { summary: true } : {}),
       ...(tags.length > 0 ? { tags } : {}),
       ...(q !== undefined ? { q } : {}),
       ...(order.length > 0 ? { order } : {})
@@ -603,8 +609,41 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     if (refKeyBuf === null) {
       reply.code(400);
       return reply.send({
-        error: { code: 'INVALID_REQUEST', message: 'expected 32-char hex ref_key' }
+        error: { code: 'INVALID_REQUEST', message: 'expected 32-char hex key' }
       });
+    }
+
+    // The path param is documented as :ref_key but is shaped as 32-char
+    // hex — the same shape as a stable asset id. Resolve in two passes:
+    // ref_key first (the canonical, version-pinned URL), then fall back
+    // to id and 302 redirect to the current ref_key. The redirect lets
+    // entry asset fields (which store the id) resolve as URL slugs
+    // without forcing every consumer to expand_assets first.
+    let asset = await core.findAssetByRefKey(req.params.ref_key);
+    let resolvedViaId = false;
+    if (!asset) {
+      try {
+        asset = await core.getAsset({ id: req.params.ref_key });
+      } catch {
+        asset = null;
+      }
+      if (asset) resolvedViaId = true;
+    }
+    if (!asset) {
+      reply.code(404);
+      return reply.send({
+        error: { code: 'NOT_FOUND', message: `asset ${req.params.ref_key}` }
+      });
+    }
+
+    if (resolvedViaId) {
+      const currentRefKey = toHex(asset.ref_key);
+      const qIx = req.url.indexOf('?');
+      const qs = qIx >= 0 ? req.url.slice(qIx) : '';
+      // 302, not 301: the target rotates whenever bytes are replaced,
+      // so caches must not pin the redirect itself.
+      reply.header('Cache-Control', 'public, max-age=300');
+      return reply.redirect(`/assets/${currentRefKey}${qs}`, 302);
     }
 
     // imgix-style transforms (w, h, fit, q, fm, auto, dpr) — applied at
@@ -635,13 +674,6 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       return reply.send(result.bytes);
     }
 
-    const asset = await core.findAssetByRefKey(req.params.ref_key);
-    if (!asset) {
-      reply.code(404);
-      return reply.send({
-        error: { code: 'NOT_FOUND', message: `asset ${req.params.ref_key}` }
-      });
-    }
     const bytes = await core.readAssetBytes({
       id: toHex(asset.id),
       version: asset.version

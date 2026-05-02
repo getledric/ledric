@@ -38,8 +38,10 @@ When you `update_asset` (replace bytes in place):
 - `id` doesn't change. Every entry referring to the old hero still
   resolves to the new bytes — you don't have to re-edit posts.
 - `current_version` bumps from N to N+1.
-- `ref_key` rotates. Old ref_key URLs return 404; new URLs serve
-  the new bytes.
+- `ref_key` rotates. Old ref_key URLs keep serving the old bytes
+  (each version is its own row), so caches that pinned an old URL
+  never see stale-but-different content. New URLs serve the new
+  bytes.
 
 This is why `Cache-Control: public, max-age=31536000, immutable` is
 correct on every byte response: the URL is *inherently*
@@ -154,9 +156,13 @@ per-upload, operation.
 
 ## Reading bytes
 
-Always `GET /assets/<ref_key>`. The `id` route exists only on the
-`/meta` companion (`GET /assets/<key>/meta`) for tools that have one
-or the other.
+`GET /assets/<ref_key>` is canonical — version-pinned, immutable
+cache. `GET /assets/<id>` also works but 302-redirects to the
+current `ref_key` (preserving any query string), which is what makes
+entry asset fields usable as URL slugs even though they store the
+`id`. The redirect itself is short-cached (~5 minutes) because the
+target rotates when bytes change. The `/meta` companion (`GET
+/assets/<key>/meta`) accepts either, returning the full record.
 
 ### Image transforms
 

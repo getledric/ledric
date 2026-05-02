@@ -270,6 +270,31 @@ describe('HTTP server', () => {
     expect(res.headers['x-ledric-transform']).toBeUndefined();
   });
 
+  it('GET /assets/:id 302-redirects to the current ref_key, preserving query', async () => {
+    const write = await storage.createAsset({
+      kind: 'file',
+      bytes: Buffer.from('redirect-me'),
+      meta: { mime: 'text/plain' }
+    });
+    const id = Buffer.from(write.id).toString('hex');
+    const refKey = Buffer.from(write.ref_key).toString('hex');
+    expect(id).not.toBe(refKey);
+
+    const plain = await app.inject({ method: 'GET', url: `/assets/${id}` });
+    expect(plain.statusCode).toBe(302);
+    expect(plain.headers.location).toBe(`/assets/${refKey}`);
+
+    const withQs = await app.inject({ method: 'GET', url: `/assets/${id}?w=80&fm=webp` });
+    expect(withQs.statusCode).toBe(302);
+    expect(withQs.headers.location).toBe(`/assets/${refKey}?w=80&fm=webp`);
+  });
+
+  it('GET /assets/:something returns 404 when neither ref_key nor id match', async () => {
+    const random = '0'.repeat(32);
+    const res = await app.inject({ method: 'GET', url: `/assets/${random}` });
+    expect(res.statusCode).toBe(404);
+  });
+
   it('GET /assets/:key/meta accepts either a ref_key or an asset id', async () => {
     const write = await storage.createAsset({
       kind: 'file',

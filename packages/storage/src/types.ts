@@ -180,6 +180,13 @@ export interface FindEntriesInput {
    * count. When omitted, all locales contribute.
    */
   locale?: string;
+  /**
+   * When true, restrict results to currently-published entries — drafts
+   * (entries whose published_version is null, or whose current_version is
+   * unpublished) are filtered out, and the projection returns the
+   * published version of each entry rather than the head/draft.
+   */
+  published?: boolean;
 }
 
 export interface FindEntriesResult {

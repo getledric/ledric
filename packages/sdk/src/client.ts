@@ -140,6 +140,8 @@ export class LedricClient {
       );
     }
     if (opts.resolveRefs === true) params.set('resolve_refs', '1');
+    if (opts.published === true) params.set('published', '1');
+    if (opts.summary === true) params.set('summary', '1');
     if (opts.tags) for (const t of opts.tags) params.append('tag', t);
     const qs = params.toString() ? `?${params.toString()}` : '';
     const url = `${this.baseUrl}/entries/${encodeURIComponent(type)}${qs}`;

@@ -118,9 +118,18 @@ export const serveCommand = defineCommand({
     // already resolved); compute it eagerly so Core.describeModel can
     // surface http_base to MCP clients without a follow-up update.
     const httpBase = wantHttp ? `http://${httpHost}:${httpPortStr}` : undefined;
+    const auth = wantHttp
+      ? {
+          read: requireReaderKey ? ('reader' as const) : ('open' as const),
+          write: 'admin' as const,
+          keys: ['admin', 'reader'] as const,
+          header: 'Authorization: Bearer <key>'
+        }
+      : undefined;
     const core = new Core(storage, {
       ...(transformCache !== undefined ? { transformCache } : {}),
-      ...(httpBase !== undefined ? { httpBase } : {})
+      ...(httpBase !== undefined ? { httpBase } : {}),
+      ...(auth !== undefined ? { auth } : {})
     });
 
     // First-boot key generation. Only relevant when HTTP is on (stdio
