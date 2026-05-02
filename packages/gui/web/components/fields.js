@@ -322,10 +322,16 @@ function AssetField({ name, def, value, onChange }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [meta, setMeta] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [library, setLibrary] = useState([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryQuery, setLibraryQuery] = useState('');
   const fileInput = useRef(null);
 
   const isHexId = typeof value === 'string' && /^[0-9a-f]{32}$/i.test(value);
   const isPlaceholder = typeof value === 'string' && value.length > 0 && !isHexId;
+  const allowedKinds =
+    Array.isArray(def.kinds) && def.kinds.length > 0 ? new Set(def.kinds) : null;
 
   useEffect(() => {
     if (!isHexId) {
@@ -346,6 +352,25 @@ function AssetField({ name, def, value, onChange }) {
     };
   }, [value, isHexId]);
 
+  useEffect(() => {
+    if (!pickerOpen) return;
+    let cancelled = false;
+    setLibraryLoading(true);
+    api
+      .assets({ limit: 200 })
+      .then((r) => {
+        if (cancelled) return;
+        setLibrary(r?.results ?? []);
+        setLibraryLoading(false);
+      })
+      .catch(() => {
+        if (!cancelled) setLibraryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pickerOpen]);
+
   async function onFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -362,6 +387,25 @@ function AssetField({ name, def, value, onChange }) {
       if (fileInput.current) fileInput.current.value = '';
     }
   }
+
+  function pickFromLibrary(asset) {
+    setMeta(asset);
+    onChange(asset.id);
+    setPickerOpen(false);
+    setLibraryQuery('');
+  }
+
+  const term = libraryQuery.trim().toLowerCase();
+  const candidates = library
+    .filter((a) => (allowedKinds ? allowedKinds.has(a.kind) : true))
+    .filter((a) => {
+      if (term === '') return true;
+      const m = a.meta ?? {};
+      const filename = String(m.filename ?? '').toLowerCase();
+      const alt = String(m.alt ?? '').toLowerCase();
+      const tags = (a.tags ?? []).map((t) => String(t.label ?? t.slug ?? '').toLowerCase());
+      return filename.includes(term) || alt.includes(term) || tags.some((t) => t.includes(term));
+    });
 
   const previewUrl = meta?.ref_key ? `${api.baseUrl}/assets/${meta.ref_key}` : null;
   const kind = meta?.kind;
@@ -395,7 +439,7 @@ function AssetField({ name, def, value, onChange }) {
           Placeholder string: <code className="font-mono">${value}</code> · upload a real asset to replace.
         </div>
       `}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <input
           ref=${fileInput}
           type="file"
@@ -403,8 +447,58 @@ function AssetField({ name, def, value, onChange }) {
           onChange=${onFile}
           className="text-xs text-zinc-600 file:mr-3 file:px-3 file:py-1.5 file:text-xs file:border file:border-zinc-200 file:bg-zinc-100 file:text-zinc-800 file:hover:bg-zinc-200 file:rounded file:cursor-pointer file:transition"
         />
+        <button
+          type="button"
+          onClick=${() => setPickerOpen((v) => !v)}
+          className="text-xs px-3 py-1.5 border border-zinc-200 hover:border-zinc-400 rounded text-zinc-700"
+        >${pickerOpen ? 'close library' : 'pick from library'}</button>
         ${uploading && html`<span className="text-xs text-zinc-500">uploading…</span>`}
       </div>
+      ${pickerOpen && html`
+        <div className="mt-2 border border-zinc-200 rounded bg-white p-3">
+          <input
+            type="text"
+            value=${libraryQuery}
+            onChange=${(e) => setLibraryQuery(e.target.value)}
+            placeholder=${`Search ${allowedKinds ? [...allowedKinds].join(' / ') + ' ' : ''}assets by filename, alt, or tag…`}
+            className=${`${inputClass} mb-3`}
+          />
+          ${libraryLoading
+            ? html`<div className="text-xs text-zinc-500">loading…</div>`
+            : candidates.length === 0
+              ? html`<div className="text-xs text-zinc-500">${
+                  library.length === 0
+                    ? 'No assets uploaded yet.'
+                    : allowedKinds
+                      ? `No ${[...allowedKinds].join(' / ')} assets match.`
+                      : 'No matches.'
+                }</div>`
+              : html`<div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-72 overflow-y-auto">
+                  ${candidates.map((a) => {
+                    const url = `${api.baseUrl}/assets/${a.ref_key}`;
+                    const filename = (a.meta?.filename ?? '').toString();
+                    const alt = (a.meta?.alt ?? '').toString();
+                    const isImage = a.kind === 'image';
+                    return html`
+                      <button
+                        key=${a.id}
+                        type="button"
+                        onClick=${() => pickFromLibrary(a)}
+                        className=${`text-left border rounded overflow-hidden hover:border-amber-500 transition ${
+                          a.id === value ? 'border-amber-500 ring-1 ring-amber-500' : 'border-zinc-200'
+                        }`}
+                        title=${filename || a.id}
+                      >
+                        ${isImage
+                          ? html`<img src=${url} alt=${alt} className="w-full h-20 object-cover bg-zinc-100" />`
+                          : html`<div className="w-full h-20 bg-zinc-100 flex items-center justify-center text-[10px] uppercase tracking-wider text-zinc-500">${a.kind}</div>`}
+                        <div className="px-2 py-1 text-[10px] text-zinc-700 truncate">${filename || a.id.slice(0, 8) + '…'}</div>
+                      </button>
+                    `;
+                  })}
+                </div>`}
+        </div>
+      `}
       ${error && html`<p className="text-xs text-red-700 mt-1">${error}</p>`}
     </${FieldShell}>
   `;
