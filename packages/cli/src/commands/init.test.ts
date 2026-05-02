@@ -4,6 +4,10 @@ import {
   mergeMcpServers,
   patchGitignoreContent,
   claudeDesktopConfigPath,
+  detectFramework,
+  proxyScaffold,
+  addProxyDependency,
+  PROXY_DEP_VERSION,
   DEFAULTS
 } from './init.js';
 
@@ -177,6 +181,114 @@ describe('init helpers', () => {
       expect(
         claudeDesktopConfigPath('freebsd' as NodeJS.Platform, '/home/jane')
       ).toBe(null);
+    });
+  });
+
+  describe('detectFramework', () => {
+    it('returns null when no package.json was found', () => {
+      expect(detectFramework(null)).toBe(null);
+    });
+
+    it('matches astro', () => {
+      expect(detectFramework({ dependencies: { astro: '^6.2.0' } })).toBe('astro');
+    });
+
+    it('matches sveltekit via @sveltejs/kit dep', () => {
+      expect(detectFramework({ devDependencies: { '@sveltejs/kit': '^2.0.0' } })).toBe(
+        'sveltekit'
+      );
+    });
+
+    it('distinguishes Next App Router from Pages Router via app-dir hint', () => {
+      const pkg = { dependencies: { next: '^15.0.0' } };
+      expect(detectFramework(pkg, true)).toBe('next-app');
+      expect(detectFramework(pkg, false)).toBe('next-pages');
+    });
+
+    it('flags hono / express / fastify as unsupported (manual wiring)', () => {
+      expect(detectFramework({ dependencies: { hono: '^4.0.0' } })).toBe('unsupported');
+      expect(detectFramework({ dependencies: { express: '^4.18.0' } })).toBe('unsupported');
+      expect(detectFramework({ dependencies: { fastify: '^4.0.0' } })).toBe('unsupported');
+    });
+
+    it('returns null when no known framework dep is present', () => {
+      expect(detectFramework({ dependencies: { lodash: '^4.0.0' } })).toBe(null);
+    });
+
+    it('astro takes precedence over a coexisting next dep', () => {
+      // Edge case: a project might list multiple, we pick the most specific.
+      expect(
+        detectFramework({ dependencies: { astro: '^6', next: '^15' } })
+      ).toBe('astro');
+    });
+  });
+
+  describe('proxyScaffold', () => {
+    it('returns route + code for each supported framework', () => {
+      for (const fw of ['astro', 'next-app', 'next-pages', 'sveltekit'] as const) {
+        const r = proxyScaffold(fw);
+        expect(r).not.toBeNull();
+        expect(r!.routePath).toMatch(/ledric/);
+        expect(r!.routeCode).toContain("from '@ledric/proxy'");
+        expect(r!.routeCode).toContain('createLedricProxy');
+      }
+    });
+
+    it('returns null for unsupported / unknown frameworks', () => {
+      expect(proxyScaffold('unsupported')).toBe(null);
+      expect(proxyScaffold(null)).toBe(null);
+    });
+
+    it('astro scaffold uses import.meta.env (not process.env)', () => {
+      const r = proxyScaffold('astro')!;
+      expect(r.routeCode).toContain('import.meta.env.LEDRIC_URL');
+      expect(r.routeCode).not.toContain('process.env.LEDRIC_URL');
+    });
+
+    it('next-app scaffold awaits ctx.params (Next 15 promise shape)', () => {
+      const r = proxyScaffold('next-app')!;
+      expect(r.routeCode).toContain('await ctx.params');
+      expect(r.routeCode).toContain('export const GET = handler');
+    });
+
+    it('sveltekit scaffold imports $env/dynamic/private', () => {
+      const r = proxyScaffold('sveltekit')!;
+      expect(r.routeCode).toContain("from '$env/dynamic/private'");
+    });
+  });
+
+  describe('addProxyDependency', () => {
+    it('adds @ledric/proxy when missing', () => {
+      const { next, changed } = addProxyDependency({ dependencies: { astro: '^6' } });
+      expect(changed).toBe(true);
+      expect(next.dependencies?.['@ledric/proxy']).toBe(PROXY_DEP_VERSION);
+      expect(next.dependencies?.astro).toBe('^6');
+    });
+
+    it("leaves an existing pin untouched (idempotent)", () => {
+      const { next, changed } = addProxyDependency({
+        dependencies: { '@ledric/proxy': '0.1.0' }
+      });
+      expect(changed).toBe(false);
+      expect(next.dependencies?.['@ledric/proxy']).toBe('0.1.0');
+    });
+
+    it('respects an existing devDependencies pin', () => {
+      const { next, changed } = addProxyDependency({
+        devDependencies: { '@ledric/proxy': 'workspace:*' }
+      });
+      expect(changed).toBe(false);
+      expect(next).toEqual({ devDependencies: { '@ledric/proxy': 'workspace:*' } });
+    });
+
+    it('preserves other top-level package.json fields', () => {
+      const { next } = addProxyDependency({
+        name: 'my-site',
+        scripts: { dev: 'astro dev' },
+        dependencies: { astro: '^6' }
+      });
+      expect(next.name).toBe('my-site');
+      expect(next.scripts).toEqual({ dev: 'astro dev' });
     });
   });
 });
