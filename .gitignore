@@ -37,3 +37,8 @@ tmp/
 
 # Local-only test runner (driver for the opt-in Postgres / MySQL suites)
 runTests.sh
+
+# Playwright outputs
+playwright-report/
+test-results/
+e2e/.tmp/

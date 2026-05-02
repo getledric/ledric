@@ -164,7 +164,7 @@ pnpm build
 pnpm cli serve --gui             # same as `npx ledric serve --gui`, but against your dev tree
 ```
 
-`pnpm dev` watches and rebuilds. `pnpm test` runs the suite (vitest, ~360 tests sqlite-only; an extra ~18 Postgres + ~18 MySQL tests opt-in via `LEDRIC_TEST_POSTGRES_URL` / `LEDRIC_TEST_MYSQL_URL` env vars).
+`pnpm dev` watches and rebuilds. `pnpm test` runs the unit suite (vitest, ~360 tests sqlite-only; an extra ~18 Postgres + ~18 MySQL tests opt-in via `LEDRIC_TEST_POSTGRES_URL` / `LEDRIC_TEST_MYSQL_URL` env vars). `pnpm e2e` runs the Playwright smoke suite against a freshly-booted CLI (admin GUI flows — needs `pnpm exec playwright install chromium` once); use `pnpm e2e:ui` for the interactive runner.
 
 ## Status
 
