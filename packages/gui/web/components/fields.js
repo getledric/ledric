@@ -517,6 +517,7 @@ function ReferencesField({ name, def, value, onChange }) {
   const [pool, setPool] = useState([]);
   const [resolved, setResolved] = useState({});
   const [loading, setLoading] = useState(false);
+  const inputRef = useRef(null);
   const max = def.max;
   const atMax = max !== undefined && arr.length >= max;
   const readOnly = !onChange;
@@ -572,6 +573,7 @@ function ReferencesField({ name, def, value, onChange }) {
     setResolved((prev) => ({ ...prev, [`${c.type}/${c.slug}`]: c }));
     setInput('');
     setOpen(false);
+    inputRef.current?.blur();
   }
   function removeAt(i) {
     onChange(arr.filter((_, j) => j !== i));
@@ -632,6 +634,7 @@ function ReferencesField({ name, def, value, onChange }) {
       ${!readOnly &&
       html`<div className="relative">
         <input
+          ref=${inputRef}
           type="text"
           className=${`${inputClass} ${atMax ? 'opacity-50 cursor-not-allowed' : ''}`}
           value=${input}
