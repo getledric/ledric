@@ -118,6 +118,8 @@ importers:
         specifier: workspace:*
         version: link:../storage
 
+  packages/proxy: {}
+
   packages/schema: {}
 
   packages/sdk:

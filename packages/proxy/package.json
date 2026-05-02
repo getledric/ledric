@@ -1,0 +1,35 @@
+{
+  "name": "@ledric/proxy",
+  "version": "0.1.2",
+  "description": "Server-side proxy primitive for ledric — keeps the browser off the ledric origin and keys off the client. Framework-agnostic (Request) => Promise<Response> handlers.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getledric/ledric.git",
+    "directory": "packages/proxy"
+  },
+  "bugs": "https://github.com/getledric/ledric/issues",
+  "homepage": "https://github.com/getledric/ledric#readme",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist",
+    "prepack": "tsup"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
