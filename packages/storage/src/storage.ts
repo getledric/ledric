@@ -1850,11 +1850,23 @@ export class LedricStorage implements Storage {
         rankExpr = sql<number>`ts_rank(fts_entries.ts, plainto_tsquery('simple', ${input.q}))`;
         rankDir = 'desc';
         break;
-      case 'mysql':
-        matchExpr = sql<boolean>`MATCH(fts_entries.value) AGAINST (${input.q} IN NATURAL LANGUAGE MODE)`;
-        rankExpr = sql<number>`MATCH(fts_entries.value) AGAINST (${input.q} IN NATURAL LANGUAGE MODE)`;
+      case 'mysql': {
+        // BOOLEAN MODE chosen over NATURAL LANGUAGE MODE because NL has
+        // a "50% rule": a word appearing in >=50% of indexed rows is
+        // treated as a stop word and matches nothing. Tiny datasets
+        // (test fixtures, freshly-seeded production tables) hit this
+        // surprise constantly. BOOLEAN MODE has no such rule.
+        //
+        // Operator characters in BOOLEAN MODE (+ - * ~ < > @ ( ) ")
+        // would re-interpret a plain user query as syntax, so we strip
+        // them out — replace each with a space so adjacent tokens stay
+        // word-separated.
+        const cleaned = input.q.replace(/[+\-*~<>@()"]/g, ' ');
+        matchExpr = sql<boolean>`MATCH(fts_entries.value) AGAINST (${cleaned} IN BOOLEAN MODE)`;
+        rankExpr = sql<number>`MATCH(fts_entries.value) AGAINST (${cleaned} IN BOOLEAN MODE)`;
         rankDir = 'desc';
         break;
+      }
     }
 
     // Two-step approach: pull matching FTS rows first, then filter and
