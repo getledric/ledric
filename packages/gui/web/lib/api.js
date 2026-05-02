@@ -147,12 +147,11 @@ export const api = {
   asset: (id) =>
     authedFetch(`${ROOT}/assets/${encodeURIComponent(id)}/meta`).then(jsonOrThrow),
 
-  // Asset bytes are typically loaded by <img src="..."> which the
-  // browser fetches without our injected auth header. That's fine when
-  // reads_open (default) but breaks under --require-reader-key. The
-  // assetUrl helper stays headerless for backward compatibility; if a
-  // strict-mode operator hits it, they'll need a SDK-level fetch.
-  assetUrl: (id) => `${ROOT}/assets/${encodeURIComponent(id)}`,
+  // Build a bytes URL from a per-version ref_key. Bytes URLs are
+  // version-pinned by ref_key — id-keyed URLs do NOT serve bytes.
+  // Callers holding only an id should resolve it via api.asset(id) and
+  // use the resulting `ref_key` (or the canonical `url` field).
+  bytesUrl: (refKey) => `${ROOT}/assets/${encodeURIComponent(refKey)}`,
 
   uploadAsset: async (file, { alt, kind } = {}) => {
     const fd = new FormData();

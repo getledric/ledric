@@ -203,7 +203,7 @@ function MarkdownField({ name, def, value, onChange }) {
       const snippet = assetSnippet(
         isImage ? 'image' : 'file',
         file.name,
-        api.assetUrl(result.id)
+        result.url ?? `${api.baseUrl}/assets/${result.ref_key}`
       );
       const ta = textareaRef.current;
       const v = value ?? '';
@@ -321,7 +321,30 @@ function EnumField({ name, def, value, onChange }) {
 function AssetField({ name, def, value, onChange }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
+  const [meta, setMeta] = useState(null);
   const fileInput = useRef(null);
+
+  const isHexId = typeof value === 'string' && /^[0-9a-f]{32}$/i.test(value);
+  const isPlaceholder = typeof value === 'string' && value.length > 0 && !isHexId;
+
+  useEffect(() => {
+    if (!isHexId) {
+      setMeta(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .asset(value)
+      .then((m) => {
+        if (!cancelled) setMeta(m);
+      })
+      .catch(() => {
+        if (!cancelled) setMeta(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [value, isHexId]);
 
   async function onFile(e) {
     const file = e.target.files?.[0];
@@ -330,6 +353,7 @@ function AssetField({ name, def, value, onChange }) {
     setError(null);
     try {
       const result = await api.uploadAsset(file);
+      setMeta(result);
       onChange(result.id);
     } catch (err) {
       setError(err.message ?? 'upload failed');
@@ -339,16 +363,25 @@ function AssetField({ name, def, value, onChange }) {
     }
   }
 
-  const isHexId = typeof value === 'string' && /^[0-9a-f]{32}$/i.test(value);
-  const isPlaceholder = typeof value === 'string' && value.length > 0 && !isHexId;
+  const previewUrl = meta?.ref_key ? `${api.baseUrl}/assets/${meta.ref_key}` : null;
+  const kind = meta?.kind;
 
   return html`
     <${FieldShell} name=${name} def=${def} hint=${def.kinds ? `Allowed kinds: ${def.kinds.join(', ')}` : null}>
       ${isHexId && html`
         <div className="flex items-start gap-3 mb-2">
-          <img src=${api.assetUrl(value)} alt="" className="w-24 h-16 object-cover rounded border border-zinc-200" />
-          <div className="flex-1 text-xs text-zinc-500">
+          ${previewUrl && kind === 'image'
+            ? html`<img src=${previewUrl} alt="" className="w-24 h-16 object-cover rounded border border-zinc-200" />`
+            : html`<div className="w-24 h-16 rounded border border-zinc-200 bg-zinc-100 flex items-center justify-center text-[10px] uppercase tracking-wider text-zinc-500">${kind ?? '…'}</div>`}
+          <div className="flex-1 text-xs text-zinc-500 min-w-0">
             <div className="font-mono break-all">${value}</div>
+            ${previewUrl &&
+            html`<a
+              href=${previewUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-zinc-600 hover:text-amber-600 underline-offset-2 hover:underline break-all"
+            >${meta?.url ?? previewUrl}</a>`}
           </div>
           <button
             type="button"

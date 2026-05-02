@@ -6,8 +6,16 @@ import { api } from '../lib/api.js';
 function fieldPreview(value, fieldDef) {
   if (value === undefined || value === null) return '—';
   if (fieldDef && fieldDef.type === 'asset') {
-    if (typeof value === 'string' && /^[0-9a-f]{32}$/i.test(value)) {
-      return html`<img src=${api.assetUrl(value)} alt="" className="w-12 h-8 object-cover rounded" />`;
+    // With expand_assets, value is { id, ref_key, kind, url, meta }
+    if (value && typeof value === 'object' && value.ref_key) {
+      const url = `${api.baseUrl}/assets/${value.ref_key}`;
+      if (value.kind === 'image') {
+        return html`<img src=${url} alt="" className="w-12 h-8 object-cover rounded" />`;
+      }
+      return html`<span className="text-zinc-500 text-xs uppercase tracking-wider">${value.kind ?? 'file'}</span>`;
+    }
+    if (typeof value === 'string') {
+      return html`<span className="text-zinc-500 text-xs font-mono">${value.slice(0, 8)}…</span>`;
     }
     return html`<span className="text-zinc-500 text-xs">${String(value)}</span>`;
   }
@@ -37,7 +45,7 @@ export function EntryList() {
     setTypeDef(null);
     setList(null);
     setError(null);
-    const opts = { limit: 200 };
+    const opts = { limit: 200, expand_assets: true };
     if (tagFilter) opts.tags = [tagFilter];
     Promise.all([api.type(type), api.find(type, opts)])
       .then(([t, l]) => {
