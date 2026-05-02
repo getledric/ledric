@@ -506,35 +506,74 @@ describe('HTTP server with auth (admin-protects-writes default)', () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it('POST /rpc requires an admin key', async () => {
+  it('POST /rpc requires an admin key for write tools (no auth → 401)', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/rpc',
-      payload: { tool: 'describe_model' }
+      payload: {
+        tool: 'create_type',
+        args: { name: 'note', fields: { title: { type: 'string', required: true } } }
+      }
     });
     expect(res.statusCode).toBe(401);
     expect(JSON.parse(res.body).error.code).toBe('UNAUTHORIZED');
   });
 
-  it('POST /rpc with a malformed token returns 401', async () => {
+  it('POST /rpc with a malformed token returns 401 (write tool)', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/rpc',
       headers: { authorization: 'Bearer not-a-key' },
-      payload: { tool: 'describe_model' }
+      payload: {
+        tool: 'create_type',
+        args: { name: 'note', fields: { title: { type: 'string', required: true } } }
+      }
     });
     expect(res.statusCode).toBe(401);
   });
 
-  it('POST /rpc with a reader key returns 403 (forbidden, not unauthorized)', async () => {
+  it('POST /rpc with a reader key passes for read-only tools (describe_model)', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/rpc',
       headers: { authorization: `Bearer ${readerSecret}` },
       payload: { tool: 'describe_model' }
     });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('POST /rpc with a reader key returns 403 for write tools (create_type)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      headers: { authorization: `Bearer ${readerSecret}` },
+      payload: {
+        tool: 'create_type',
+        args: { name: 'note', fields: { title: { type: 'string', required: true } } }
+      }
+    });
     expect(res.statusCode).toBe(403);
     expect(JSON.parse(res.body).error.code).toBe('FORBIDDEN');
+  });
+
+  it('POST /rpc with a reader key passes for find (read-only)', async () => {
+    // Need a type to find against, so create it as admin first.
+    await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      headers: { authorization: `Bearer ${adminSecret}` },
+      payload: {
+        tool: 'create_type',
+        args: { name: 'note', fields: { title: { type: 'string', required: true } } }
+      }
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      headers: { authorization: `Bearer ${readerSecret}` },
+      payload: { tool: 'find', args: { type: 'note' } }
+    });
+    expect(res.statusCode).toBe(200);
   });
 
   it('POST /rpc with an admin Bearer key passes', async () => {
@@ -562,11 +601,17 @@ describe('HTTP server with auth (admin-protects-writes default)', () => {
     const adminRow = all.find((r) => r.label === 'admin')!;
     await storage.revokeApiKey(adminRow.id);
 
+    // Use a write tool here so the auth gate actually engages — reads
+    // are open in default mode, so a revoked-key + read would return
+    // 200 (auth gate skipped entirely).
     const res = await app.inject({
       method: 'POST',
       url: '/rpc',
       headers: { authorization: `Bearer ${adminSecret}` },
-      payload: { tool: 'describe_model' }
+      payload: {
+        tool: 'create_type',
+        args: { name: 'note', fields: { title: { type: 'string', required: true } } }
+      }
     });
     expect(res.statusCode).toBe(401);
   });

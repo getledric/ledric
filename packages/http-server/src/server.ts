@@ -722,8 +722,12 @@ async function dispatchTool(
  *   - Public routes (GET / and the GUI mount) skip auth entirely.
  *   - If no active keys exist (DB + env), every request is anonymous —
  *     this preserves the day-zero "no auth configured" UX.
- *   - Otherwise: POSTs require admin; GETs are open by default but
- *     require reader when `requireReaderKey` is set.
+ *   - Otherwise: writes require admin, reads accept reader (when
+ *     reader-key mode is on; reads stay open otherwise). For
+ *     `POST /rpc` the read/write split is per-tool, not per-method —
+ *     `find` / `read` / `describe_model` / `list_assets` / `list_tags` /
+ *     `get_asset` are reads and accept reader keys. Everything else
+ *     under /rpc requires admin.
  *
  * Env-var keys (LEDRIC_ADMIN_KEY / LEDRIC_READER_KEY) are checked
  * alongside DB-issued keys so ops scenarios that don't want secrets in
@@ -751,7 +755,21 @@ function attachAuth(
     return false;
   }
 
-  app.addHook('onRequest', async (req, reply) => {
+  // Tool names dispatched by /rpc that mutate nothing — these accept a
+  // reader key. Everything not in this set requires admin.
+  const READ_RPC_TOOLS = new Set([
+    'describe_model',
+    'read',
+    'find',
+    'get_asset',
+    'list_assets',
+    'list_tags'
+  ]);
+
+  // preHandler runs after body parsing, so /rpc's `body.tool` is
+  // available here for the per-tool auth split. onRequest would be too
+  // early.
+  app.addHook('preHandler', async (req, reply) => {
     const path = (req.url.split('?', 1)[0] ?? req.url);
     if (isPublicPath(path)) return;
 
@@ -760,10 +778,22 @@ function attachAuth(
     const dbKeys = await auth.storage.countActiveApiKeys();
     if (dbKeys === 0 && envKeys.size === 0) return;
 
-    // Required role for this request.
+    // Required role for this request. /rpc looks at the dispatched
+    // tool to decide; everything else uses HTTP-method semantics.
     let required: ApiKeyRole | null = null;
-    if (req.method === 'POST') required = 'admin';
-    else if (requireReaderKey) required = 'reader';
+    if (path === '/rpc') {
+      const body = req.body as { tool?: unknown } | undefined;
+      const tool = typeof body?.tool === 'string' ? body.tool : null;
+      if (tool !== null && READ_RPC_TOOLS.has(tool)) {
+        required = requireReaderKey ? 'reader' : null;
+      } else {
+        required = 'admin';
+      }
+    } else if (req.method === 'POST') {
+      required = 'admin';
+    } else if (requireReaderKey) {
+      required = 'reader';
+    }
     if (required === null) return;
 
     // Extract presented secret.
