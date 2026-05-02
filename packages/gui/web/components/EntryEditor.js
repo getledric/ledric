@@ -24,6 +24,10 @@ export function EntryEditor({ mode }) {
     setLoading(true);
     setError(null);
     setInfo(null);
+    setContent({});
+    setTags([]);
+    setParentVersion(null);
+    setPublishedVersion(null);
     (async () => {
       try {
         const t = await api.type(type);
@@ -45,9 +49,6 @@ export function EntryEditor({ mode }) {
           setParentVersion(entry.version);
           setPublishedVersion(typeof entry.published_version === 'number' ? entry.published_version : null);
           setTags(entry.tags ?? []);
-        } else {
-          // initialise from the type's example if there is one
-          setContent(t && t.example ? { ...t.example } : {});
         }
       } catch (e) {
         if (!cancelled) setError(e);
