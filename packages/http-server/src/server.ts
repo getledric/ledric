@@ -138,6 +138,39 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     bodyLimit: uploadLimit
   });
 
+  // Default 404 handler: return the same `{error: {code, message}}`
+  // shape every other route uses. Without this, Fastify's default
+  // `{message, error, statusCode}` shape would surface for any
+  // unmatched URL — and an agent probing the API (`/v1/types`,
+  // `/api/posts`, etc.) would see two different error envelopes
+  // depending on whether it found a route or not.
+  //
+  // Skipped when the GUI is being mounted; that block sets its own
+  // not-found handler with the same JSON-404 fall-through plus an
+  // SPA-fallback for deep HTML routes.
+  if (opts.gui === undefined) {
+    app.setNotFoundHandler(async (req, reply) => {
+      reply
+        .code(404)
+        .send({ error: { code: 'NOT_FOUND', message: `route ${req.url}` } });
+    });
+  }
+
+  // Default error handler: same envelope shape on uncaught throws
+  // so a 500 doesn't escape with Fastify's default schema either.
+  app.setErrorHandler(async (err, req, reply) => {
+    if (opts.logger) req.log.error(err);
+    const e = err as Error & { statusCode?: number };
+    const status = typeof e.statusCode === 'number' ? e.statusCode : 500;
+    const message = typeof e.message === 'string' ? e.message : String(err);
+    reply.code(status).send({
+      error: {
+        code: status === 500 ? 'INTERNAL' : 'ERROR',
+        message
+      }
+    });
+  });
+
   // Content-API ergonomics: CORS open by default so any frontend can read.
   const corsOption = opts.cors ?? '*';
   if (corsOption !== false) {

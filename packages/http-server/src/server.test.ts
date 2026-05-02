@@ -421,6 +421,19 @@ describe('HTTP server', () => {
     expect(body.error.code).toBe('TOOL_ERROR');
     expect(body.error.message).toMatch(/Unknown tool/);
   });
+
+  it('returns the structured error envelope on unmatched routes (no Fastify default leak)', async () => {
+    // An agent probing /v1/types or any other guessed-at path should see
+    // {error: {code, message}}, not Fastify's {message, error, statusCode}.
+    const res = await app.inject({ method: 'GET', url: '/v1/types' });
+    expect(res.statusCode).toBe(404);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error.message).toMatch(/\/v1\/types/);
+    // Fastify default keys must NOT appear at the top level.
+    expect(body.statusCode).toBeUndefined();
+    expect(body.message).toBeUndefined();
+  });
 });
 
 describe('HTTP server with GUI mount', () => {
