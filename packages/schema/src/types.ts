@@ -68,8 +68,28 @@ export interface FieldMarkdown extends FieldCommon {
 
 export interface FieldAsset extends FieldCommon {
   type: 'asset';
+  /** High-level kinds whitelist: e.g. ['image'], ['image', 'video']. */
   kinds?: readonly string[];
+  /** When true, the field stores an array of asset ids instead of one. */
   multiple?: boolean;
+  /**
+   * Concrete MIME types to allow — finer-grained than `kinds`. e.g.
+   * ['image/jpeg', 'image/png'] to disallow GIF/WebP. Empty array is
+   * not allowed; omit the key to leave it open.
+   */
+  mime_types?: readonly string[];
+  /** Maximum byte size of the referenced asset's source bytes. */
+  max_size_bytes?: number;
+  /** Image dimension bounds, applied when the asset's meta carries width/height. */
+  min_width?: number;
+  max_width?: number;
+  min_height?: number;
+  max_height?: number;
+  /**
+   * Required aspect ratio in "W:H" form (e.g. "16:9"). The check passes
+   * if abs(width/height − W/H) < 0.005 — accommodates one-pixel rounding.
+   */
+  aspect_ratio?: string;
 }
 
 export interface FieldReferences extends FieldCommon {

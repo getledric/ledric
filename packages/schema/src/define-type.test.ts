@@ -263,4 +263,63 @@ describe('defineType', () => {
       )
     ).toThrow(/cannot be both unique and localized/);
   });
+
+  // Asset constraint shape validation — checked at defineType, before the
+  // type ever stores anything.
+
+  it('accepts asset fields with size, mime, dimension, aspect_ratio constraints', () => {
+    const t = defineType('post', {
+      title: field.string({ required: true }),
+      hero: field.asset({
+        kinds: ['image'],
+        mime_types: ['image/jpeg', 'image/png'],
+        max_size_bytes: 5_000_000,
+        min_width: 800,
+        max_width: 4000,
+        aspect_ratio: '16:9'
+      })
+    });
+    expect(t.fields.hero).toMatchObject({
+      kinds: ['image'],
+      mime_types: ['image/jpeg', 'image/png'],
+      max_size_bytes: 5_000_000,
+      aspect_ratio: '16:9'
+    });
+  });
+
+  it('rejects an empty mime_types array', () => {
+    expect(() =>
+      defineType('post', {
+        title: field.string({ required: true }),
+        hero: field.asset({ mime_types: [] as never })
+      })
+    ).toThrow(/non-empty array of MIME strings/);
+  });
+
+  it('rejects mime_types entries that don\'t look like MIME', () => {
+    expect(() =>
+      defineType('post', {
+        title: field.string({ required: true }),
+        hero: field.asset({ mime_types: ['jpeg'] })
+      })
+    ).toThrow(/must look like MIME types/);
+  });
+
+  it('rejects non-positive max_size_bytes', () => {
+    expect(() =>
+      defineType('post', {
+        title: field.string({ required: true }),
+        hero: field.asset({ max_size_bytes: 0 })
+      })
+    ).toThrow(/max_size_bytes must be a positive integer/);
+  });
+
+  it('rejects malformed aspect_ratio', () => {
+    expect(() =>
+      defineType('post', {
+        title: field.string({ required: true }),
+        hero: field.asset({ aspect_ratio: '16x9' })
+      })
+    ).toThrow(/aspect_ratio must be a "W:H" string/);
+  });
 });

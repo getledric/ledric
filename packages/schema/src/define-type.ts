@@ -127,6 +127,41 @@ function validateFieldDef(
         `${pathLabel}: field "${fieldName}".dims must be a positive integer`
       );
     }
+  } else if (field.type === 'asset') {
+    if (field.mime_types !== undefined) {
+      if (!Array.isArray(field.mime_types) || field.mime_types.length === 0) {
+        vfail(
+          `${pathLabel}: field "${fieldName}".mime_types must be a non-empty array of MIME strings (or omit the key)`
+        );
+      }
+      if (field.mime_types.some((m) => typeof m !== 'string' || !m.includes('/'))) {
+        vfail(
+          `${pathLabel}: field "${fieldName}".mime_types entries must look like MIME types (e.g. "image/jpeg")`
+        );
+      }
+    }
+    for (const k of [
+      'max_size_bytes',
+      'min_width',
+      'max_width',
+      'min_height',
+      'max_height'
+    ] as const) {
+      const v = field[k];
+      if (v === undefined) continue;
+      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || !Number.isInteger(v)) {
+        vfail(
+          `${pathLabel}: field "${fieldName}".${k} must be a positive integer`
+        );
+      }
+    }
+    if (field.aspect_ratio !== undefined) {
+      if (typeof field.aspect_ratio !== 'string' || !/^\d+:\d+$/.test(field.aspect_ratio)) {
+        vfail(
+          `${pathLabel}: field "${fieldName}".aspect_ratio must be a "W:H" string (e.g. "16:9")`
+        );
+      }
+    }
   }
 }
 

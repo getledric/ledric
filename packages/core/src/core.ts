@@ -24,6 +24,7 @@ import type {
   TagWithCounts
 } from '@ledric/storage';
 import { UniqueViolationError } from '@ledric/storage';
+import sharp from 'sharp';
 import { normalizeTypeDef } from './normalize.js';
 import { deriveContent } from './derive.js';
 import { validateContent, type ValidationError } from './validate.js';
@@ -259,6 +260,103 @@ export class ValidationFailedError extends Error {
   constructor(public readonly errors: ValidationError[]) {
     super(`VALIDATION_FAILED: ${errors.length} error(s)`);
   }
+}
+
+export class AssetConstraintError extends Error {
+  readonly code = 'ASSET_CONSTRAINT';
+  constructor(
+    public readonly field: string,
+    public readonly constraint: string,
+    public readonly value: unknown,
+    public readonly limit: unknown
+  ) {
+    super(
+      `ASSET_CONSTRAINT: field "${field}" violates ${constraint} (got ${String(value)}, limit ${String(limit)})`
+    );
+  }
+}
+
+/**
+ * Throw AssetConstraintError if the resolved asset violates any of the
+ * field-level constraints. Called once per referenced asset id.
+ *
+ * Width/height come from asset meta (set by uploadAsset for images);
+ * when meta lacks them we skip the dimension rules rather than fail —
+ * non-image assets won't have them.
+ */
+function validateAssetAgainstField(
+  fieldName: string,
+  fieldDef: FieldAssetDef,
+  asset: { kind: string; meta: unknown }
+): void {
+  const meta = (asset.meta ?? {}) as {
+    mime?: unknown;
+    size?: unknown;
+    width?: unknown;
+    height?: unknown;
+  };
+
+  if (Array.isArray(fieldDef.kinds) && fieldDef.kinds.length > 0) {
+    if (!fieldDef.kinds.includes(asset.kind)) {
+      throw new AssetConstraintError(fieldName, 'kinds', asset.kind, fieldDef.kinds.join(','));
+    }
+  }
+  if (Array.isArray(fieldDef.mime_types) && fieldDef.mime_types.length > 0) {
+    if (typeof meta.mime !== 'string' || !fieldDef.mime_types.includes(meta.mime)) {
+      throw new AssetConstraintError(fieldName, 'mime_types', meta.mime, fieldDef.mime_types.join(','));
+    }
+  }
+  if (typeof fieldDef.max_size_bytes === 'number') {
+    if (typeof meta.size === 'number' && meta.size > fieldDef.max_size_bytes) {
+      throw new AssetConstraintError(fieldName, 'max_size_bytes', meta.size, fieldDef.max_size_bytes);
+    }
+  }
+  const w = typeof meta.width === 'number' ? meta.width : null;
+  const h = typeof meta.height === 'number' ? meta.height : null;
+  if (typeof fieldDef.min_width === 'number' && w !== null && w < fieldDef.min_width) {
+    throw new AssetConstraintError(fieldName, 'min_width', w, fieldDef.min_width);
+  }
+  if (typeof fieldDef.max_width === 'number' && w !== null && w > fieldDef.max_width) {
+    throw new AssetConstraintError(fieldName, 'max_width', w, fieldDef.max_width);
+  }
+  if (typeof fieldDef.min_height === 'number' && h !== null && h < fieldDef.min_height) {
+    throw new AssetConstraintError(fieldName, 'min_height', h, fieldDef.min_height);
+  }
+  if (typeof fieldDef.max_height === 'number' && h !== null && h > fieldDef.max_height) {
+    throw new AssetConstraintError(fieldName, 'max_height', h, fieldDef.max_height);
+  }
+  if (typeof fieldDef.aspect_ratio === 'string' && w !== null && h !== null && h > 0) {
+    const m = /^(\d+):(\d+)$/.exec(fieldDef.aspect_ratio);
+    if (m) {
+      const targetW = parseInt(m[1]!, 10);
+      const targetH = parseInt(m[2]!, 10);
+      if (targetH > 0) {
+        const actual = w / h;
+        const target = targetW / targetH;
+        if (Math.abs(actual - target) > 0.005) {
+          throw new AssetConstraintError(
+            fieldName,
+            'aspect_ratio',
+            `${w}x${h} (=${actual.toFixed(3)})`,
+            fieldDef.aspect_ratio
+          );
+        }
+      }
+    }
+  }
+}
+
+/** Field shape we care about in validateAssetAgainstField. */
+interface FieldAssetDef {
+  type: 'asset';
+  kinds?: readonly string[];
+  mime_types?: readonly string[];
+  max_size_bytes?: number;
+  min_width?: number;
+  max_width?: number;
+  min_height?: number;
+  max_height?: number;
+  aspect_ratio?: string;
 }
 
 /**
@@ -498,6 +596,12 @@ export class Core {
       input.ref
     );
 
+    // Per-field asset constraints (mime / size / dimensions / aspect ratio).
+    // The asset itself is unconstrained at upload time; constraints live on
+    // the field that USES the asset, so the same image can be a hero on one
+    // type and a thumbnail on another with different rules.
+    await this.checkAssetConstraints(typeDetail.definition, validated.value);
+
     if (input.ref !== undefined) {
       if (input.ref.slug !== slug) {
         throw new ValidationFailedError([
@@ -690,6 +794,36 @@ export class Core {
   }
 
   /**
+   * Walk every top-level asset-typed field on the type and check the
+   * referenced asset(s) against the field's per-use constraints
+   * (mime_types, max_size_bytes, dimension bounds, aspect_ratio).
+   * Dimensions only apply when the asset's meta carries width/height —
+   * non-image assets and old-format images skip those checks.
+   */
+  private async checkAssetConstraints(
+    typeDef: TypeDef,
+    content: Record<string, unknown>
+  ): Promise<void> {
+    for (const [fieldName, fieldDef] of Object.entries(typeDef.fields)) {
+      if (fieldDef.type !== 'asset') continue;
+      const raw = content[fieldName];
+      if (raw === undefined || raw === null) continue;
+      const ids: string[] = Array.isArray(raw)
+        ? raw.filter((v): v is string => typeof v === 'string')
+        : typeof raw === 'string'
+          ? [raw]
+          : [];
+      for (const idHex of ids) {
+        const idBytes = Buffer.from(idHex, 'hex');
+        if (idBytes.byteLength !== 16) continue; // not a real id; validateContent will catch
+        const asset = await this.storage.getAsset(new Uint8Array(idBytes));
+        if (!asset) continue; // ref-validation surfaces this elsewhere
+        validateAssetAgainstField(fieldName, fieldDef, asset);
+      }
+    }
+  }
+
+  /**
    * For every top-level field declared with `unique: true`, query for any
    * other live entry of the same type that already has the same value.
    * `excludeRef` is the entry being updated (so it doesn't match itself).
@@ -784,10 +918,35 @@ export class Core {
   }
 
   async uploadAsset(input: UploadAssetInput): Promise<AssetWrite> {
+    const meta: Record<string, unknown> = { ...(input.meta ?? {}) };
+    // Always stash byte size so per-field max_size_bytes has something to
+    // check against. Caller-supplied size wins (e.g. for streamed uploads
+    // where bytes is a chunked Buffer view).
+    if (meta.size === undefined && input.bytes !== undefined) {
+      meta.size = input.bytes.byteLength;
+    }
+    // For images, extract intrinsic width/height via sharp so per-field
+    // dimension constraints have something to validate against. We never
+    // overwrite a width/height that the caller already supplied.
+    if (input.kind === 'image' && (meta.width === undefined || meta.height === undefined)) {
+      try {
+        const probe = await sharp(input.bytes as Buffer).metadata();
+        if (typeof probe.width === 'number' && meta.width === undefined) {
+          meta.width = probe.width;
+        }
+        if (typeof probe.height === 'number' && meta.height === undefined) {
+          meta.height = probe.height;
+        }
+      } catch {
+        // Non-image bytes labelled as image, or sharp can't read them.
+        // Leave width/height unset; constraint checks treat absent
+        // dimensions as "unknown" and skip dimension rules.
+      }
+    }
     return this.storage.createAsset({
       kind: input.kind,
       bytes: input.bytes,
-      ...(input.meta !== undefined ? { meta: input.meta } : {}),
+      ...(Object.keys(meta).length > 0 ? { meta: meta as AssetMeta } : {}),
       ...(input.author !== undefined ? { author: input.author } : {}),
       ...(input.tags !== undefined ? { tags: input.tags } : {})
     });

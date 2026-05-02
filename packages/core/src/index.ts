@@ -1,6 +1,6 @@
 export const PACKAGE_NAME = '@ledric/core';
 
-export { Core, ValidationFailedError } from './core.js';
+export { Core, ValidationFailedError, AssetConstraintError } from './core.js';
 export type {
   Capabilities,
   CoreOptions,

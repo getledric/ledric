@@ -916,6 +916,8 @@ function serializeToolError(err: unknown): Record<string, unknown> {
     field?: unknown;
     value?: unknown;
     conflicting_slug?: unknown;
+    constraint?: unknown;
+    limit?: unknown;
   };
   // Default to INTERNAL so unhandled JS errors (TypeError,
   // ReferenceError, anything without an explicit `code`) are clearly
@@ -947,6 +949,8 @@ function serializeToolError(err: unknown): Record<string, unknown> {
   if (typeof e.field === 'string') out.field = e.field;
   if (e.value !== undefined && isJsonScalar(e.value)) out.value = e.value;
   if (typeof e.conflicting_slug === 'string') out.conflicting_slug = e.conflicting_slug;
+  if (typeof e.constraint === 'string') out.constraint = e.constraint;
+  if (e.limit !== undefined && isJsonScalar(e.limit)) out.limit = e.limit;
   return out;
 }
 

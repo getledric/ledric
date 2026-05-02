@@ -81,10 +81,27 @@ export const FIELD_TYPE_SPECS: Record<FieldType, FieldTypeSpec> = {
   },
   asset: {
     description:
-      'Reference to an uploaded file by 32-char hex id. Optional kind whitelist.',
+      'Reference to an uploaded file by 32-char hex id. Optional kind / MIME / size / dimension constraints checked when the field is set.',
     required: [],
-    optional: ['kinds', 'multiple', ...COMMON_OPTIONAL],
-    example: { type: 'asset', kinds: ['image'] }
+    optional: [
+      'kinds',
+      'multiple',
+      'mime_types',
+      'max_size_bytes',
+      'min_width',
+      'max_width',
+      'min_height',
+      'max_height',
+      'aspect_ratio',
+      ...COMMON_OPTIONAL
+    ],
+    example: {
+      type: 'asset',
+      kinds: ['image'],
+      mime_types: ['image/jpeg', 'image/png', 'image/webp'],
+      max_size_bytes: 5_000_000,
+      min_width: 800
+    }
   },
   references: {
     description:

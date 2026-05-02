@@ -196,6 +196,110 @@ describe('Core', () => {
     expect(adminView?.content.internal_notes).toBe('editor scratchpad');
   });
 
+  it('enforces asset constraints (min_width) on draft', async () => {
+    // Upload a 200x100 image. uploadAsset extracts dimensions via sharp.
+    const png = await sharp({
+      create: { width: 200, height: 100, channels: 3, background: { r: 0, g: 0, b: 0 } }
+    })
+      .png()
+      .toBuffer();
+    const asset = await core.uploadAsset({
+      kind: 'image',
+      bytes: png,
+      meta: { mime: 'image/png' }
+    });
+    const idHex = Buffer.from(asset.id).toString('hex');
+
+    await core.createType({
+      name: 'post',
+      fields: {
+        title: field.string({ required: true }),
+        slug: field.slug({ required: true, from: 'title' }),
+        hero: field.asset({ kinds: ['image'], min_width: 300 })
+      },
+      opts: { identifier_field: 'slug', display_field: 'title' }
+    });
+    await expect(
+      core.draft({
+        type: 'post',
+        fields: { title: 'Hi', slug: 'hi', hero: idHex }
+      })
+    ).rejects.toMatchObject({
+      code: 'ASSET_CONSTRAINT',
+      field: 'hero',
+      constraint: 'min_width'
+    });
+  });
+
+  it('passes a hero that meets all asset constraints', async () => {
+    const png = await sharp({
+      create: { width: 1280, height: 720, channels: 3, background: { r: 0, g: 0, b: 0 } }
+    })
+      .png()
+      .toBuffer();
+    const asset = await core.uploadAsset({
+      kind: 'image',
+      bytes: png,
+      meta: { mime: 'image/png' }
+    });
+    const idHex = Buffer.from(asset.id).toString('hex');
+
+    await core.createType({
+      name: 'post',
+      fields: {
+        title: field.string({ required: true }),
+        slug: field.slug({ required: true, from: 'title' }),
+        hero: field.asset({
+          kinds: ['image'],
+          mime_types: ['image/png'],
+          min_width: 800,
+          max_width: 4000,
+          aspect_ratio: '16:9'
+        })
+      },
+      opts: { identifier_field: 'slug', display_field: 'title' }
+    });
+    const draft = await core.draft({
+      type: 'post',
+      fields: { title: 'Hi', slug: 'hi', hero: idHex }
+    });
+    expect(draft.version).toBe(1);
+  });
+
+  it('rejects an asset whose mime is not in the allowlist', async () => {
+    const png = await sharp({
+      create: { width: 800, height: 600, channels: 3, background: { r: 0, g: 0, b: 0 } }
+    })
+      .png()
+      .toBuffer();
+    const asset = await core.uploadAsset({
+      kind: 'image',
+      bytes: png,
+      meta: { mime: 'image/png' }
+    });
+    const idHex = Buffer.from(asset.id).toString('hex');
+
+    await core.createType({
+      name: 'post',
+      fields: {
+        title: field.string({ required: true }),
+        slug: field.slug({ required: true, from: 'title' }),
+        hero: field.asset({ mime_types: ['image/jpeg', 'image/webp'] })
+      },
+      opts: { identifier_field: 'slug', display_field: 'title' }
+    });
+    await expect(
+      core.draft({
+        type: 'post',
+        fields: { title: 'Hi', slug: 'hi', hero: idHex }
+      })
+    ).rejects.toMatchObject({
+      code: 'ASSET_CONSTRAINT',
+      field: 'hero',
+      constraint: 'mime_types'
+    });
+  });
+
   it('strips private fields from find results too', async () => {
     await core.createType({
       name: 'page',
