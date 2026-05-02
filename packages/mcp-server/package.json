@@ -1,6 +1,6 @@
 {
   "name": "@ledric/mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ledric MCP server: MCP tool surface bound to @ledric/core (stdio + HTTP+SSE).",
   "license": "Apache-2.0",
   "repository": {
