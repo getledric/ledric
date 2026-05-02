@@ -178,7 +178,9 @@ Create or update a draft entry. Same tool for both — `ref` distinguishes.
 | `parent_version` | integer | conditionally | Required when `ref` is set |
 | `author` | string | no | |
 
-**Returns:** `{ type, slug, version, content }`.
+**Returns:** `{ type, slug, version, fields }` — same envelope used by
+the HTTP `GET /entries/:type/:slug` route. Your content lives under
+`fields`; top-level keys are entry metadata.
 
 If `ref` is omitted, the slug is derived from the type's
 `identifier_field` (defaults to whatever `slug` field contains, or to
@@ -209,6 +211,7 @@ Read a single entry by ref.
 | `version` | integer | no | Specific historical version |
 | `locale` | string | no | Project into this locale (must be in type's `locales`) |
 | `expand_assets` | boolean \| string[] | no | `true` expands every asset field; array picks specific ones |
+| `resolve_references` | boolean \| string[] | no | Inlines `references`-typed field values (each becomes `{ id, type, slug, version, fields }`). Different from `resolve_refs` below. |
 | `resolve_refs` | boolean | no | Walk markdown for `:::ref{}` directives, attach `_refs` sidecar |
 
 **Returns:** the entry record. Returns `null` when not found.
@@ -240,7 +243,9 @@ List entries of a type. Paginated, filterable, sortable.
 | `order` | `[{ field, dir }]` | no | `dir` ∈ `asc` \| `desc` |
 | `locale` | string | no | Project results into this locale |
 | `expand_assets` | boolean \| string[] | no | |
+| `resolve_references` | boolean \| string[] | no | Inline `references` fields. Distinct from `resolve_refs`. |
 | `resolve_refs` | boolean | no | |
+| `q` | string | no | Full-text search across `searchable: true` fields. Overrides `order` with relevance rank. |
 | `includeDeleted` | boolean | no | Include soft-deleted rows |
 
 **Returns:** `{ results: [...], total, offset }`.

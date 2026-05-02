@@ -154,6 +154,23 @@ rules.
 field.date({ required: true })
 ```
 
+> **Watch out: JavaScript `new Date(iso)` parsing.** A bare
+> `YYYY-MM-DD` like `"2026-05-01"` is parsed as **UTC midnight**.
+> In any timezone west of UTC (the entire Americas), formatting
+> that with `toLocaleDateString()` renders as **the day before**
+> (April 30 in Boston, etc.). If you want the date as the editor
+> wrote it, parse the components manually:
+>
+> ```ts
+> function parseDateLocal(iso: string) {
+>   const [y, m, d] = iso.split("-").map(Number);
+>   return new Date(y, m - 1, d);  // local midnight, not UTC
+> }
+> ```
+>
+> This is JavaScript's bug, not ledric's. Every consumer hits it
+> once.
+
 ### `slug`
 
 URL-safe identifier. Lowercase alphanumerics + hyphens.

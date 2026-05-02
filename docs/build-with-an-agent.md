@@ -27,12 +27,36 @@ or Opus) actually behaves over MCP, not a literal recording.
 
 ---
 
+## Architecture: ledric and your consumer site are separate processes
+
+Before any code: ledric runs as **its own process**. Your consumer
+site (Astro, Next.js, plain HTML, whatever) is a **different
+project** that fetches via ledric's HTTP URL. They share content,
+not codebases.
+
+```
+[ ./ledric-content/  ]      [ ./my-site/             ]
+     ↓ runs                       ↓ runs
+[ npx ledric serve ]  ←  HTTP  ←  [ npm run dev (astro/next/...) ]
+   (one process)                    (another process)
+   exposes :3000                    fetches LEDRIC_API_URL
+```
+
+Concretely: don't add `ledric` to your consumer site's
+`package.json`. Doing so would drag better-sqlite3 + sharp + libvips
+(~50MB native binaries) into every Vercel build for no reason. The
+consumer needs the URL, not the binary.
+
+For local dev convenience you can colocate both directories and
+launch them with one command (see the example in this page's
+section on dev scripts), but they're still two processes.
+
 ## Before you start
 
 A 60-second setup so the rest of the page makes sense:
 
 ```bash
-mkdir my-site && cd my-site
+mkdir my-content && cd my-content      # ← ledric's directory
 npx -y ledric init
 # accept defaults — patches .mcp.json, mints keys, writes .gitignore
 npx ledric serve --gui &
@@ -51,6 +75,10 @@ In the Claude session, confirm it's connected:
 
 It should list the 20 ledric tools. If it doesn't, restart Claude
 Code (the MCP discovery happens at session start).
+
+When you scaffold the consumer site later in the session, it lives
+in a sibling directory (`../my-site/` or wherever) — not inside
+`my-content/`.
 
 ---
 

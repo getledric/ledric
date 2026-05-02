@@ -77,6 +77,44 @@ curl http://localhost:3000/types/blog_post
 
 Returns 404 if the type doesn't exist.
 
+### The entry envelope
+
+Both `GET /entries/:type` (in each `results` element) and
+`GET /entries/:type/:slug` (the response itself) return the same
+shape:
+
+```json
+{
+  "id": "0193cf2c...",
+  "type": "blog_post",
+  "slug": "why-kysely",
+  "version": 4,
+  "published_version": 3,
+  "fields": { "title": "Why I switched to Kysely", "body": "..." },
+  "tags": [{ "slug": "featured", "label": "Featured" }]
+}
+```
+
+**Your content lives under `fields`.** The top-level keys (`id`,
+`type`, `slug`, `version`, `published_version`, `tags`) are entry
+metadata; everything you defined on the type lives inside `fields`.
+Consumer-side TypeScript types want this shape:
+
+```ts
+interface Entry<F> {
+  id: string;
+  type: string;
+  slug: string;
+  version: number;
+  published_version?: number;
+  fields: F;
+  tags?: Array<{ slug: string; label: string }>;
+}
+```
+
+The same envelope is used by the MCP `read` and `find` tools — pick
+the appropriate transport, the response shape is identical.
+
 ### `GET /entries/:type`
 
 List entries of a type.
@@ -85,35 +123,23 @@ List entries of a type.
 |---|---|
 | `limit` | 1–200, default 20 |
 | `offset` | |
-| `locale` | Project results into this locale |
+| `locale` | Project results into this locale (with fallback) |
+| `order` | `field:dir` — e.g. `?order=published_at:desc`. Comma-separate for multi-field: `?order=published_at:desc,title:asc`. Bare `?order=field` defaults to ascending. |
 | `expand_assets` | `1` / `true` to expand all asset fields, or comma-separated field names |
-| `resolve_refs` | `1` / `true` to walk markdown for `:::ref{}` directives |
+| `resolve_references` | `1` / `true` to inline `references`-typed field values, or comma-separated field names. Different from `resolve_refs` — that walks markdown for `:::ref{}` directives. |
+| `resolve_refs` | `1` / `true` to walk markdown for `:::ref{}` directives, attaches `_refs` sidecar |
+| `q` | Full-text search across `searchable: true` fields. AND-composes with `tag`, overrides `order` with relevance rank. |
 | `tag` | Repeatable. AND semantics — entry must have ALL listed tags. `?tag=featured&tag=2025` |
+| `include_private` | `1` / `true` to include `private: true` fields (admin-only contexts) |
 
 ```bash
-curl 'http://localhost:3000/entries/blog_post?limit=10&tag=featured'
-curl 'http://localhost:3000/entries/blog_post?expand_assets=hero'
+curl 'http://localhost:3000/entries/blog_post?order=published_at:desc&limit=10'
+curl 'http://localhost:3000/entries/blog_post?expand_assets=hero&resolve_references=author'
+curl 'http://localhost:3000/entries/blog_post?q=kysely'
 ```
 
-Response:
-
-```json
-{
-  "total": 42,
-  "offset": 0,
-  "results": [
-    {
-      "id": "0193cf2c...",
-      "type": "blog_post",
-      "slug": "why-kysely",
-      "version": 4,
-      "published_version": 3,
-      "fields": { "title": "Why I switched to Kysely", "..." : "..." },
-      "tags": [{ "slug": "featured", "label": "Featured" }]
-    }
-  ]
-}
-```
+Response: `{ total, offset, results: Entry[] }` — see the envelope
+above.
 
 ### `GET /entries/:type/:slug`
 
@@ -124,16 +150,27 @@ Read a single entry.
 | `version` | Specific historical version |
 | `locale` | Project into this locale |
 | `expand_assets` | `1` / `true` or comma-separated field names |
+| `resolve_references` | `1` / `true` or comma-separated field names |
 | `resolve_refs` | `1` / `true` |
+| `include_private` | `1` / `true` |
 
 ```bash
 curl http://localhost:3000/entries/blog_post/why-kysely
-curl 'http://localhost:3000/entries/blog_post/why-kysely?expand_assets=true'
+curl 'http://localhost:3000/entries/blog_post/why-kysely?expand_assets=true&resolve_references=author'
 ```
+
+Response: a single `Entry` (the envelope above).
 
 If the slug was renamed, the response is a `301` redirect to the new
 URL with `X-Ledric-Redirect: <new-slug>` set — your CDN's
 permanent-redirect rule keeps old URLs valid forever.
+
+> **Watch out: `Date` parsing.** `published_at` and other `date`
+> fields come back as `YYYY-MM-DD` strings. `new Date("2026-05-01")`
+> parses as UTC midnight, which renders as the previous day in
+> negative-UTC timezones. If you want the date as the editor wrote
+> it, parse manually: `const [y,m,d] = iso.split("-").map(Number);
+> new Date(y, m-1, d);`
 
 ### `GET /assets`
 
@@ -222,6 +259,11 @@ over MCP.
 
 Catch-all dispatch for the MCP tool surface. Same input shape as
 calling the tool over MCP, just wrapped in `{ tool, args }`.
+
+**Auth note:** /rpc is per-tool, not per-method. Read-only tools
+(`describe_model`, `read`, `find`, `get_asset`, `list_assets`,
+`list_tags`) accept reader keys; write tools require admin. So you
+can hit `POST /rpc { tool: "find" }` with a reader key safely.
 
 ```bash
 curl -X POST http://localhost:3000/rpc \
