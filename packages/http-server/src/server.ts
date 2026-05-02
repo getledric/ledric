@@ -309,6 +309,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       offset?: string;
       locale?: string;
       expand_assets?: string;
+      resolve_references?: string;
       resolve_refs?: string;
       include_private?: string;
       tag?: string | string[];
@@ -319,6 +320,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
     const offset = req.query.offset ? parseInt(req.query.offset, 10) : undefined;
     const expandAssets = parseExpandAssets(req.query.expand_assets);
+    const resolveReferences = parseExpandAssets(req.query.resolve_references);
     const resolveRefs = req.query.resolve_refs === '1' || req.query.resolve_refs === 'true';
     const includePrivate =
       req.query.include_private === '1' || req.query.include_private === 'true';
@@ -331,6 +333,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       ...(offset !== undefined ? { offset } : {}),
       ...(req.query.locale !== undefined ? { locale: req.query.locale } : {}),
       ...(expandAssets !== undefined ? { expand_assets: expandAssets } : {}),
+      ...(resolveReferences !== undefined ? { resolve_references: resolveReferences } : {}),
       ...(resolveRefs ? { resolve_refs: true } : {}),
       ...(includePrivate ? { include_private: true } : {}),
       ...(tags.length > 0 ? { tags } : {}),
@@ -359,6 +362,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       version?: string;
       locale?: string;
       expand_assets?: string;
+      resolve_references?: string;
       resolve_refs?: string;
       include_private?: string;
     };
@@ -366,6 +370,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     const versionNum = req.query.version ? parseInt(req.query.version, 10) : undefined;
     const localeArg = req.query.locale;
     const expandAssets = parseExpandAssets(req.query.expand_assets);
+    const resolveReferences = parseExpandAssets(req.query.resolve_references);
     const resolveRefs = req.query.resolve_refs === '1' || req.query.resolve_refs === 'true';
     const includePrivate =
       req.query.include_private === '1' || req.query.include_private === 'true';
@@ -374,6 +379,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       ...(versionNum !== undefined ? { version: versionNum } : {}),
       ...(localeArg !== undefined ? { locale: localeArg } : {}),
       ...(expandAssets !== undefined ? { expand_assets: expandAssets } : {}),
+      ...(resolveReferences !== undefined ? { resolve_references: resolveReferences } : {}),
       ...(resolveRefs ? { resolve_refs: true } : {}),
       ...(includePrivate ? { include_private: true } : {})
     });

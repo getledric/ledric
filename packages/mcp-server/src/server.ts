@@ -91,6 +91,7 @@ const ReadArgsSchema = z
     version: IntFromStringOrNumber.optional(),
     locale: z.string().optional(),
     expand_assets: ExpandAssetsSchema,
+    resolve_references: ExpandAssetsSchema,
     resolve_refs: z.boolean().optional(),
     include_private: z.boolean().optional()
   })
@@ -113,6 +114,7 @@ const FindArgsSchema = z
     includeDeleted: z.boolean().optional(),
     locale: z.string().optional(),
     expand_assets: ExpandAssetsSchema,
+    resolve_references: ExpandAssetsSchema,
     resolve_refs: z.boolean().optional(),
     include_private: z.boolean().optional(),
     q: z.string().optional(),
@@ -394,6 +396,14 @@ export function createMcpServer(core: Core): Server {
                 { type: 'array', items: { type: 'string' } }
               ]
             },
+            resolve_references: {
+              description:
+                'Inline `references`-typed field values. true expands every references-typed field on the type; an array of field names expands just those. Distinct from resolve_refs (which walks markdown bodies for :::ref{} directives).',
+              oneOf: [
+                { type: 'boolean' },
+                { type: 'array', items: { type: 'string' } }
+              ]
+            },
             resolve_refs: {
               type: 'boolean',
               description:
@@ -448,6 +458,12 @@ export function createMcpServer(core: Core): Server {
             includeDeleted: { type: 'boolean' },
             locale: { type: 'string' },
             expand_assets: {
+              oneOf: [
+                { type: 'boolean' },
+                { type: 'array', items: { type: 'string' } }
+              ]
+            },
+            resolve_references: {
               oneOf: [
                 { type: 'boolean' },
                 { type: 'array', items: { type: 'string' } }

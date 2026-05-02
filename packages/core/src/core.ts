@@ -32,6 +32,7 @@ import { classifyChange, deepEqual, type TypeDiff } from './classify.js';
 import { applyMergePatch } from './merge-patch.js';
 import { projectForLocale, extractLocaleSlugs } from './locale.js';
 import { resolveAssets } from './resolve-assets.js';
+import { resolveReferences } from './resolve-references.js';
 import { resolveInlineRefs } from './resolve-refs.js';
 import { checkStructuralRefs } from './check-refs.js';
 import {
@@ -174,6 +175,21 @@ export interface ReadInput {
    *   undefined  → leave as opaque ids (default)
    */
   expand_assets?: boolean | readonly string[];
+  /**
+   * Resolve `references`-typed fields in the response. Symmetric to
+   * `expand_assets` but for cross-entry references rather than assets.
+   *   true       → every references-typed field on the type
+   *   string[]   → only the named fields
+   *   undefined  → leave as opaque "type/slug" strings (default)
+   *
+   * Resolution is shallow — the resolved entries are returned as
+   * stored, without further expand_assets / resolve_references passes
+   * on their fields. (v0.2 will add recursive expansion.)
+   *
+   * Distinct from `resolve_refs` (below), which walks markdown bodies
+   * for :::ref{} directives — totally different mechanism.
+   */
+  resolve_references?: boolean | readonly string[];
   /** Resolve inline :::ref{} directives in markdown fields into a _refs sidecar. */
   resolve_refs?: boolean;
   /**
@@ -690,26 +706,32 @@ export class Core {
       typeDetail.definition,
       input.locale
     );
-    const resolved = await resolveAssets(
+    const assetsResolved = await resolveAssets(
       projected,
       typeDetail.definition,
       this.storage,
       input.expand_assets
     );
+    const referencesResolved = await resolveReferences(
+      assetsResolved,
+      typeDetail.definition,
+      this.storage,
+      input.resolve_references
+    );
     const refs =
       input.resolve_refs === true
-        ? await resolveInlineRefs(resolved, typeDetail.definition, this.storage)
+        ? await resolveInlineRefs(referencesResolved, typeDetail.definition, this.storage)
         : undefined;
     // Surface structural-ref issues as a sidecar so consumers can show
     // "this points at content that no longer exists" without re-running
     // the check themselves.
     const warnings = await checkStructuralRefs(
-      resolved,
+      referencesResolved,
       typeDetail.definition,
       this.storage
     );
     const visible = stripPrivateFields(
-      resolved,
+      referencesResolved,
       typeDetail.definition,
       input.include_private === true
     );
@@ -725,6 +747,7 @@ export class Core {
     input: FindEntriesInput & {
       locale?: string;
       expand_assets?: boolean | readonly string[];
+      resolve_references?: boolean | readonly string[];
       resolve_refs?: boolean;
       include_private?: boolean;
     }
@@ -739,18 +762,24 @@ export class Core {
         typeDetail.definition,
         input.locale
       );
-      const resolved = await resolveAssets(
+      const assetsResolved = await resolveAssets(
         localeProjected,
         typeDetail.definition,
         this.storage,
         input.expand_assets
       );
+      const referencesResolved = await resolveReferences(
+        assetsResolved,
+        typeDetail.definition,
+        this.storage,
+        input.resolve_references
+      );
       const refs =
         input.resolve_refs === true
-          ? await resolveInlineRefs(resolved, typeDetail.definition, this.storage)
+          ? await resolveInlineRefs(referencesResolved, typeDetail.definition, this.storage)
           : undefined;
       const visible = stripPrivateFields(
-        resolved,
+        referencesResolved,
         typeDetail.definition,
         input.include_private === true
       );
