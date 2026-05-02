@@ -286,5 +286,36 @@ export function defineType(
     }
   }
 
+  // Validate that opts.example uses the input shape — what `draft`
+  // would accept — not the output / resolved shape an agent might see
+  // in a read response. The specific case that bites: references
+  // fields are stored and accepted as arrays of "type/slug" strings;
+  // when expanded on read with resolve_references they become objects.
+  // Examples in the resolved shape mislead agents into trying to
+  // `draft` with `[{type, slug}]` and bouncing off validation.
+  if (opts.example !== undefined) {
+    if (typeof opts.example !== 'object' || opts.example === null || Array.isArray(opts.example)) {
+      vfail(`defineType("${name}"): example must be an object mapping field names to input values`);
+    }
+    for (const [fieldName, fieldDef] of Object.entries(fields)) {
+      if (fieldDef.type !== 'references') continue;
+      const value = (opts.example as Record<string, unknown>)[fieldName];
+      if (value === undefined || value === null) continue;
+      if (!Array.isArray(value)) {
+        vfail(
+          `defineType("${name}"): example.${fieldName} must be an array of "type/slug" strings (got ${typeof value})`
+        );
+      }
+      for (let i = 0; i < value.length; i++) {
+        const v = value[i];
+        if (typeof v !== 'string') {
+          vfail(
+            `defineType("${name}"): example.${fieldName}[${i}] must be a "type/slug" string — references in examples take the input shape, not the resolved {type, slug} object shape`
+          );
+        }
+      }
+    }
+  }
+
   return { name, fields, ...opts };
 }

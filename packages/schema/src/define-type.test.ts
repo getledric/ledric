@@ -348,4 +348,62 @@ describe('defineType', () => {
       })
     ).toThrow(/searchable:true is only allowed on string or markdown/);
   });
+
+  // example shape validation — references in the example must use the
+  // input shape (string["type/slug"]), not the resolved-object shape.
+
+  it('accepts an example with references as string["type/slug"] (input shape)', () => {
+    const t = defineType(
+      'post',
+      {
+        title: field.string({ required: true }),
+        slug: field.slug({ from: 'title' }),
+        author: field.references({ to: ['author'], min: 1, max: 1 })
+      },
+      {
+        example: {
+          title: 'Hello',
+          slug: 'hello',
+          author: ['author/ada-lovelace']
+        }
+      }
+    );
+    expect(t.example).toMatchObject({ author: ['author/ada-lovelace'] });
+  });
+
+  it('rejects an example with references as objects (output shape)', () => {
+    expect(() =>
+      defineType(
+        'post',
+        {
+          title: field.string({ required: true }),
+          author: field.references({ to: ['author'], min: 1, max: 1 })
+        },
+        {
+          example: {
+            title: 'Hello',
+            author: [{ type: 'author', slug: 'ada-lovelace' } as never]
+          }
+        }
+      )
+    ).toThrow(/references in examples take the input shape/);
+  });
+
+  it('rejects an example where references is a bare object (not an array)', () => {
+    expect(() =>
+      defineType(
+        'post',
+        {
+          title: field.string({ required: true }),
+          author: field.references({ to: ['author'], min: 1, max: 1 })
+        },
+        {
+          example: {
+            title: 'Hello',
+            author: { type: 'author', slug: 'ada-lovelace' } as never
+          }
+        }
+      )
+    ).toThrow(/must be an array of "type\/slug" strings/);
+  });
 });
