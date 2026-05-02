@@ -12,7 +12,7 @@ ledric sits in the middle and gets out of the way.
 
 ## Why
 
-This is a personal project first. After 25 years of building on top of content management systems and being annoyed by all of them, ledric is my attempt at the one I'd actually want to use. A few things to be upfront about:
+This is a personal project first. After 25 years of building bespoke content management systems for clients (pre-headless CMS days) and working with the major players since, and being annoyed by most of them, ledric is my attempt at the one I'd actually want to use. A few things to be upfront about:
 
 - It's probably confusing in places.
 - It definitely has gaps.
@@ -23,9 +23,9 @@ If you want a battle-tested CMS, this isn't it yet. If you like the shape of the
 
 ## What you get
 
-**Write your schema however you want.** Define content types in TypeScript for the autocomplete vibes, or ask Claude to make one up over chat. Both paths write the same canonical thing to the same file. No separate admin UI, no weird drift between your code and your "real" schema.
+**Set up your schema by chat.** "I want a blog with posts, authors, and tags" — Claude writes the canonical types for you and calls `create_type`. (Coders who still code get `defineType()` from `@ledric/schema` for the autocomplete vibes — same canonical output, same row in the DB.) No separate admin UI, no weird drift between your code and your "real" schema.
 
-**Your content is just Markdown.** Rich-text fields are Markdown strings. Diff them in git. Paste them into Slack. Open them in any editor. No "oh, you need *our* SDK to render that" moments.
+**Your content is just Markdown** (with some embedding magic when you need it). Rich-text fields are Markdown strings — diff them in git, paste them into Slack, open them in any editor. Need to embed a section, asset, or another entry inline? Drop `:::ref{to="section/hero"}:::` in the body and ledric resolves it on read. No "oh, you need *our* SDK to render that" moments.
 
 **History on every edit.** Every save writes a new version. Nothing is ever silently overwritten. You can read any historical version by number.
 
@@ -49,14 +49,24 @@ If you want a battle-tested CMS, this isn't it yet. If you like the shape of the
 
 ## How I actually use it
 
-Most of my real work happens in a single Claude session against the MCP server:
+Most pages I build aren't just "title, body, hero image." They're collections of sections — a hero with desktop and mobile backgrounds, a pricing table that gets reused on three pages, a testimonials block, a CTA, a feature grid — sometimes with prose flowing around them, sometimes entirely composed of them.
 
-1. *"Go through this Figma node and build out the required asset exports."* I open Figma, run the exports, drop them in a folder.
-2. *"Upload these to ledric and tag them appropriately."*
-3. *"Build out the page from this Figma design using the uploaded assets and the copy I've extracted."*
-4. *"Read SMARTBLOCK.md and fix the styling so it matches Figma — I want the styling editable from the admin UI in a pinch."*
+The shape of the work I kept doing on every project:
 
-So no, you don't strictly need a headless CMS in the loop if you're already operating like this. ledric exists because I want my marketing team to roll out updates without me — and I want them to be able to wire up their own LLM tools to the same content store.
+1. Design and copy land in Figma.
+2. I shuttle assets and content to the CMS, structure it as best as the CMS lets me.
+3. I build a rendering / template engine on top of the headless CMS that turns those content rows back into pages — section ordering, asset variants per breakpoint, linked blocks, fallbacks for missing fields, the cache layer, the lot.
+4. The rendering engine becomes the actual CMS, with its own template-module system. The "real" CMS is just a poorly-shaped ORM underneath. Non-technical maintainers can't touch any of it.
+
+I've built that pile too many times. ledric is what the data layer wants to look like *before* the rendering engine grows tentacles: sections are first-class entries you can compose into a page (top-level via `references`, inline via `:::ref{to="section/hero"}:::` in any markdown field), assets are version-pinned with imgix-style transforms baked in, and the inline editor lets a non-technical maintainer change what they see without owning the rendering pipeline.
+
+A typical session against the MCP server now looks like:
+
+1. *"Go through this page design in Figma and prepare all required asset exports."*
+2. *"Import all assets into ledric, tagging them appropriately."*
+3. *"Build out the required sections, and roll them into a page."*
+
+Without ledric in the loop, Claude could write static HTML and call it a day. ledric exists because I want my marketing team to roll out updates without me — and I want them to be able to wire up their own LLM tools to the same content store.
 
 ## Two minutes to running
 
