@@ -10,6 +10,17 @@ You've got content. You've got AI tools. In a sane world they'd just talk to eac
 
 ledric sits in the middle and gets out of the way.
 
+## Why
+
+This is a personal project first. After 25 years of building on top of content management systems and being annoyed by all of them, ledric is my attempt at the one I'd actually want to use. A few things to be upfront about:
+
+- It's probably confusing in places.
+- It definitely has gaps.
+- Does AI make headless CMSes redundant? Maybe. I'm shipping this anyway.
+- It was clearly coded quickly using AI. That's exactly what has happened here. It's in no way production-tested.
+
+If you want a battle-tested CMS, this isn't it yet. If you like the shape of the bet — that the schema is the API, that agents deserve a real interface, that one SQLite file is enough — give it a try and tell me what's wrong with it.
+
 ## What you get
 
 **Write your schema however you want.** Define content types in TypeScript for the autocomplete vibes, or ask Claude to make one up over chat. Both paths write the same canonical thing to the same file. No separate admin UI, no weird drift between your code and your "real" schema.
@@ -35,6 +46,17 @@ ledric sits in the middle and gets out of the way.
 **Agents are properly invited.** Connect Claude Desktop, Cursor, or anything else that speaks MCP. Your AI gets the same surface you do — with validation, with version history, with structured errors — so it can draft posts, publish them, and evolve the content model without you holding its hand.
 
 **Tokens are sacred.** Responses are flat, not wrapped in metadata envelopes. Lists come in three budgets (`list`, `summary`, `full`) so you pay only for what you asked for.
+
+## How I actually use it
+
+Most of my real work happens in a single Claude session against the MCP server:
+
+1. *"Go through this Figma node and build out the required asset exports."* I open Figma, run the exports, drop them in a folder.
+2. *"Upload these to ledric and tag them appropriately."*
+3. *"Build out the page from this Figma design using the uploaded assets and the copy I've extracted."*
+4. *"Read SMARTBLOCK.md and fix the styling so it matches Figma — I want the styling editable from the admin UI in a pinch."*
+
+So no, you don't strictly need a headless CMS in the loop if you're already operating like this. ledric exists because I want my marketing team to roll out updates without me — and I want them to be able to wire up their own LLM tools to the same content store.
 
 ## Two minutes to running
 
@@ -109,6 +131,7 @@ matches what you're trying to do.
 | **[Auth](./docs/auth.md)** | Roles, key minting via `init` / first boot, header formats, closed-reads mode, listing / creating / revoking, rotation, env-var override. |
 | **[SDKs](./docs/sdks.md)** | `@ledric/sdk` (TypeScript) and `Ledric\LedricClient` (PHP) — methods, options, errors, inline-editor `refAttrs()`. |
 | **[Localization](./docs/localization.md)** | Per-type locales, `localized: true` fields, the `_locale` sidecar, fallback chains, locale-specific slugs, recipes. |
+| **[Deployment](./docs/deployment.md)** | Production shape: CDN in front of `/assets/<ref_key>`, reverse proxy + TLS, env-supplied API keys, backups, Postgres / MySQL deploys, what to handle outside of ledric. |
 
 ## The design philosophy
 
@@ -135,7 +158,7 @@ pnpm cli serve --gui             # same as `npx ledric serve --gui`, but against
 
 ## Status
 
-Alpha. The core works end-to-end. Shapes will shift before v1. If you try it and something breaks, open an issue — I'll see it.
+Alpha. The core works end-to-end, shapes will shift before v1. AI did most of the typing and it's in no way production-tested yet. If you try it and something breaks, open an issue — I'll see it.
 
 ## License
 
