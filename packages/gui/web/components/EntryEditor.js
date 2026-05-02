@@ -164,7 +164,21 @@ export function EntryEditor({ mode }) {
       </div>
 
       ${info && html`<div className="text-sm text-green-700 border border-green-200 bg-green-50 rounded px-3 py-2 mb-4">${info}</div>`}
-      ${error && html`<div className="text-sm text-red-700 border border-red-200 bg-red-50 rounded px-3 py-2 mb-4">${error.message}</div>`}
+      ${error && html`
+        <div className="text-sm text-red-700 border border-red-200 bg-red-50 rounded px-3 py-2 mb-4">
+          <div>${error.message}</div>
+          ${error.error && Array.isArray(error.error.errors) && error.error.errors.length > 0 && html`
+            <ul className="mt-2 space-y-0.5 text-xs">
+              ${error.error.errors.map((e, i) => html`
+                <li key=${i} className="flex gap-2">
+                  <code className="font-mono text-red-700/80">${e.path || '/'}</code>
+                  <span className="text-red-700">${e.message}${e.expected ? ` (expected ${typeof e.expected === 'string' ? e.expected : JSON.stringify(e.expected)})` : ''}</span>
+                </li>
+              `)}
+            </ul>
+          `}
+        </div>
+      `}
 
       <form
         onSubmit=${(e) => {
