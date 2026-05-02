@@ -104,7 +104,7 @@ Manual Claude Desktop config:
   "mcpServers": {
     "ledric": {
       "command": "npx",
-      "args": ["-y", "ledric", "serve"],
+      "args": ["-y", "ledric", "serve", "--gui"],
       "cwd": "/absolute/path/to/your/content/dir"
     }
   }

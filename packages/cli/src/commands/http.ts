@@ -103,10 +103,14 @@ export const httpCommand = defineCommand({
     const transformCache = cacheDisabled
       ? undefined
       : new FsTransformCache(typeof cacheArg === 'string' ? cacheArg : './ledric-transforms');
-    const core = new Core(
-      storage,
-      transformCache !== undefined ? { transformCache } : {}
-    );
+    // ledric http always exposes HTTP — surface http_base on
+    // describe_model so any MCP client peering at this process knows
+    // where the consumer plane is.
+    const httpBase = `http://${host}:${portStr}`;
+    const core = new Core(storage, {
+      ...(transformCache !== undefined ? { transformCache } : {}),
+      httpBase
+    });
 
     const envAdminKey = process.env.LEDRIC_ADMIN_KEY;
     const envReaderKey = process.env.LEDRIC_READER_KEY;

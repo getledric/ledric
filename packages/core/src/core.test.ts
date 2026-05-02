@@ -62,6 +62,18 @@ describe('Core', () => {
     expect(result.conventions.notes).toMatch(/leading underscore/i);
   });
 
+  it('describeModel surfaces consumer_guidance and (when set) http_base', async () => {
+    // Default Core (no httpBase): http_base absent, guidance present.
+    const noHttp = await core.describeModel();
+    expect(noHttp.capabilities.http_base).toBeUndefined();
+    expect(noHttp.capabilities.consumer_guidance).toMatch(/standalone process/i);
+
+    // Core constructed with httpBase: surfaces it.
+    const withHttp = new Core(storage, { httpBase: 'http://127.0.0.1:3000' });
+    const r = await withHttp.describeModel();
+    expect(r.capabilities.http_base).toBe('http://127.0.0.1:3000');
+  });
+
   it('createType validates via defineType and persists', async () => {
     const result = await core.createType({
       name: 'product',

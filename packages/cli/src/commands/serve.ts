@@ -114,10 +114,14 @@ export const serveCommand = defineCommand({
     const transformCache = cacheDisabled
       ? undefined
       : new FsTransformCache(typeof cacheArg === 'string' ? cacheArg : './ledric-transforms');
-    const core = new Core(
-      storage,
-      transformCache !== undefined ? { transformCache } : {}
-    );
+    // We know the HTTP URL before runHttp boots (port + host are
+    // already resolved); compute it eagerly so Core.describeModel can
+    // surface http_base to MCP clients without a follow-up update.
+    const httpBase = wantHttp ? `http://${httpHost}:${httpPortStr}` : undefined;
+    const core = new Core(storage, {
+      ...(transformCache !== undefined ? { transformCache } : {}),
+      ...(httpBase !== undefined ? { httpBase } : {})
+    });
 
     // First-boot key generation. Only relevant when HTTP is on (stdio
     // MCP runs in-process and is implicitly trusted), but we mint keys

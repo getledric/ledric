@@ -148,9 +148,15 @@ function writeJsonFile(path: string, data: unknown): void {
 }
 
 function ledricMcpEntry(cwd: string): McpServerEntry {
+  // Default to `serve --gui` so the spawned process gives the agent
+  // both MCP stdio (for tool calls) AND the HTTP API + admin GUI (for
+  // testing consumer-side reads, browsing /admin). Without --gui the
+  // agent has to start a second process via Bash whenever it wants to
+  // curl an endpoint, which is wasteful and confusing. Port comes from
+  // ledric.config.json so the user's chosen port carries through.
   return {
     command: 'npx',
-    args: ['-y', 'ledric', 'serve'],
+    args: ['-y', 'ledric', 'serve', '--gui'],
     cwd
   };
 }

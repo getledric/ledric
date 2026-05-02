@@ -70,6 +70,22 @@ export interface Capabilities {
    * without trial-and-error or doc-hunting.
    */
   fieldTypeSpecs: Record<string, FieldTypeSpec>;
+  /**
+   * Base URL of the HTTP API exposed by this ledric process, if one is
+   * running alongside MCP (i.e. `serve --http` or `serve --gui`). Absent
+   * when MCP is the only surface. Lets agents call the consumer-facing
+   * REST routes without probing or guessing the port.
+   */
+  http_base?: string;
+  /**
+   * Plain-language guidance for agents wiring up consumer sites. Steers
+   * them toward the right architecture (ledric runs as a separate
+   * process; consumers fetch via http_base) instead of inadvisable
+   * defaults like adding ledric to the consumer project's
+   * package.json — which would drag better-sqlite3 + sharp into every
+   * consumer build.
+   */
+  consumer_guidance: string;
 }
 
 /**
@@ -388,6 +404,13 @@ export interface CoreOptions {
    * requests skip the libvips pass.
    */
   transformCache?: TransformCache;
+  /**
+   * Base URL of the HTTP API exposed by this ledric process, when one is
+   * running. Surfaced on `describe_model().capabilities.http_base` so MCP
+   * clients know where to call without probing. Set by the CLI's serve
+   * command when --http or --gui is on; absent otherwise.
+   */
+  httpBase?: string;
 }
 
 /**
@@ -433,9 +456,11 @@ export interface UpdateAssetResult {
 
 export class Core {
   private readonly transformCache: TransformCache | undefined;
+  private readonly httpBase: string | undefined;
 
   constructor(private readonly storage: Storage, opts: CoreOptions = {}) {
     this.transformCache = opts.transformCache;
+    this.httpBase = opts.httpBase;
   }
 
   async describeModel(): Promise<DescribeModelResult> {
@@ -460,7 +485,10 @@ export class Core {
         imageTransforms: true,
         refValidation: true,
         fieldTypes: FIELD_TYPES,
-        fieldTypeSpecs: FIELD_TYPE_SPECS as unknown as Record<string, FieldTypeSpec>
+        fieldTypeSpecs: FIELD_TYPE_SPECS as unknown as Record<string, FieldTypeSpec>,
+        ...(this.httpBase !== undefined ? { http_base: this.httpBase } : {}),
+        consumer_guidance:
+          'ledric is intended to run as a standalone process. Consumer sites (Astro, Next.js, plain HTML, etc.) should reference its HTTP URL via http_base, NOT include ledric as a package dependency — that would drag better-sqlite3 + sharp + libvips into every consumer build (~50MB native binaries). For local dev convenience you can use `npx -y ledric http` from the consumer directory; in production, run ledric somewhere stable (Oracle Cloud free tier, Hetzner VPS, etc.) and point consumers at it via env var. The MCP server describes the admin plane; the HTTP API at http_base is the consumer plane.'
       },
       conventions: {
         name_pattern: NAME_PATTERN,

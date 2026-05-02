@@ -85,6 +85,14 @@ export interface Capabilities {
    * example. Lets callers build new field defs without trial-and-error.
    */
   fieldTypeSpecs?: Record<string, FieldTypeSpec>;
+  /**
+   * URL of the HTTP API on this ledric process, when one is running
+   * alongside the MCP server (i.e. `serve --http` / `serve --gui`).
+   * Absent when only MCP stdio is on.
+   */
+  http_base?: string;
+  /** Plain-language guidance for agents wiring up consumer sites. */
+  consumer_guidance?: string;
 }
 
 export interface FieldTypeSpec {

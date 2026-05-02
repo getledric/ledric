@@ -50,7 +50,7 @@ Claude Desktop  (~/Library/Application Support/Claude/claude_desktop_config.json
     "mcpServers": {
       "ledric": {
         "command": "npx",
-        "args": ["-y", "ledric", "serve"],
+        "args": ["-y", "ledric", "serve", "--gui"],
         "cwd": "/absolute/path/to/your/content/dir"
       }
     }
