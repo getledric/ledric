@@ -587,26 +587,85 @@ function ReferencesField({ name, def, value, onChange }) {
   `;
 }
 
-function ArrayOfStringField({ name, def, value, onChange }) {
+function ArrayOfPrimitiveField({ name, def, value, onChange }) {
   const arr = Array.isArray(value) ? value : [];
+  const itemDef = def.of;
   const [pending, setPending] = useState('');
 
+  function commit(raw) {
+    if (itemDef.type === 'number') {
+      const trimmed = String(raw).trim();
+      if (trimmed === '') return null;
+      const n = Number(trimmed);
+      if (Number.isNaN(n)) return null;
+      if (itemDef.integer && !Number.isInteger(n)) return null;
+      return n;
+    }
+    if (itemDef.type === 'string') {
+      const t = String(raw).trim();
+      return t === '' ? null : t;
+    }
+    return raw;
+  }
+
   function add() {
-    const v = pending.trim();
-    if (!v) return;
+    const v = commit(pending);
+    if (v === null) return;
+    if (arr.includes(v)) return;
     onChange([...arr, v]);
     setPending('');
   }
+
+  function remove(i) {
+    const next = arr.filter((_, j) => j !== i);
+    onChange(next.length > 0 ? next : undefined);
+  }
+
+  // Enum-of-values: a select beats a freeform input.
+  if (itemDef.type === 'enum') {
+    const remaining = (itemDef.values ?? []).filter((v) => !arr.includes(v));
+    return html`
+      <${FieldShell} name=${name} def=${def}>
+        <div className="flex flex-wrap gap-1 mb-2">
+          ${arr.map((v, i) => html`
+            <span key=${i} className="inline-flex items-center gap-1 text-xs bg-zinc-100 border border-zinc-200 rounded-full px-2 py-1">
+              ${v}
+              <button
+                type="button"
+                onClick=${() => remove(i)}
+                className="text-zinc-500 hover:text-red-700"
+              >×</button>
+            </span>
+          `)}
+          ${arr.length === 0 && html`<span className="text-xs text-zinc-500">none</span>`}
+        </div>
+        ${remaining.length > 0 && html`<select
+          className=${inputClass}
+          value=""
+          onChange=${(e) => {
+            if (e.target.value) onChange([...arr, e.target.value]);
+          }}
+        >
+          <option value="">— add ${name} —</option>
+          ${remaining.map((v) => html`<option key=${v} value=${v}>${v}</option>`)}
+        </select>`}
+      </${FieldShell}>
+    `;
+  }
+
+  const inputType = itemDef.type === 'number' ? 'number' : 'text';
+  const placeholder =
+    itemDef.type === 'number' ? 'add a number and press enter' : 'add an item and press enter';
 
   return html`
     <${FieldShell} name=${name} def=${def}>
       <div className="flex flex-wrap gap-1 mb-2">
         ${arr.map((v, i) => html`
           <span key=${i} className="inline-flex items-center gap-1 text-xs bg-zinc-100 border border-zinc-200 rounded-full px-2 py-1">
-            ${v}
+            ${String(v)}
             <button
               type="button"
-              onClick=${() => onChange(arr.filter((_, j) => j !== i))}
+              onClick=${() => remove(i)}
               className="text-zinc-500 hover:text-red-700"
             >×</button>
           </span>
@@ -614,7 +673,7 @@ function ArrayOfStringField({ name, def, value, onChange }) {
       </div>
       <div className="flex gap-2">
         <input
-          type="text"
+          type=${inputType}
           className=${inputClass}
           value=${pending}
           onChange=${(e) => setPending(e.target.value)}
@@ -624,7 +683,7 @@ function ArrayOfStringField({ name, def, value, onChange }) {
               add();
             }
           }}
-          placeholder="add tag and press enter"
+          placeholder=${placeholder}
         />
         <button
           type="button"
@@ -632,6 +691,133 @@ function ArrayOfStringField({ name, def, value, onChange }) {
           className="text-xs px-3 py-1 border border-zinc-200 hover:border-zinc-400 rounded text-zinc-600"
         >add</button>
       </div>
+    </${FieldShell}>
+  `;
+}
+
+function ObjectField({ name, def, value, onChange }) {
+  const obj = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const fields = def.fields ?? {};
+
+  function setNested(key, v) {
+    const next = { ...obj };
+    if (v === undefined) {
+      delete next[key];
+    } else {
+      next[key] = v;
+    }
+    onChange(Object.keys(next).length > 0 ? next : undefined);
+  }
+
+  return html`
+    <${FieldShell} name=${name} def=${def}>
+      <div className="border-l-2 border-zinc-200 pl-4 pt-1 space-y-1">
+        ${Object.keys(fields).length === 0
+          ? html`<div className="text-xs text-zinc-500">No fields declared on this object.</div>`
+          : Object.entries(fields).map(([k, fdef]) => html`
+            <${FieldRenderer}
+              key=${k}
+              name=${k}
+              def=${fdef}
+              value=${obj[k]}
+              content=${obj}
+              onChange=${(v) => setNested(k, v)}
+            />
+          `)}
+      </div>
+    </${FieldShell}>
+  `;
+}
+
+function ArrayOfObjectField({ name, def, value, onChange }) {
+  const arr = Array.isArray(value) ? value : [];
+  const itemDef = def.of ?? { type: 'object', fields: {} };
+  const itemFields = itemDef.fields ?? {};
+
+  function updateAt(i, v) {
+    const next = [...arr];
+    if (v === undefined) {
+      next.splice(i, 1);
+    } else {
+      next[i] = v;
+    }
+    onChange(next.length > 0 ? next : undefined);
+  }
+  function setNestedAt(i, key, v) {
+    const item = { ...(arr[i] ?? {}) };
+    if (v === undefined) {
+      delete item[key];
+    } else {
+      item[key] = v;
+    }
+    updateAt(i, Object.keys(item).length > 0 ? item : {});
+  }
+  function add() {
+    onChange([...arr, {}]);
+  }
+  function remove(i) {
+    const next = arr.filter((_, j) => j !== i);
+    onChange(next.length > 0 ? next : undefined);
+  }
+  function move(i, dir) {
+    const j = i + dir;
+    if (j < 0 || j >= arr.length) return;
+    const next = [...arr];
+    const tmp = next[i];
+    next[i] = next[j];
+    next[j] = tmp;
+    onChange(next);
+  }
+
+  return html`
+    <${FieldShell} name=${name} def=${def}>
+      ${arr.length === 0 && html`<div className="text-xs text-zinc-500 mb-2">No items.</div>`}
+      ${arr.map((item, i) => html`
+        <div key=${i} className="border border-zinc-200 rounded p-3 mb-2 bg-white">
+          <div className="flex items-center justify-between mb-2 pb-1 border-b border-zinc-100">
+            <span className="text-xs uppercase tracking-widest text-zinc-500">#${i + 1}</span>
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                disabled=${i === 0}
+                onClick=${() => move(i, -1)}
+                className="text-xs text-zinc-500 hover:text-zinc-900 disabled:opacity-30 px-2 py-0.5"
+                title="Move up"
+              >↑</button>
+              <button
+                type="button"
+                disabled=${i === arr.length - 1}
+                onClick=${() => move(i, 1)}
+                className="text-xs text-zinc-500 hover:text-zinc-900 disabled:opacity-30 px-2 py-0.5"
+                title="Move down"
+              >↓</button>
+              <button
+                type="button"
+                onClick=${() => remove(i)}
+                className="text-xs text-zinc-500 hover:text-red-700 px-2 py-0.5"
+                title="Remove"
+              >×</button>
+            </div>
+          </div>
+          <div className="space-y-1">
+            ${Object.entries(itemFields).map(([k, fdef]) => html`
+              <${FieldRenderer}
+                key=${k}
+                name=${k}
+                def=${fdef}
+                value=${item?.[k]}
+                content=${item ?? {}}
+                onChange=${(v) => setNestedAt(i, k, v)}
+              />
+            `)}
+          </div>
+        </div>
+      `)}
+      <button
+        type="button"
+        onClick=${add}
+        className="text-xs px-3 py-1 border border-zinc-300 hover:border-zinc-500 rounded text-zinc-700"
+      >+ add item</button>
     </${FieldShell}>
   `;
 }
@@ -780,9 +966,15 @@ export function FieldRenderer(props) {
     case 'references': return html`<${ReferencesField} ...${props} />`;
     case 'jss':    return html`<${JssField} ...${props} />`;
     case 'css':    return html`<${CssField} ...${props} />`;
-    case 'array':
-      if (def.of && def.of.type === 'string') return html`<${ArrayOfStringField} ...${props} />`;
+    case 'object': return html`<${ObjectField} ...${props} />`;
+    case 'array': {
+      const ofType = def.of && def.of.type;
+      if (ofType === 'object') return html`<${ArrayOfObjectField} ...${props} />`;
+      if (ofType === 'string' || ofType === 'number' || ofType === 'enum') {
+        return html`<${ArrayOfPrimitiveField} ...${props} />`;
+      }
       return html`<${FallbackField} ...${props} />`;
+    }
     default:
       return html`<${FallbackField} ...${props} />`;
   }
