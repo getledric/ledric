@@ -159,6 +159,12 @@ export interface ReadInput {
   expand_assets?: boolean | readonly string[];
   /** Resolve inline :::ref{} directives in markdown fields into a _refs sidecar. */
   resolve_refs?: boolean;
+  /**
+   * Include fields marked `private: true` in the response. Default false.
+   * The admin GUI / inline editor / authoring tools should pass true; public
+   * consumer reads should leave it false.
+   */
+  include_private?: boolean;
 }
 
 export interface PublishInput {
@@ -253,6 +259,28 @@ export class ValidationFailedError extends Error {
   constructor(public readonly errors: ValidationError[]) {
     super(`VALIDATION_FAILED: ${errors.length} error(s)`);
   }
+}
+
+/**
+ * Drop top-level fields marked `private: true` from a projected content
+ * object unless the caller explicitly opted in via `include_private`.
+ * Run last in the read pipeline (after locale projection and asset
+ * expansion) so the dropped fields stay invisible in every shape we
+ * return — list summaries, detail reads, expanded asset URLs, the lot.
+ */
+function stripPrivateFields(
+  content: Record<string, unknown>,
+  typeDef: TypeDef,
+  includePrivate: boolean
+): Record<string, unknown> {
+  if (includePrivate) return content;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(content)) {
+    const def = typeDef.fields[key];
+    if (def && (def as { private?: boolean }).private === true) continue;
+    out[key] = value;
+  }
+  return out;
 }
 
 export interface CoreOptions {
@@ -548,9 +576,14 @@ export class Core {
       typeDetail.definition,
       this.storage
     );
+    const visible = stripPrivateFields(
+      resolved,
+      typeDetail.definition,
+      input.include_private === true
+    );
     return {
       ...entry,
-      content: resolved,
+      content: visible,
       ...(refs !== undefined ? { _refs: refs } : {}),
       ...(warnings.length > 0 ? { _warnings: warnings } : {})
     };
@@ -561,6 +594,7 @@ export class Core {
       locale?: string;
       expand_assets?: boolean | readonly string[];
       resolve_refs?: boolean;
+      include_private?: boolean;
     }
   ): Promise<FindEntriesResult> {
     const result = await this.storage.findEntries(input);
@@ -583,9 +617,14 @@ export class Core {
         input.resolve_refs === true
           ? await resolveInlineRefs(resolved, typeDetail.definition, this.storage)
           : undefined;
+      const visible = stripPrivateFields(
+        resolved,
+        typeDetail.definition,
+        input.include_private === true
+      );
       projected.push({
         ...r,
-        content: resolved,
+        content: visible,
         ...(refs !== undefined ? { _refs: refs } : {})
       });
     }

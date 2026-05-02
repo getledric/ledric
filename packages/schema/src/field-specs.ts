@@ -30,7 +30,8 @@ const COMMON_OPTIONAL = [
   'description',
   'localized',
   'indexed',
-  'deprecated'
+  'deprecated',
+  'private'
 ] as const;
 
 export const FIELD_TYPE_SPECS: Record<FieldType, FieldTypeSpec> = {

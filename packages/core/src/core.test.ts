@@ -162,6 +162,68 @@ describe('Core', () => {
     });
     expect(updated.version).toBe(2);
   });
+
+  it('strips private:true fields from read responses by default', async () => {
+    await core.createType({
+      name: 'page',
+      fields: {
+        title: field.string({ required: true }),
+        slug: field.slug({ required: true, from: 'title' }),
+        body: field.string({ required: true }),
+        internal_notes: field.string({ private: true })
+      },
+      opts: { identifier_field: 'slug', display_field: 'title' }
+    });
+    await core.draft({
+      type: 'page',
+      fields: {
+        title: 'Hello',
+        slug: 'hello',
+        body: 'public body',
+        internal_notes: 'editor scratchpad'
+      }
+    });
+    const publicView = await core.read({ ref: { type: 'page', slug: 'hello' } });
+    expect(publicView).not.toBeNull();
+    expect(publicView?.content.title).toBe('Hello');
+    expect(publicView?.content.body).toBe('public body');
+    expect(publicView?.content.internal_notes).toBeUndefined();
+
+    const adminView = await core.read({
+      ref: { type: 'page', slug: 'hello' },
+      include_private: true
+    });
+    expect(adminView?.content.internal_notes).toBe('editor scratchpad');
+  });
+
+  it('strips private fields from find results too', async () => {
+    await core.createType({
+      name: 'page',
+      fields: {
+        title: field.string({ required: true }),
+        slug: field.slug({ required: true, from: 'title' }),
+        body: field.string({ required: true }),
+        internal_notes: field.string({ private: true })
+      },
+      opts: { identifier_field: 'slug', display_field: 'title' }
+    });
+    await core.draft({
+      type: 'page',
+      fields: { title: 'A', slug: 'a', body: 'a-body', internal_notes: 'a-notes' }
+    });
+    await core.draft({
+      type: 'page',
+      fields: { title: 'B', slug: 'b', body: 'b-body', internal_notes: 'b-notes' }
+    });
+    const publicList = await core.find({ type: 'page' });
+    for (const r of publicList.results) {
+      expect((r.content as Record<string, unknown>).internal_notes).toBeUndefined();
+    }
+    const adminList = await core.find({ type: 'page', include_private: true });
+    for (const r of adminList.results) {
+      expect((r.content as Record<string, unknown>).internal_notes).toMatch(/-notes$/);
+    }
+  });
 });
 
 describe('Core.getTransformedAsset', () => {

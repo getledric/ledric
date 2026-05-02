@@ -91,7 +91,8 @@ const ReadArgsSchema = z
     version: IntFromStringOrNumber.optional(),
     locale: z.string().optional(),
     expand_assets: ExpandAssetsSchema,
-    resolve_refs: z.boolean().optional()
+    resolve_refs: z.boolean().optional(),
+    include_private: z.boolean().optional()
   })
   .strict();
 
@@ -112,7 +113,8 @@ const FindArgsSchema = z
     includeDeleted: z.boolean().optional(),
     locale: z.string().optional(),
     expand_assets: ExpandAssetsSchema,
-    resolve_refs: z.boolean().optional()
+    resolve_refs: z.boolean().optional(),
+    include_private: z.boolean().optional()
   })
   .strict();
 
@@ -394,6 +396,11 @@ export function createMcpServer(core: Core): Server {
               type: 'boolean',
               description:
                 'Walk markdown fields for :::ref{to="type/slug"}::: directives, resolve each, and attach a _refs sidecar to the response.'
+            },
+            include_private: {
+              type: 'boolean',
+              description:
+                'Include fields marked private:true in the response. Default false — public-facing reads should leave it off; admin / authoring reads should pass true.'
             }
           },
           required: ['ref'],
@@ -435,7 +442,8 @@ export function createMcpServer(core: Core): Server {
                 { type: 'array', items: { type: 'string' } }
               ]
             },
-            resolve_refs: { type: 'boolean' }
+            resolve_refs: { type: 'boolean' },
+            include_private: { type: 'boolean' }
           },
           required: ['type'],
           additionalProperties: false

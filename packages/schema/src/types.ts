@@ -11,6 +11,15 @@ export interface FieldCommon {
    * type must match the field's `type` (validated at defineType).
    */
   default?: unknown;
+  /**
+   * When true, the field is excluded from `read` / `find` responses by
+   * default. Pass `include_private: true` (admin role only over HTTP) to
+   * see it. Useful for internal notes, audit metadata, draft scratchpads,
+   * etc. that shouldn't leak to public consumer sites. v1 enforcement is
+   * top-level only — `private` on nested object/array fields is accepted
+   * for forward compat but not yet stripped from responses.
+   */
+  private?: boolean;
 }
 
 export interface FieldString extends FieldCommon {
