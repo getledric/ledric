@@ -79,10 +79,16 @@ export const serveCommand = defineCommand({
         'Require a reader key on every GET (closed-reads mode). Default: GETs are open and only writes need an admin key.',
       default: false
     },
-    'remote-mcp': {
+    'http-mcp': {
       type: 'boolean',
       description:
-        'Mount the Streamable HTTP MCP transport at /mcp so remote clients (claude.ai custom connectors, mcp-remote bridges) can connect over the public internet. Implies --http. Disabled by default.',
+        'Mount the Streamable HTTP MCP transport at /mcp for local clients (Claude Code, Cursor, mcp-remote). Bearer-key auth only. Binds 127.0.0.1 by default. Implies --http.',
+      default: false
+    },
+    'public-mcp': {
+      type: 'boolean',
+      description:
+        'Expose this ledric on the public internet so claude.ai custom connectors can reach it. Implies --http-mcp. Mounts the OAuth provider, accepts OAuth bearers on /mcp, requires publicUrl, and defaults the bind to 0.0.0.0.',
       default: false
     }
   },
@@ -91,14 +97,20 @@ export const serveCommand = defineCommand({
     const dbPath = resolveDb(args.db);
     const httpPortStr =
       args['http-port'] ?? (cfg.http?.port !== undefined ? String(cfg.http.port) : '3000');
-    const httpHost = args['http-host'] ?? cfg.http?.host ?? '127.0.0.1';
     const assetsBackend = args['assets-backend'] ?? cfg.assets?.backend;
     const assetsRoot = args['assets-root'] ?? cfg.assets?.path;
     const requireReaderKey =
       args['require-reader-key'] === true || cfg.auth?.requireReaderKey === true;
     const wantGui = args.gui === true || cfg.gui?.enabled === true;
-    const remoteMcp = args['remote-mcp'] === true || cfg.mcp?.remote === true;
-    const wantHttp = args.http === true || wantGui || remoteMcp;
+    const publicMcp = args['public-mcp'] === true || cfg.mcp?.public === true;
+    // public implies http; otherwise honor each independently.
+    const httpMcp =
+      publicMcp || args['http-mcp'] === true || cfg.mcp?.http === true;
+    const wantHttp = args.http === true || wantGui || httpMcp;
+    // Public mode flips the default bind to 0.0.0.0; otherwise the
+    // existing 127.0.0.1 default stands. Explicit --http-host always wins.
+    const httpHostDefault = publicMcp ? '0.0.0.0' : '127.0.0.1';
+    const httpHost = args['http-host'] ?? cfg.http?.host ?? httpHostDefault;
 
     const assetsConfig = assetsConfigFromArgs({
       'assets-backend': assetsBackend,
@@ -160,13 +172,27 @@ export const serveCommand = defineCommand({
             mountPath: guiMount
           }
         : undefined;
-      const publicUrl = cfg.publicUrl ?? httpBase;
-      const mcpOpts = remoteMcp
+      // publicUrl is mandatory in public mode (it's the OAuth issuer
+      // and the Origin allowlist anchor). In http-only mode it's
+      // optional — fall back to the local bind URL purely so the
+      // describe_model http_base advertisement stays accurate.
+      const publicUrl = cfg.publicUrl;
+      if (publicMcp && (publicUrl === undefined || publicUrl.length === 0)) {
+        process.stderr.write(
+          'ledric: --public-mcp requires `publicUrl` to be set in ledric.config.json (it identifies this server as an OAuth issuer and anchors the Origin allowlist). See docs/remote-mcp.md.\n'
+        );
+        process.exit(2);
+      }
+      const mcpOpts = httpMcp
         ? {
-            remote: true as const,
+            http: true as const,
+            ...(publicMcp ? { public: true as const } : {}),
             ...(publicUrl !== undefined ? { publicUrl } : {}),
             ...(Array.isArray(cfg.mcp?.allowedOrigins)
               ? { allowedOrigins: cfg.mcp.allowedOrigins }
+              : {}),
+            ...(Array.isArray(cfg.mcp?.allowedCidrs)
+              ? { allowedCidrs: cfg.mcp.allowedCidrs }
               : {})
           }
         : undefined;
