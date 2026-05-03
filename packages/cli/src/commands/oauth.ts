@@ -14,36 +14,25 @@ const clientsListCommand = defineCommand({
     description: 'List OAuth clients registered against this ledric.'
   },
   args: {
-    db: dbArg,
-    'include-revoked': {
-      type: 'boolean',
-      description: 'Include revoked clients in the listing.',
-      default: false
-    }
+    db: dbArg
   },
   async run({ args }) {
     const storage = await openSqlite({ path: resolveDb(args.db) });
     try {
-      const clients = await listClients(storage, {
-        includeRevoked: args['include-revoked'] === true
-      });
+      const clients = await listClients(storage);
       if (clients.length === 0) {
         process.stderr.write('No OAuth clients registered.\n');
         return;
       }
-      // Two-line entry per client. The DCR-supplied name is shown in
-      // quotes and labelled "claimed" — operators have stared at this
-      // string before approving consent, so the framing has to make
-      // its trust level obvious.
+      // The DCR-supplied name is shown in quotes and labelled "claimed" —
+      // operators have stared at this string before approving consent, so
+      // the framing has to make its trust level obvious.
       for (const c of clients) {
-        const status = c.revoked_at !== null
-          ? ` (revoked ${new Date(c.revoked_at).toISOString()})`
-          : '';
         process.stdout.write(
-          `${c.client_id}${status}\n` +
+          `${c.client_id}\n` +
             `  claimed name: "${c.name}"\n` +
             `  redirect_uris: ${c.redirect_uris.join(', ')}\n` +
-            `  registered: ${new Date(c.created_at).toISOString()}\n\n`
+            `  grant_types: ${c.grant_types.join(', ')}\n\n`
         );
       }
     } finally {
@@ -73,7 +62,7 @@ const clientsRevokeCommand = defineCommand({
         process.stderr.write(`Revoked OAuth client ${args.client_id}\n`);
       } else {
         process.stderr.write(
-          `No active OAuth client with id ${args.client_id} (already revoked or never existed).\n`
+          `No OAuth client with id ${args.client_id} (already revoked or never existed).\n`
         );
         process.exit(1);
       }
