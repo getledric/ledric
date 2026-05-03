@@ -15,6 +15,10 @@ This page covers:
 - [Validation](#validation)
 - [Evolving a schema](#evolving-a-schema)
 
+If "type", "entry", "slug", "ref", "version" don't already mean
+something specific to you, [`concepts.md`](./concepts.md) is the
+primer this page assumes.
+
 For agent prompts that walk Claude through schema setup, see
 [`agent-recipes.md`](./agent-recipes.md).
 

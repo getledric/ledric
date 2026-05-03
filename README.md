@@ -175,17 +175,23 @@ Pages are short, scoped, and self-contained — pick the one that matches what y
 
 | | |
 |---|---|
+| **[Concepts](./docs/concepts.md)** | The mental model in one page: types, entries, ids vs slugs vs refs, versions, structural vs inline references, assets, locales, environments, the wire format. Read this first. |
 | **[Build with an agent](./docs/build-with-an-agent.md)** | End-to-end walkthrough: ask Claude to set up the schema, seed content, build an Astro site that renders it, wire up inline editing. Anchored to the committed `examples/astro-blog/` artifact. |
+| **[Build with an agent — PHP](./docs/build-with-an-agent-php.md)** | Same walkthrough, vanilla PHP consumer using `Ledric\LedricClient`. |
 | **[Schema](./docs/schema.md)** | Field types catalogue, `defineType()` examples, common + type-level options, validation, schema evolution. |
 | **[Agent recipes](./docs/agent-recipes.md)** | Example prompts you can paste into Claude: project setup, drafting, schema evolution, bulk ops, refactoring, localization. |
 | **[MCP tools](./docs/mcp-tools.md)** | The full 20-tool surface — args, returns, examples. Same surface as `POST /rpc` over HTTP. |
 | **[HTTP API](./docs/http-api.md)** | REST routes for reads, multipart upload, generic `POST /rpc`, image transforms, slug redirects, error codes. |
+| **[SDKs](./docs/sdks.md)** | `@ledric/sdk` (TypeScript) and `Ledric\LedricClient` (PHP) — methods, options, errors, inline-editor `refAttrs()`. |
 | **[Inline editor](./docs/inline-editor.md)** | `<script>` install, `data-ledric-ref` / `data-ledric-field` attributes, `refAttrs()` helpers in both SDKs, auth, behaviour. |
 | **[Assets](./docs/assets.md)** | The id / ref_key split, db vs local backends, uploads, image transforms, in-place bytes replacement, the transforms cache. |
-| **[Auth](./docs/auth.md)** | Roles, key minting via `init` / first boot, header formats, closed-reads mode, listing / creating / revoking, rotation, env-var override. |
-| **[SDKs](./docs/sdks.md)** | `@ledric/sdk` (TypeScript) and `Ledric\LedricClient` (PHP) — methods, options, errors, inline-editor `refAttrs()`. |
 | **[Localization](./docs/localization.md)** | Per-type locales, `localized: true` fields, the `_locale` sidecar, fallback chains, locale-specific slugs, recipes. |
+| **[Auth](./docs/auth.md)** | Roles, key minting via `init` / first boot, header formats, closed-reads mode, listing / creating / revoking, rotation, env-var override. |
+| **[Architecture](./docs/architecture.md)** | What's running when ledric boots: the packages, the storage adapters, the asset pipeline, the inline editor, process lifecycle. |
 | **[Deployment](./docs/deployment.md)** | Production shape: CDN in front of `/assets/<ref_key>`, reverse proxy + TLS, env-supplied API keys, backups, Postgres / MySQL deploys, what to handle outside of ledric. |
+| **[Why ledric](./docs/why.md)** | Honest comparison vs Contentful, Sanity, Payload, Strapi, Directus — and when ledric is the wrong choice. |
+| **[FAQ](./docs/faq.md)** | The questions that come up most: production-readiness, SQLite limits, hosting, the agent angle, migration. |
+| **[Roadmap](./docs/roadmap.md)** | What's stable, in progress, planned, and explicitly out of scope. |
 
 ## From source
 
