@@ -27,7 +27,8 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "clean": "rm -rf dist",
-    "prepack": "tsup"
+    "smoke": "node dist/cli.js --help > /dev/null && node dist/cli.js init --help > /dev/null",
+    "prepack": "tsup && pnpm smoke"
   },
   "dependencies": {
     "@clack/prompts": "^1.3.0",
