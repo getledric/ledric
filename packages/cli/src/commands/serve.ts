@@ -161,7 +161,8 @@ export const serveCommand = defineCommand({
       const bootstrapped = await bootstrapApiKeysIfEmpty(
         storage,
         envAdminKey,
-        envReaderKey
+        envReaderKey,
+        { mintReader: requireReaderKey }
       );
       if (bootstrapped !== null) printFirstBootKeys(bootstrapped);
 

@@ -1,8 +1,17 @@
 # API keys and auth
 
-ledric ships an API-key auth layer with two roles, sensible
-defaults, and a one-shot bootstrap so you don't have to figure out
-key minting before you can run anything.
+ledric has three credential types, one for each trust relationship.
+They don't substitute for each other — the right one depends on
+*who* is presenting it and *what* they're trying to do.
+
+| Credential | Holder | Use |
+|---|---|---|
+| **Admin key** (`lka_…`) | The operator | Master credential. Drives the admin GUI, server-side scripts, the CI/deploy path, and acts as proof-of-identity at the OAuth consent screen. Long-lived. Stored in `.env.local` or a secrets manager. |
+| **Reader key** (`lkr_…`) | A delegated service | Read-only credential for closed-reads deployments where consumer sites need to authenticate their reads. Long-lived. **Optional** — only minted when needed. |
+| **OAuth access / refresh tokens** | A third-party agent (claude.ai, etc.) | Delegated credentials issued via the OAuth flow when the operator authorizes a custom connector. Short-lived access tokens, rotating refresh tokens. Validated as JWTs at `/mcp`. |
+
+Each row corresponds to a different trust relationship — operator,
+service, agent. The rest of this page is the long version.
 
 - [The default mode](#the-default-mode)
 - [Roles](#roles)
@@ -13,6 +22,7 @@ key minting before you can run anything.
 - [Rotation](#rotation)
 - [Env-var override](#env-var-override)
 - [No-auth dev mode](#no-auth-dev-mode)
+- [OAuth tokens on `/mcp`](#oauth-tokens-on-mcp)
 
 ---
 
@@ -22,9 +32,12 @@ key minting before you can run anything.
 
 - `GET` requests don't need a key. Public sites can fetch directly.
 - `POST` / mutation requests need an admin key.
-- `npx ledric init` mints both an admin and a reader key on the way
-  through. The first HTTP boot does it instead if you skipped init.
-- Either way, the secrets are printed *once* — to stderr in the
+- `npx ledric init` mints **only an admin key** by default — that's
+  the operator credential and the only one needed in the open-reads
+  mode. The first HTTP boot does it instead if you skipped init.
+- Pass `--require-reader-key` to `init` to also mint a reader key
+  (the deliberate closed-reads-mode setup).
+- Either way, the secret(s) are printed *once* — to stderr in the
   CLI, into the init's note block in the GUI, and into
   `.env.local` if init wrote it.
 
@@ -47,24 +60,9 @@ The full secret looks like
 password.
 
 A `reader` key only matters when [closed-reads mode](#closed-reads-mode)
-is on — under the default (reads_open) mode you don't need one.
-
-### OAuth tokens (third path, `--public-mcp` only)
-
-When `serve --public-mcp` is on, ledric also accepts OAuth 2.1 JWT
-bearers on `/mcp`. They map to the same admin/reader roles via scope:
-
-| OAuth scope | Maps to ledric role |
-|---|---|
-| `ledric:read` | `reader` |
-| `ledric:write` | `admin` |
-
-Auth precedence on `/mcp` is: presented JWT first (looks like a JWT
-when it starts with `ey` and contains `.`), API-key bearer as the
-fallback. A bad JWT falls through to API-key auth — clients sending
-both don't dead-end on a misconfigured token. The OAuth provider
-itself lives at `/.well-known/*` and `/oauth/*`; see
-[`remote-mcp.md`](./remote-mcp.md) for the flow.
+is on — under the default (reads_open) mode you don't need one. Mint
+one later with `ledric keys create --role reader` if you flip a
+deployment into closed-reads mode after the fact.
 
 ---
 
@@ -252,3 +250,43 @@ npx ledric keys list --include-revoked    # see what's there
 
 Or just blow away the `api_keys` table (it's a SQLite file; you have
 all the tools).
+
+---
+
+## OAuth tokens on `/mcp`
+
+When `ledric serve --public-mcp` is on, the third credential type
+becomes available: OAuth 2.1 access tokens issued through the
+provider mounted under `/oauth/*`. They map to the same admin/reader
+roles via scope:
+
+| OAuth scope | Maps to ledric role |
+|---|---|
+| `ledric:read` | `reader` |
+| `ledric:write` | `admin` |
+
+Auth precedence on `/mcp`:
+
+1. **Bearer JWT** (looks like a JWT when it starts with `ey` and
+   contains `.`) — verified against the issuer's JWKS via `jose`.
+   On verify failure, falls through to the API-key path so a bad JWT
+   doesn't dead-end clients also sending an admin key.
+2. **API-key bearer** (`lka_…` / `lkr_…`) — same path as `/rpc`.
+
+The OAuth provider itself is run by [`oidc-provider`](https://github.com/panva/node-oidc-provider) — ledric doesn't
+implement OAuth endpoints by hand. See
+[`remote-mcp.md`](./remote-mcp.md) for the flow operators walk
+through (consent page validates the admin key, mints a Grant against
+the synthetic `operator` account, hands back an auth code, etc.).
+
+Manage registered clients with:
+
+```bash
+npx ledric oauth clients list             # active clients
+npx ledric oauth clients list --include-revoked
+npx ledric oauth clients revoke <client_id>
+```
+
+Revoking a client doesn't invalidate already-issued JWTs — those
+expire on their own (1h default). Refresh-token rotation will fail,
+which is the practical kill switch.

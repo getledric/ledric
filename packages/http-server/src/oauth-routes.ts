@@ -1,125 +1,133 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { LedricStorage } from '@ledric/storage';
+import { hashApiKey } from '@ledric/storage';
 import {
-  loadOrGenerateSigningKeys,
-  registerClient,
-  getClient,
-  mintAuthCode,
-  consumeAuthCode,
-  AuthCodeError,
-  RegisterClientError,
-  mintTokens,
-  findRefreshToken,
-  revokeRefreshToken,
-  revokeLineage,
-  verifyAccessToken,
-  randomToken,
-  timingSafeEqual,
+  buildProvider,
+  reapExpiredOidcPayloads,
   SCOPE_TO_ROLE,
-  type SigningKeys,
-  type Scope,
   type AccessTokenClaims,
-  type AuthorizationServerMetadata,
-  type ProtectedResourceMetadata
+  type ProtectedResourceMetadata,
+  type Scope
 } from '@ledric/oauth';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 export interface OAuthMountOptions {
-  /** OAuth issuer URL — must match the configured publicUrl. */
+  /** OAuth issuer URL — must equal the configured `publicUrl`. */
   issuer: string;
-  /** Hostnames a DCR-registered client may use in `redirect_uris`. */
-  allowedRedirectHosts?: readonly string[];
-  /** Whether DCR is open to anonymous registrants. Default: true. */
+  /** Allow Dynamic Client Registration. Default: true. */
   dcr?: boolean;
   accessTokenTtlSeconds?: number;
   refreshTokenTtlSeconds?: number;
-  /**
-   * stderr writer used for consent-token banners. Defaults to
-   * `process.stderr.write` — tests inject their own to capture output.
-   */
+  /** stderr writer — tests can swap this. */
   printToStderr?: (s: string) => void;
 }
 
 /**
- * Live OAuth state shared across handlers — signing keys, the current
- * boot-time consent token, the issuer config. Held in module-private
- * scope of mountOAuthRoutes so each createHttpServer instance gets
- * its own.
- */
-interface OAuthRuntime {
-  storage: LedricStorage;
-  keys: SigningKeys;
-  opts: OAuthMountOptions;
-  /** Active consent token. Single-use; rotates on consumption. */
-  consentToken: string;
-  consentTokenIssuedAt: number;
-}
-
-const CONSENT_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
-function rotateConsentToken(runtime: OAuthRuntime): string {
-  runtime.consentToken = randomToken(24);
-  runtime.consentTokenIssuedAt = Date.now();
-  const print = runtime.opts.printToStderr ?? ((s) => process.stderr.write(s));
-  print(
-    [
-      '',
-      '╭──────────────────────────────────────────────────────────────────────────╮',
-      '│  OAuth consent token (single-use, ~10 min). Paste this into the          │',
-      '│  consent page when claude.ai or another client requests authorization.   │',
-      '├──────────────────────────────────────────────────────────────────────────┤',
-      `│  ${runtime.consentToken.padEnd(72, ' ')}│`,
-      '╰──────────────────────────────────────────────────────────────────────────╯',
-      ''
-    ].join('\n')
-  );
-  return runtime.consentToken;
-}
-
-/**
- * The verifier returned by mountOAuthRoutes — the /mcp preHandler
- * uses this to validate OAuth bearer tokens. Returns null when the
- * token is unrecognised (so caller can fall through to api-key auth)
- * and throws on JWT failure (caller treats that as 401).
+ * Verifier closed over the issuer's JWKS. Returned from
+ * mountOAuthRoutes so the /mcp middleware can validate access tokens
+ * without re-creating the key set per request.
  */
 export type AccessTokenVerifier = (token: string) => Promise<AccessTokenClaims>;
 
+/**
+ * Mount the OAuth surface (oidc-provider does the heavy lifting),
+ * the protected-resource metadata document (RFC 9728), and the
+ * consent UI that interactions are routed to. Returns the access-
+ * token verifier the /mcp middleware uses for the JWT path.
+ */
 export async function mountOAuthRoutes(
   app: FastifyInstance,
   storage: LedricStorage,
   opts: OAuthMountOptions
-): Promise<{ verify: AccessTokenVerifier }> {
-  const keys = await loadOrGenerateSigningKeys(storage);
-  const runtime: OAuthRuntime = {
-    storage,
-    keys,
-    opts,
-    consentToken: '',
-    consentTokenIssuedAt: 0
-  };
-  rotateConsentToken(runtime);
-
-  const verify: AccessTokenVerifier = (token) =>
-    verifyAccessToken(keys, { issuer: opts.issuer }, token);
-
-  // ── RFC 8414: authorization-server metadata ─────────────────────────────
-  app.get('/.well-known/oauth-authorization-server', async () => {
-    const metadata: AuthorizationServerMetadata = {
-      issuer: opts.issuer,
-      authorization_endpoint: `${opts.issuer}/oauth/authorize`,
-      token_endpoint: `${opts.issuer}/oauth/token`,
-      registration_endpoint: `${opts.issuer}/oauth/register`,
-      revocation_endpoint: `${opts.issuer}/oauth/revoke`,
-      jwks_uri: `${opts.issuer}/oauth/jwks`,
-      scopes_supported: ['ledric:read', 'ledric:write'],
-      response_types_supported: ['code'],
-      grant_types_supported: ['authorization_code', 'refresh_token'],
-      code_challenge_methods_supported: ['S256'],
-      token_endpoint_auth_methods_supported: ['client_secret_basic', 'none']
-    };
-    return metadata;
+): Promise<{ verify: AccessTokenVerifier; close: () => void }> {
+  const provider = buildProvider(storage, {
+    issuer: opts.issuer,
+    ...(opts.dcr !== undefined ? { dcr: opts.dcr } : {}),
+    ...(opts.accessTokenTtlSeconds !== undefined
+      ? { accessTokenTtlSeconds: opts.accessTokenTtlSeconds }
+      : {}),
+    ...(opts.refreshTokenTtlSeconds !== undefined
+      ? { refreshTokenTtlSeconds: opts.refreshTokenTtlSeconds }
+      : {})
   });
 
-  // ── MCP authorization spec: protected-resource metadata ─────────────────
+  // Periodic GC for expired payloads. oidc-provider doesn't sweep
+  // the store; the adapter's hydrate path filters expired rows out
+  // of reads, but the table grows without this. Once an hour is
+  // plenty for an adapter that's only active when public mode is on.
+  const reaper = setInterval(
+    () => {
+      reapExpiredOidcPayloads(storage).catch(() => undefined);
+    },
+    60 * 60 * 1000
+  );
+  reaper.unref();
+
+  // Surface library errors to stderr so 500 responses don't hide
+  // their cause behind a generic "oops" body. oidc-provider emits a
+  // `server_error` event with the original Error attached.
+  provider.on('server_error', (_ctx, err) => {
+    process.stderr.write(`oidc-provider error: ${err.stack ?? err.message}\n`);
+  });
+
+  // Provider extends Koa — `.callback()` returns a Node request listener.
+  // We mount it inside a Fastify plugin that strips Fastify's
+  // built-in body parsers, so oidc-provider's koa stack can read the
+  // request stream directly. Without that, Fastify's JSON / formbody
+  // parsers consume `req.raw` before our handler runs, and the
+  // library reports "redirect_uris is mandatory" / similar shape
+  // errors because its body parser sees an empty payload.
+  const oidcCallback = provider.callback();
+  await app.register(
+    async (instance) => {
+      instance.removeAllContentTypeParsers();
+      instance.addContentTypeParser('*', (_req, _payload, done) => {
+        // No-op: leave the underlying stream intact for oidc-provider.
+        done(null, undefined);
+      });
+
+      const handler = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+        reply.hijack();
+        await new Promise<void>((resolve, reject) => {
+          reply.raw.on('finish', resolve);
+          reply.raw.on('close', resolve);
+          reply.raw.on('error', reject);
+          oidcCallback(req.raw, reply.raw);
+        });
+      };
+
+      // Library-owned routes. Use wildcards so resume paths like
+      // /oauth/authorize/<uid> (which oidc-provider mounts as a
+      // sub-route of /oauth/authorize) also reach the library.
+      // Consent UI is /oauth/consent/* — handled by separate Fastify
+      // routes outside this plugin scope and so doesn't collide.
+      const oidcSubpaths = [
+        '/oauth/authorize',
+        '/oauth/authorize/*',
+        '/oauth/token',
+        '/oauth/token/*',
+        '/oauth/register',
+        '/oauth/register/*',
+        '/oauth/revoke',
+        '/oauth/introspection',
+        '/oauth/jwks',
+        '/oauth/session/end',
+        '/oauth/par',
+        '/oauth/backchannel',
+        '/oauth/device',
+        '/oauth/device/verify',
+        '/.well-known/openid-configuration',
+        '/.well-known/oauth-authorization-server'
+      ];
+      for (const path of oidcSubpaths) {
+        instance.all(path, handler);
+      }
+    }
+  );
+
+  // RFC 9728: protected-resource metadata. Lives on the resource
+  // server (us, the MCP host), not the auth server. Points discovering
+  // clients at the issuer so they can pick up its metadata next.
   app.get('/.well-known/oauth-protected-resource', async () => {
     const metadata: ProtectedResourceMetadata = {
       resource: `${opts.issuer}/mcp`,
@@ -130,322 +138,164 @@ export async function mountOAuthRoutes(
     return metadata;
   });
 
-  // ── JWKS ───────────────────────────────────────────────────────────────
-  app.get('/oauth/jwks', async () => ({ keys: [keys.publicJwk] }));
-
-  // ── DCR (RFC 7591) ─────────────────────────────────────────────────────
-  if (opts.dcr !== false) {
-    app.post<{
-      Body: {
-        client_name?: unknown;
-        redirect_uris?: unknown;
-      };
-    }>('/oauth/register', async (req, reply) => {
-      const body = req.body ?? {};
-      const name =
-        typeof body.client_name === 'string' && body.client_name.length > 0
-          ? body.client_name
-          : 'Unnamed client';
-      const redirect_uris = Array.isArray(body.redirect_uris)
-        ? body.redirect_uris.filter((u): u is string => typeof u === 'string')
-        : [];
-      try {
-        const result = await registerClient(
-          storage,
-          {
-            name,
-            redirect_uris,
-            ...(opts.allowedRedirectHosts !== undefined
-              ? { allowed_redirect_hosts: opts.allowedRedirectHosts }
-              : {})
-          },
-          { confidential: false }
-        );
-        // RFC 7591 response shape
-        reply.code(201);
-        return {
-          client_id: result.client_id,
-          client_id_issued_at: Math.floor(result.created_at / 1000),
-          client_name: result.name,
-          redirect_uris: result.redirect_uris,
-          token_endpoint_auth_method: 'none',
-          grant_types: ['authorization_code', 'refresh_token'],
-          response_types: ['code']
-        };
-      } catch (err) {
-        if (err instanceof RegisterClientError) {
-          reply.code(400);
-          return { error: 'invalid_client_metadata', error_description: err.message };
-        }
-        throw err;
-      }
-    });
-  } else {
-    app.post('/oauth/register', async (_req, reply) => {
-      reply.code(403);
-      return {
-        error: 'access_denied',
-        error_description: 'Dynamic Client Registration is disabled on this server.'
-      };
-    });
-  }
-
-  // ── /oauth/authorize — GET renders consent page, POST consumes token ───
-  app.get<{
-    Querystring: {
-      response_type?: string;
-      client_id?: string;
-      redirect_uri?: string;
-      scope?: string;
-      state?: string;
-      code_challenge?: string;
-      code_challenge_method?: string;
-    };
-  }>('/oauth/authorize', async (req, reply) => {
-    const q = req.query;
-    const errors: string[] = [];
-    if (q.response_type !== 'code') errors.push('response_type must be "code"');
-    if (typeof q.client_id !== 'string' || q.client_id.length === 0)
-      errors.push('client_id required');
-    if (typeof q.redirect_uri !== 'string' || q.redirect_uri.length === 0)
-      errors.push('redirect_uri required');
-    if (typeof q.code_challenge !== 'string' || q.code_challenge.length === 0)
-      errors.push('code_challenge required (PKCE)');
-    if (q.code_challenge_method !== 'S256')
-      errors.push('code_challenge_method must be S256');
-    const scope = parseScope(q.scope);
-    if (scope === null) errors.push('scope must be ledric:read or ledric:write');
-    if (errors.length > 0) {
-      reply.code(400).type('text/html');
-      return errorPage(errors);
-    }
-
-    const client = await getClient(storage, q.client_id!);
-    if (client === null || client.info.revoked_at !== null) {
-      reply.code(404).type('text/html');
-      return errorPage(['Unknown or revoked client_id']);
-    }
-    if (!client.info.redirect_uris.includes(q.redirect_uri!)) {
-      reply.code(400).type('text/html');
-      return errorPage(['redirect_uri does not match the registered set for this client']);
-    }
-
-    reply.type('text/html');
-    return consentPage({
-      client_id: q.client_id!,
-      claimed_name: client.info.name,
-      redirect_uri: q.redirect_uri!,
-      scope: scope!,
-      state: q.state ?? '',
-      code_challenge: q.code_challenge!,
-      code_challenge_method: 'S256'
-    });
-  });
-
-  app.post<{
-    Body: {
-      client_id?: string;
-      redirect_uri?: string;
-      scope?: string;
-      state?: string;
-      code_challenge?: string;
-      consent_token?: string;
-    };
-  }>('/oauth/authorize', async (req, reply) => {
-    const b = req.body ?? {};
-    const presented = typeof b.consent_token === 'string' ? b.consent_token : '';
-
-    // Constant-time check + TTL.
-    const fresh = Date.now() - runtime.consentTokenIssuedAt < CONSENT_TOKEN_TTL_MS;
-    const valid = fresh && timingSafeEqual(presented, runtime.consentToken);
-    if (!valid) {
-      // Rotate so a leaked guess can't be replayed even within the TTL.
-      rotateConsentToken(runtime);
-      reply.code(403).type('text/html');
-      return errorPage([
-        'Consent token invalid or expired.',
-        'A fresh token has been printed to the ledric server stderr — copy that and retry.'
-      ]);
-    }
-
-    const scope = parseScope(b.scope);
-    if (
-      scope === null ||
-      typeof b.client_id !== 'string' ||
-      typeof b.redirect_uri !== 'string' ||
-      typeof b.code_challenge !== 'string'
-    ) {
-      reply.code(400).type('text/html');
-      return errorPage(['Missing required fields on the consent form']);
-    }
-
-    const minted = await mintAuthCode(storage, {
-      client_id: b.client_id,
-      redirect_uri: b.redirect_uri,
-      code_challenge: b.code_challenge,
-      scope
-    });
-
-    // Consume the token AFTER successful mint so a partial failure
-    // doesn't burn it for the operator.
-    rotateConsentToken(runtime);
-
-    const target = new URL(b.redirect_uri);
-    target.searchParams.set('code', minted.code);
-    if (typeof b.state === 'string' && b.state.length > 0) {
-      target.searchParams.set('state', b.state);
-    }
-    return reply.redirect(target.toString(), 302);
-  });
-
-  // ── /oauth/token — code or refresh exchange ────────────────────────────
-  app.post<{
-    Body: {
-      grant_type?: string;
-      code?: string;
-      redirect_uri?: string;
-      client_id?: string;
-      code_verifier?: string;
-      refresh_token?: string;
-    };
-  }>('/oauth/token', async (req, reply) => {
-    const b = req.body ?? {};
-    if (b.grant_type === 'authorization_code') {
-      if (
-        typeof b.code !== 'string' ||
-        typeof b.client_id !== 'string' ||
-        typeof b.redirect_uri !== 'string' ||
-        typeof b.code_verifier !== 'string'
-      ) {
-        reply.code(400);
-        return { error: 'invalid_request', error_description: 'missing required field' };
-      }
-      try {
-        const consumed = await consumeAuthCode(storage, {
-          code: b.code,
-          client_id: b.client_id,
-          redirect_uri: b.redirect_uri,
-          code_verifier: b.code_verifier
-        });
-        const pair = await mintTokens(
-          storage,
-          keys,
-          {
-            issuer: opts.issuer,
-            ...(opts.accessTokenTtlSeconds !== undefined
-              ? { accessTtlSeconds: opts.accessTokenTtlSeconds }
-              : {}),
-            ...(opts.refreshTokenTtlSeconds !== undefined
-              ? { refreshTtlSeconds: opts.refreshTokenTtlSeconds }
-              : {})
-          },
-          { client_id: consumed.client_id, scope: consumed.scope }
-        );
-        return pair;
-      } catch (err) {
-        if (err instanceof AuthCodeError) {
-          reply.code(400);
-          return { error: err.code, error_description: err.message };
-        }
-        throw err;
-      }
-    }
-
-    if (b.grant_type === 'refresh_token') {
-      if (typeof b.refresh_token !== 'string') {
-        reply.code(400);
-        return { error: 'invalid_request', error_description: 'refresh_token required' };
-      }
-      const stored = await findRefreshToken(storage, b.refresh_token);
-      if (stored === null) {
-        reply.code(400);
-        return { error: 'invalid_grant', error_description: 'unknown refresh token' };
-      }
-      if (stored.revoked_at !== null) {
-        // Replay attack: someone is presenting an already-rotated token.
-        // Walk the lineage forward and revoke any descendants too.
-        await revokeLineage(storage, stored.token_hash);
-        reply.code(400);
-        return {
-          error: 'invalid_grant',
-          error_description: 'refresh token was already rotated; lineage revoked'
-        };
-      }
-      if (stored.expires_at < Date.now()) {
-        reply.code(400);
-        return { error: 'invalid_grant', error_description: 'refresh token expired' };
-      }
-      // Mark the offered token revoked first so it can't be reused.
-      await revokeRefreshToken(storage, b.refresh_token);
-      const pair = await mintTokens(
-        storage,
-        keys,
-        {
-          issuer: opts.issuer,
-          ...(opts.accessTokenTtlSeconds !== undefined
-            ? { accessTtlSeconds: opts.accessTokenTtlSeconds }
-            : {}),
-          ...(opts.refreshTokenTtlSeconds !== undefined
-            ? { refreshTtlSeconds: opts.refreshTokenTtlSeconds }
-            : {})
-        },
-        {
-          client_id: stored.client_id,
-          scope: stored.scope,
-          parent_token_hash: stored.token_hash
-        }
-      );
-      return pair;
-    }
-
-    reply.code(400);
-    return { error: 'unsupported_grant_type', error_description: `grant_type=${b.grant_type}` };
-  });
-
-  // ── /oauth/revoke (RFC 7009) ───────────────────────────────────────────
-  app.post<{ Body: { token?: string; token_type_hint?: string } }>(
-    '/oauth/revoke',
+  // ── Consent UI (interactions handler) ───────────────────────────────────
+  // oidc-provider redirects unauthenticated authorize requests to
+  // `/oauth/consent/:uid`. We render a minimal HTML form, the operator
+  // pastes the admin key, we validate it the same way the auth
+  // middleware does (env-key match OR sha256 lookup against api_keys),
+  // then `provider.interactionFinished()` resumes the flow with a
+  // login + consent grant for the synthetic 'operator' account.
+  app.get<{ Params: { uid: string } }>(
+    '/oauth/consent/:uid',
     async (req, reply) => {
-      const token = typeof req.body?.token === 'string' ? req.body.token : '';
-      if (token.length === 0) {
-        reply.code(200);
-        // RFC 7009: 200 even on no-op so attackers can't probe for valid tokens.
-        return {};
+      try {
+        const details = await provider.interactionDetails(req.raw, reply.raw);
+        const params = details.params as Record<string, string | undefined>;
+        const clientId = typeof params.client_id === 'string' ? params.client_id : '';
+        const client = clientId.length > 0
+          ? await provider.Client.find(clientId)
+          : undefined;
+        const scope = typeof params.scope === 'string' ? params.scope : '';
+        const role = inferRole(scope);
+        reply.type('text/html');
+        return consentPage({
+          uid: details.uid,
+          client_id: clientId,
+          claimed_name: client?.clientName ?? '(no name registered)',
+          redirect_uri: typeof params.redirect_uri === 'string' ? params.redirect_uri : '',
+          scope,
+          role,
+          error: null
+        });
+      } catch (err) {
+        reply.code(400).type('text/html');
+        return errorPage([
+          'Could not look up the interaction.',
+          err instanceof Error ? err.message : String(err)
+        ]);
       }
-      // Try refresh token first; access tokens are JWTs and can't be
-      // revoked server-side without a denylist (out of scope for v1).
-      await revokeRefreshToken(storage, token);
-      reply.code(200);
-      return {};
     }
   );
 
-  return { verify };
+  app.post<{
+    Params: { uid: string };
+    Body: { admin_key?: string };
+  }>('/oauth/consent/:uid', async (req, reply) => {
+    let details;
+    try {
+      details = await provider.interactionDetails(req.raw, reply.raw);
+    } catch (err) {
+      reply.code(400).type('text/html');
+      return errorPage([
+        'Interaction expired or not found — restart the flow from your client.',
+        err instanceof Error ? err.message : String(err)
+      ]);
+    }
+
+    const presented = typeof req.body?.admin_key === 'string' ? req.body.admin_key.trim() : '';
+    const ok = await verifyAdminKey(storage, presented);
+    if (!ok) {
+      const params = details.params as Record<string, string | undefined>;
+      const clientId = typeof params.client_id === 'string' ? params.client_id : '';
+      const client = clientId.length > 0
+        ? await provider.Client.find(clientId)
+        : undefined;
+      const scope = typeof params.scope === 'string' ? params.scope : '';
+      reply.code(403).type('text/html');
+      return consentPage({
+        uid: details.uid,
+        client_id: clientId,
+        claimed_name: client?.clientName ?? '(no name registered)',
+        redirect_uri: typeof params.redirect_uri === 'string' ? params.redirect_uri : '',
+        scope,
+        role: inferRole(scope),
+        error: 'Admin key invalid. Try again.'
+      });
+    }
+
+    const params = details.params as Record<string, string | undefined>;
+    const requestedScopes =
+      typeof params.scope === 'string' ? params.scope.split(/\s+/).filter(Boolean) : [];
+    const clientId = typeof params.client_id === 'string' ? params.client_id : '';
+
+    // Mint a Grant with the requested scopes attached.
+    const grant = new provider.Grant({ accountId: 'operator', clientId });
+    grant.addOIDCScope(requestedScopes.join(' '));
+    if (typeof params.resource === 'string') {
+      grant.addResourceScope(params.resource, requestedScopes.join(' '));
+    } else {
+      grant.addResourceScope(`${opts.issuer}/mcp`, requestedScopes.join(' '));
+    }
+    const grantId = await grant.save();
+
+    // interactionFinished writes the 303 redirect response itself.
+    // We must hand it the raw Node response (Fastify already lets us
+    // do that via reply.raw) and stop Fastify from sending its own.
+    reply.hijack();
+    await provider.interactionFinished(
+      req.raw,
+      reply.raw,
+      {
+        login: { accountId: 'operator' },
+        consent: { grantId }
+      },
+      { mergeWithLastSubmission: false }
+    );
+  });
+
+  // JWKS verifier — cached for the lifetime of the http server.
+  const jwks = createRemoteJWKSet(new URL(`${opts.issuer}/oauth/jwks`));
+  const verify: AccessTokenVerifier = async (token) => {
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: opts.issuer,
+      audience: `${opts.issuer}/mcp`
+    });
+    return {
+      iss: String(payload.iss),
+      aud: payload.aud as string | string[],
+      sub: String(payload.sub),
+      scope: typeof payload['scope'] === 'string' ? payload['scope'] : '',
+      iat: Number(payload.iat),
+      exp: Number(payload.exp)
+    };
+  };
+
+  return {
+    verify,
+    close: () => clearInterval(reaper)
+  };
 }
 
-function parseScope(raw: string | undefined): Scope | null {
-  if (typeof raw !== 'string' || raw.length === 0) return null;
-  // OAuth scope is space-separated; we accept exactly one of our two.
-  const trimmed = raw.trim();
-  if (trimmed === 'ledric:read' || trimmed === 'ledric:write') {
-    return trimmed;
-  }
-  return null;
+async function verifyAdminKey(storage: LedricStorage, presented: string): Promise<boolean> {
+  if (presented.length === 0) return false;
+  if (process.env.LEDRIC_ADMIN_KEY === presented) return true;
+  const found = await storage.findApiKeyByHash(hashApiKey(presented));
+  return Boolean(found && found.role === 'admin' && found.revoked_at === null);
+}
+
+function inferRole(scope: string): string {
+  // Resource-server projects scope→role; consent UI just shows the
+  // user-friendly name. Highest scope wins on a multi-scope request.
+  if (scope.includes('ledric:write')) return SCOPE_TO_ROLE['ledric:write'];
+  if (scope.includes('ledric:read')) return SCOPE_TO_ROLE['ledric:read'];
+  return '(unrecognised scope)';
 }
 
 interface ConsentPageVars {
+  uid: string;
   client_id: string;
   claimed_name: string;
   redirect_uri: string;
-  scope: Scope;
-  state: string;
-  code_challenge: string;
-  code_challenge_method: 'S256';
+  scope: string;
+  role: string;
+  error: string | null;
 }
 
 function consentPage(v: ConsentPageVars): string {
-  const role = SCOPE_TO_ROLE[v.scope];
   const e = htmlEscape;
+  const errorBlock = v.error
+    ? `<p style="color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;padding:0.6em 1em;border-radius:4px">${e(v.error)}</p>`
+    : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -463,7 +313,7 @@ function consentPage(v: ConsentPageVars): string {
     .scope { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 0.85rem; }
     form { margin-top: 2em; padding-top: 1.5em; border-top: 1px solid #e4e4e7; }
     label { display: block; margin-bottom: 0.5em; }
-    input[type=text] { width: 100%; padding: 0.6em; font-family: ui-monospace, monospace; font-size: 1rem; box-sizing: border-box; border: 1px solid #d4d4d8; border-radius: 4px; }
+    input[type=password] { width: 100%; padding: 0.6em; font-family: ui-monospace, monospace; font-size: 1rem; box-sizing: border-box; border: 1px solid #d4d4d8; border-radius: 4px; }
     button { margin-top: 1em; padding: 0.6em 1.2em; background: #18181b; color: white; border: 0; border-radius: 4px; font: inherit; cursor: pointer; }
     .hint { color: #71717a; font-size: 0.85rem; margin-top: 0.4em; }
   </style>
@@ -471,22 +321,17 @@ function consentPage(v: ConsentPageVars): string {
 <body>
   <h1>Authorize an MCP client</h1>
   <p>A client is asking ledric for an access token. Verify <em>everything</em> below before approving — the display name comes from the client itself and isn't trusted.</p>
+  ${errorBlock}
   <dl>
     <dt>Display name</dt><dd class="claimed">${e(v.claimed_name)} <span class="untrusted">(claimed by client; not verified)</span></dd>
     <dt>client_id</dt><dd>${e(v.client_id)}</dd>
     <dt>Redirect</dt><dd>${e(v.redirect_uri)}</dd>
-    <dt>Scope</dt><dd><span class="scope">${e(v.scope)}</span> — maps to ledric role <strong>${role}</strong></dd>
+    <dt>Scope</dt><dd><span class="scope">${e(v.scope)}</span> — maps to ledric role <strong>${e(v.role)}</strong></dd>
   </dl>
-  <form method="POST" action="/oauth/authorize">
-    <input type="hidden" name="client_id" value="${e(v.client_id)}">
-    <input type="hidden" name="redirect_uri" value="${e(v.redirect_uri)}">
-    <input type="hidden" name="scope" value="${e(v.scope)}">
-    <input type="hidden" name="state" value="${e(v.state)}">
-    <input type="hidden" name="code_challenge" value="${e(v.code_challenge)}">
-    <input type="hidden" name="code_challenge_method" value="${e(v.code_challenge_method)}">
-    <label for="consent_token">Consent token (printed to your ledric server's stderr at boot)</label>
-    <input id="consent_token" name="consent_token" type="text" autocomplete="off" autofocus required>
-    <p class="hint">If you don't see one, look in the terminal running <code>ledric serve --public-mcp</code>. Tokens rotate after each use.</p>
+  <form method="POST" action="/oauth/consent/${e(v.uid)}">
+    <label for="admin_key">Paste your ledric admin key (from <code>.env.local</code>) to approve</label>
+    <input id="admin_key" name="admin_key" type="password" autocomplete="off" autofocus required>
+    <p class="hint">The admin key is the operator credential — same one in your <code>LEDRIC_ADMIN_KEY</code> env var.</p>
     <button type="submit">Approve</button>
   </form>
 </body>
@@ -508,15 +353,4 @@ function htmlEscape(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/**
- * Used by tests to swap in their own consent token without scraping
- * stderr. Returns the current token so test fixtures can submit
- * forms against it deterministically.
- */
-export function _testGetConsentToken(_app: FastifyInstance): never {
-  // Placeholder — the runtime is closed over inside mountOAuthRoutes.
-  // Tests use the printToStderr capture to grab the token instead.
-  throw new Error('use printToStderr to capture the token in tests');
-}
-
-export type { FastifyRequest, FastifyReply };
+export type { Scope, FastifyRequest, FastifyReply };

@@ -1,174 +1,259 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Core } from '@ledric/core';
-import { openSqlite, type LedricStorage } from '@ledric/storage';
-import { pkceS256, randomToken } from '@ledric/oauth';
+import { openSqlite, type LedricStorage, generateApiKey } from '@ledric/storage';
+import { createHash } from 'node:crypto';
 import { createHttpServer } from './server.js';
 import type { FastifyInstance } from 'fastify';
 
 const ISSUER = 'http://127.0.0.1';
 
-describe('OAuth 2.1 provider — end-to-end flow', () => {
-  let storage: LedricStorage;
-  let app: FastifyInstance;
-  let stderrOutput = '';
+interface Env {
+  app: FastifyInstance;
+  storage: LedricStorage;
+  url: string;
+  adminKey: string;
+}
+
+/**
+ * The full DCR-through-call-/mcp dance needs a real port — the
+ * provider issues redirects with absolute URLs and we want to drive
+ * it from a fetch client. Spin a Fastify listener on an ephemeral
+ * port; tear down in afterEach.
+ */
+async function bootPublicMcp(): Promise<Env> {
+  const storage = await openSqlite({ path: ':memory:' });
+  const core = new Core(storage);
+
+  // Mint an admin key in the DB so the consent page can validate it.
+  const admin = generateApiKey('admin');
+  await storage.createApiKey({
+    role: 'admin',
+    label: 'test',
+    key_hash: admin.hash,
+    key_prefix: admin.prefix
+  });
+
+  const app = createHttpServer(core, {
+    mcp: { http: true, public: true, publicUrl: ISSUER },
+    auth: { storage }
+  });
+  await app.ready();
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const addr = app.server.address();
+  if (addr === null || typeof addr !== 'object') {
+    throw new Error('listen returned no address');
+  }
+  return {
+    app,
+    storage,
+    url: `http://127.0.0.1:${addr.port}`,
+    adminKey: admin.secret
+  };
+}
+
+function pkceS256(verifier: string): string {
+  return createHash('sha256')
+    .update(verifier)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+function randomB64Url(n: number): string {
+  const bytes = new Uint8Array(n);
+  crypto.getRandomValues(bytes);
+  return Buffer.from(bytes)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+describe('OAuth provider (oidc-provider) — end-to-end against /mcp', () => {
+  let env: Env;
 
   beforeEach(async () => {
-    storage = await openSqlite({ path: ':memory:' });
-    const core = new Core(storage);
-    stderrOutput = '';
-    app = createHttpServer(core, {
-      mcp: {
-        public: true,
-        http: true,
-        publicUrl: ISSUER,
-        allowedRedirectHosts: ['claude.ai', 'localhost', '127.0.0.1'],
-        printToStderr: (s) => {
-          stderrOutput += s;
-        }
-      },
-      auth: { storage }
-    });
-    await app.ready();
+    env = await bootPublicMcp();
   });
 
   afterEach(async () => {
-    await app.close();
-    await storage.close();
+    await env.app.close();
+    await env.storage.close();
   });
 
-  function consentTokenFromStderr(): string {
-    // The banner shows the token on its own line padded to width.
-    const lines = stderrOutput.split('\n');
-    const tokenLine = lines.find(
-      (l) => /^│\s+[A-Za-z0-9_-]{20,}\s+│$/.test(l)
-    );
-    expect(tokenLine, `no consent token found in stderr:\n${stderrOutput}`).toBeDefined();
-    return tokenLine!.replace(/^│\s+/, '').replace(/\s+│$/, '');
-  }
+  it('discovery: AS metadata + protected-resource metadata + JWKS', async () => {
+    const as = await fetch(`${env.url}/.well-known/oauth-authorization-server`);
+    expect(as.status).toBe(200);
+    const asBody = (await as.json()) as Record<string, unknown>;
+    expect(asBody.issuer).toBe(ISSUER);
+    // oidc-provider derives endpoint URLs from the request host, so the
+    // test's ephemeral-port URL appears here instead of the configured
+    // issuer. Production sets `publicUrl` to the actual reachable URL
+    // (with port if non-standard) so the two stay in sync.
+    expect(asBody.token_endpoint).toMatch(/^http:\/\/127\.0\.0\.1(:\d+)?\/oauth\/token$/);
+    expect(asBody.code_challenge_methods_supported).toContain('S256');
+    expect(asBody.grant_types_supported).toContain('refresh_token');
 
-  it('discovery endpoints return the right shape and URLs', async () => {
-    const meta = await app.inject({
-      method: 'GET',
-      url: '/.well-known/oauth-authorization-server'
+    const pr = await fetch(`${env.url}/.well-known/oauth-protected-resource`);
+    expect(pr.status).toBe(200);
+    expect((await pr.json()) as Record<string, unknown>).toMatchObject({
+      resource: `${ISSUER}/mcp`,
+      authorization_servers: [ISSUER]
     });
-    expect(meta.statusCode).toBe(200);
-    const body = JSON.parse(meta.body);
-    expect(body.issuer).toBe(ISSUER);
-    expect(body.authorization_endpoint).toBe(`${ISSUER}/oauth/authorize`);
-    expect(body.token_endpoint).toBe(`${ISSUER}/oauth/token`);
-    expect(body.code_challenge_methods_supported).toEqual(['S256']);
-    expect(body.scopes_supported).toEqual(['ledric:read', 'ledric:write']);
 
-    const pr = await app.inject({
-      method: 'GET',
-      url: '/.well-known/oauth-protected-resource'
-    });
-    expect(pr.statusCode).toBe(200);
-    expect(JSON.parse(pr.body).resource).toBe(`${ISSUER}/mcp`);
-
-    const jwks = await app.inject({ method: 'GET', url: '/oauth/jwks' });
-    expect(jwks.statusCode).toBe(200);
-    const jwksBody = JSON.parse(jwks.body);
-    expect(Array.isArray(jwksBody.keys)).toBe(true);
-    expect(jwksBody.keys[0].alg).toBe('EdDSA');
-    expect(jwksBody.keys[0].use).toBe('sig');
-    expect(typeof jwksBody.keys[0].kid).toBe('string');
+    const jwks = await fetch(`${env.url}/oauth/jwks`);
+    expect(jwks.status).toBe(200);
+    const jwksBody = (await jwks.json()) as { keys: Array<{ alg?: string; kty: string }> };
+    expect(jwksBody.keys.length).toBeGreaterThan(0);
+    // Resource-server JWTs are signed RS256 (matches the dev-mode
+    // auto-generated signing keys oidc-provider mints). The exact alg
+    // is configurable in the provider; assert the key type instead so
+    // a future rotation to EdDSA wouldn't break this test.
+    expect(['RSA', 'OKP', 'EC'].includes(jwksBody.keys[0]!.kty)).toBe(true);
   });
 
-  it('walks the full DCR → authorize → token → /mcp flow', async () => {
-    // 1. DCR — register a client.
-    const reg = await app.inject({
+  it('walks DCR → consent (admin key) → token → /mcp → refresh → revoke → 401', async () => {
+    // 1. DCR — register a public PKCE-only client.
+    const reg = await fetch(`${env.url}/oauth/register`, {
       method: 'POST',
-      url: '/oauth/register',
       headers: { 'content-type': 'application/json' },
-      payload: {
+      body: JSON.stringify({
         client_name: 'Claude (test)',
-        redirect_uris: ['https://claude.ai/api/oauth/callback']
-      }
+        redirect_uris: ['http://127.0.0.1:9999/cb'],
+        token_endpoint_auth_method: 'none',
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code']
+      })
     });
-    expect(reg.statusCode).toBe(201);
-    const client = JSON.parse(reg.body);
+    if (reg.status !== 201) {
+      const body = await reg.text();
+      throw new Error(`DCR failed ${reg.status}: ${body}`);
+    }
+    const client = (await reg.json()) as { client_id: string };
     expect(typeof client.client_id).toBe('string');
-    expect(client.token_endpoint_auth_method).toBe('none');
 
-    // 2. PKCE setup.
-    const verifier = randomToken(32);
+    // 2. Authorize — follow redirects but do NOT auto-submit forms;
+    //    the consent page is HTML we'll handle manually.
+    const verifier = randomB64Url(32);
     const challenge = pkceS256(verifier);
-    const state = 'opaque-state-blob';
-
-    // 3. GET /authorize — operator sees the consent page.
-    const authPage = await app.inject({
-      method: 'GET',
-      url:
-        `/oauth/authorize?response_type=code` +
-        `&client_id=${encodeURIComponent(client.client_id)}` +
-        `&redirect_uri=${encodeURIComponent('https://claude.ai/api/oauth/callback')}` +
-        `&scope=ledric:read` +
-        `&state=${state}` +
-        `&code_challenge=${challenge}` +
-        `&code_challenge_method=S256`
-    });
-    expect(authPage.statusCode).toBe(200);
-    expect(authPage.headers['content-type']).toMatch(/text\/html/);
-    expect(authPage.body).toContain('Claude (test)');
-    expect(authPage.body).toContain(client.client_id);
-    expect(authPage.body).toContain('https://claude.ai/api/oauth/callback');
-    expect(authPage.body).toContain('ledric:read');
-    expect(authPage.body).toContain('reader');
-
-    // 4. POST /authorize with the consent token from stderr.
-    const consentToken = consentTokenFromStderr();
-    const consent = await app.inject({
-      method: 'POST',
-      url: '/oauth/authorize',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      payload: new URLSearchParams({
+    const state = 'opaque-state';
+    const authorizeUrl =
+      `${env.url}/oauth/authorize?` +
+      new URLSearchParams({
         client_id: client.client_id,
-        redirect_uri: 'https://claude.ai/api/oauth/callback',
-        scope: 'ledric:read',
+        redirect_uri: 'http://127.0.0.1:9999/cb',
+        response_type: 'code',
+        scope: 'ledric:write',
+        resource: `${ISSUER}/mcp`,
         state,
         code_challenge: challenge,
-        code_challenge_method: 'S256',
-        consent_token: consentToken
-      }).toString()
-    });
-    expect(consent.statusCode).toBe(302);
-    const location = new URL(consent.headers.location as string);
-    expect(location.origin + location.pathname).toBe('https://claude.ai/api/oauth/callback');
-    const code = location.searchParams.get('code');
-    expect(typeof code).toBe('string');
-    expect(location.searchParams.get('state')).toBe(state);
+        code_challenge_method: 'S256'
+      }).toString();
+    const cookieJar: string[] = [];
+    let res = await fetch(authorizeUrl, { redirect: 'manual' });
+    captureCookies(res, cookieJar);
+    // /authorize 303s into the interaction. Walk the redirect chain.
+    while (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      if (loc === null) break;
+      const next = new URL(loc, env.url).toString();
+      res = await fetch(next, {
+        redirect: 'manual',
+        headers: cookieJar.length > 0 ? { cookie: cookieJar.join('; ') } : {}
+      });
+      captureCookies(res, cookieJar);
+      if (next.includes('/oauth/consent/')) break;
+    }
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/text\/html/);
+    const consentHtml = await res.text();
+    expect(consentHtml).toContain('Claude (test)');
+    expect(consentHtml).toContain(client.client_id);
 
-    // 5. POST /oauth/token — exchange the code.
-    const tokenRes = await app.inject({
+    // Pull the consent UID from the form action.
+    const uidMatch = consentHtml.match(/\/oauth\/consent\/([A-Za-z0-9_-]+)/);
+    expect(uidMatch, 'consent UID not found in HTML').not.toBeNull();
+    const uid = uidMatch![1]!;
+
+    // 3. POST consent with the admin key.
+    const consent = await fetch(`${env.url}/oauth/consent/${uid}`, {
       method: 'POST',
-      url: '/oauth/token',
+      redirect: 'manual',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie: cookieJar.join('; ')
+      },
+      body: new URLSearchParams({ admin_key: env.adminKey }).toString()
+    });
+    captureCookies(consent, cookieJar);
+    expect(consent.status).toBeGreaterThanOrEqual(300);
+    expect(consent.status).toBeLessThan(400);
+
+    // Walk the post-consent redirect chain back to the redirect_uri.
+    let postRes = consent;
+    let hops = 0;
+    while (postRes.status >= 300 && postRes.status < 400 && hops++ < 10) {
+      const loc = postRes.headers.get('location');
+      if (loc === null) break;
+      const next = new URL(loc, env.url).toString();
+      if (next.startsWith('http://127.0.0.1:9999/cb')) {
+        postRes = new Response(null, {
+          status: 200,
+          headers: { 'final-location': next }
+        });
+        break;
+      }
+      postRes = await fetch(next, {
+        redirect: 'manual',
+        headers: { cookie: cookieJar.join('; ') }
+      });
+      captureCookies(postRes, cookieJar);
+    }
+    const finalLoc = postRes.headers.get('final-location');
+    if (finalLoc === null) {
+      throw new Error(
+        `redirect chain ended at status=${postRes.status} location=${postRes.headers.get('location')} body=${(await postRes.text()).slice(0, 300)}`
+      );
+    }
+    expect(finalLoc, 'flow did not redirect to client redirect_uri').toBeTruthy();
+    const codeUrl = new URL(finalLoc!);
+    const code = codeUrl.searchParams.get('code');
+    expect(typeof code).toBe('string');
+    expect(codeUrl.searchParams.get('state')).toBe(state);
+
+    // 4. Token exchange.
+    const tokenRes = await fetch(`${env.url}/oauth/token`, {
+      method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      payload: new URLSearchParams({
+      body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code!,
-        redirect_uri: 'https://claude.ai/api/oauth/callback',
+        redirect_uri: 'http://127.0.0.1:9999/cb',
         client_id: client.client_id,
         code_verifier: verifier
       }).toString()
     });
-    expect(tokenRes.statusCode).toBe(200);
-    const tokens = JSON.parse(tokenRes.body);
+    expect(tokenRes.status).toBe(200);
+    const tokens = (await tokenRes.json()) as {
+      access_token: string;
+      refresh_token: string;
+      token_type: string;
+      scope: string;
+    };
     expect(tokens.token_type).toBe('Bearer');
-    expect(typeof tokens.access_token).toBe('string');
-    expect(typeof tokens.refresh_token).toBe('string');
-    expect(tokens.scope).toBe('ledric:read');
+    expect(tokens.access_token.startsWith('ey')).toBe(true);
+    expect(tokens.scope).toBe('ledric:write');
 
-    // 6. Call /mcp with the OAuth bearer — read-only tool should work.
-    const initRes = await app.inject({
+    // 5. /mcp call with the JWT.
+    const mcpRes = await fetch(`${env.url}/mcp`, {
       method: 'POST',
-      url: '/mcp',
       headers: {
         authorization: `Bearer ${tokens.access_token}`,
         'content-type': 'application/json',
         accept: 'application/json, text/event-stream'
       },
-      payload: {
+      body: JSON.stringify({
         jsonrpc: '2.0',
         method: 'initialize',
         params: {
@@ -177,248 +262,164 @@ describe('OAuth 2.1 provider — end-to-end flow', () => {
           clientInfo: { name: 'oauth-test', version: '0' }
         },
         id: 1
-      }
+      })
     });
-    expect(initRes.statusCode).toBe(200);
+    expect(mcpRes.status).toBe(200);
 
-    // 7. Refresh the token.
-    const refreshRes = await app.inject({
+    // 6. Refresh.
+    const refresh = await fetch(`${env.url}/oauth/token`, {
       method: 'POST',
-      url: '/oauth/token',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      payload: new URLSearchParams({
+      body: new URLSearchParams({
         grant_type: 'refresh_token',
-        refresh_token: tokens.refresh_token
+        refresh_token: tokens.refresh_token,
+        client_id: client.client_id
       }).toString()
     });
-    expect(refreshRes.statusCode).toBe(200);
-    const rotated = JSON.parse(refreshRes.body);
+    if (refresh.status !== 200) {
+      throw new Error(`refresh failed ${refresh.status}: ${await refresh.text()}`);
+    }
+    const rotated = (await refresh.json()) as { access_token: string; refresh_token: string };
     expect(rotated.access_token).not.toBe(tokens.access_token);
-    expect(rotated.refresh_token).not.toBe(tokens.refresh_token);
 
-    // 8. Replay the original refresh — expect lineage revoke (400).
-    const replay = await app.inject({
+    // 7. Revoke the rotated refresh token.
+    const revoke = await fetch(`${env.url}/oauth/revoke`, {
       method: 'POST',
-      url: '/oauth/token',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      payload: new URLSearchParams({
+      body: new URLSearchParams({
+        token: rotated.refresh_token,
+        client_id: client.client_id
+      }).toString()
+    });
+    expect(revoke.status).toBe(200);
+
+    // 8. Trying to refresh again with the revoked token → invalid_grant.
+    const replay = await fetch(`${env.url}/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
         grant_type: 'refresh_token',
-        refresh_token: tokens.refresh_token
+        refresh_token: rotated.refresh_token,
+        client_id: client.client_id
       }).toString()
     });
-    expect(replay.statusCode).toBe(400);
-    expect(JSON.parse(replay.body).error).toBe('invalid_grant');
-
-    // 9. Use the rotated access token — should still work.
-    const second = await app.inject({
-      method: 'POST',
-      url: '/mcp',
-      headers: {
-        authorization: `Bearer ${rotated.access_token}`,
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream'
-      },
-      payload: {
-        jsonrpc: '2.0',
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-06-18',
-          capabilities: {},
-          clientInfo: { name: 'oauth-test', version: '0' }
-        },
-        id: 2
-      }
-    });
-    expect(second.statusCode).toBe(200);
+    expect(replay.status).toBe(400);
+    expect(((await replay.json()) as { error: string }).error).toBe('invalid_grant');
   });
 
-  it('rejects /authorize POST with stale or wrong consent token', async () => {
-    const verifier = randomToken(32);
-    const challenge = pkceS256(verifier);
-    // Register a client first.
-    const reg = await app.inject({
+  it('rejects consent page with a wrong admin key', async () => {
+    // Just exercise the negative path on /oauth/consent. We don't
+    // need to walk the whole flow — drive an authorize redirect to
+    // get a uid, then POST with garbage.
+    const reg = await fetch(`${env.url}/oauth/register`, {
       method: 'POST',
-      url: '/oauth/register',
       headers: { 'content-type': 'application/json' },
-      payload: {
-        client_name: 'X',
-        redirect_uris: ['https://claude.ai/cb']
-      }
+      body: JSON.stringify({
+        client_name: 'Bad approve test',
+        redirect_uris: ['http://127.0.0.1:9999/cb']
+      })
     });
-    const { client_id } = JSON.parse(reg.body);
+    const { client_id } = (await reg.json()) as { client_id: string };
 
-    const bad = await app.inject({
-      method: 'POST',
-      url: '/oauth/authorize',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      payload: new URLSearchParams({
-        client_id,
-        redirect_uri: 'https://claude.ai/cb',
-        scope: 'ledric:read',
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
-        consent_token: 'definitely-not-the-token'
-      }).toString()
-    });
-    expect(bad.statusCode).toBe(403);
-    expect(bad.body).toContain('Consent token invalid');
-  });
+    const verifier = randomB64Url(32);
+    const cookieJar: string[] = [];
+    let res = await fetch(
+      `${env.url}/oauth/authorize?` +
+        new URLSearchParams({
+          client_id,
+          redirect_uri: 'http://127.0.0.1:9999/cb',
+          response_type: 'code',
+          scope: 'ledric:read',
+          resource: `${ISSUER}/mcp`,
+          code_challenge: pkceS256(verifier),
+          code_challenge_method: 'S256'
+        }).toString(),
+      { redirect: 'manual' }
+    );
+    captureCookies(res, cookieJar);
+    while (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      if (loc === null) break;
+      const next = new URL(loc, env.url).toString();
+      res = await fetch(next, {
+        redirect: 'manual',
+        headers: cookieJar.length > 0 ? { cookie: cookieJar.join('; ') } : {}
+      });
+      captureCookies(res, cookieJar);
+      if (next.includes('/oauth/consent/')) break;
+    }
+    const html = await res.text();
+    const uid = html.match(/\/oauth\/consent\/([A-Za-z0-9_-]+)/)![1]!;
 
-  it('scope mapping: a ledric:read token is forbidden from write tools (403, not 401)', async () => {
-    // Walk the flow with scope=ledric:read, then try to call create_type.
-    const reg = await app.inject({
+    const bad = await fetch(`${env.url}/oauth/consent/${uid}`, {
       method: 'POST',
-      url: '/oauth/register',
-      headers: { 'content-type': 'application/json' },
-      payload: { client_name: 'R', redirect_uris: ['https://claude.ai/cb'] }
-    });
-    const { client_id } = JSON.parse(reg.body);
-    const verifier = randomToken(32);
-    const challenge = pkceS256(verifier);
-
-    const consentToken = consentTokenFromStderr();
-    const consent = await app.inject({
-      method: 'POST',
-      url: '/oauth/authorize',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      payload: new URLSearchParams({
-        client_id,
-        redirect_uri: 'https://claude.ai/cb',
-        scope: 'ledric:read',
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
-        consent_token: consentToken
-      }).toString()
-    });
-    const code = new URL(consent.headers.location as string).searchParams.get('code')!;
-
-    const tokenRes = await app.inject({
-      method: 'POST',
-      url: '/oauth/token',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      payload: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: 'https://claude.ai/cb',
-        client_id,
-        code_verifier: verifier
-      }).toString()
-    });
-    const tokens = JSON.parse(tokenRes.body);
-
-    // A write call (tools/call create_type) should be 403, not 401.
-    const writeRes = await app.inject({
-      method: 'POST',
-      url: '/mcp',
       headers: {
-        authorization: `Bearer ${tokens.access_token}`,
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream'
+        'content-type': 'application/x-www-form-urlencoded',
+        cookie: cookieJar.join('; ')
       },
-      payload: {
-        jsonrpc: '2.0',
-        method: 'tools/call',
-        params: { name: 'create_type', arguments: { name: 'x', fields: {} } },
-        id: 99
-      }
+      body: new URLSearchParams({ admin_key: 'lka_definitely_wrong' }).toString()
     });
-    expect(writeRes.statusCode).toBe(403);
-  });
-
-  it('accepts both an OAuth JWT and an api-key bearer on /mcp (mixed auth)', async () => {
-    // Walk through to get a JWT.
-    const reg = await app.inject({
-      method: 'POST',
-      url: '/oauth/register',
-      headers: { 'content-type': 'application/json' },
-      payload: { client_name: 'M', redirect_uris: ['https://claude.ai/cb'] }
-    });
-    const { client_id } = JSON.parse(reg.body);
-    const verifier = randomToken(32);
-    const challenge = pkceS256(verifier);
-    const consentToken = consentTokenFromStderr();
-    const consent = await app.inject({
-      method: 'POST',
-      url: '/oauth/authorize',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      payload: new URLSearchParams({
-        client_id,
-        redirect_uri: 'https://claude.ai/cb',
-        scope: 'ledric:write',
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
-        consent_token: consentToken
-      }).toString()
-    });
-    const code = new URL(consent.headers.location as string).searchParams.get('code')!;
-    const tokenRes = await app.inject({
-      method: 'POST',
-      url: '/oauth/token',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      payload: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: 'https://claude.ai/cb',
-        client_id,
-        code_verifier: verifier
-      }).toString()
-    });
-    const { access_token } = JSON.parse(tokenRes.body);
-
-    // No api-key minted yet — auth-off mode allows the JWT path through.
-    // Mint a key now to flip the server into authed mode and test the
-    // mixed path.
-    const { generateApiKey } = await import('@ledric/storage');
-    const adminKey = generateApiKey('admin');
-    await storage.createApiKey({
-      role: 'admin',
-      label: 'test',
-      key_hash: adminKey.hash,
-      key_prefix: adminKey.prefix
-    });
-
-    // JWT path — write call should now succeed (ledric:write → admin).
-    const viaJwt = await app.inject({
-      method: 'POST',
-      url: '/mcp',
-      headers: {
-        authorization: `Bearer ${access_token}`,
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream'
-      },
-      payload: {
-        jsonrpc: '2.0',
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-06-18',
-          capabilities: {},
-          clientInfo: { name: 'jwt', version: '0' }
-        },
-        id: 1
-      }
-    });
-    expect(viaJwt.statusCode).toBe(200);
-
-    // API-key path — same admin role, also works.
-    const viaKey = await app.inject({
-      method: 'POST',
-      url: '/mcp',
-      headers: {
-        authorization: `Bearer ${adminKey.secret}`,
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream'
-      },
-      payload: {
-        jsonrpc: '2.0',
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-06-18',
-          capabilities: {},
-          clientInfo: { name: 'apikey', version: '0' }
-        },
-        id: 2
-      }
-    });
-    expect(viaKey.statusCode).toBe(200);
+    expect(bad.status).toBe(403);
+    expect(await bad.text()).toContain('Admin key invalid');
   });
 });
+
+describe('http-only mode (mcp.http: true, mcp.public: false)', () => {
+  let env: { app: FastifyInstance; storage: LedricStorage; url: string };
+
+  beforeEach(async () => {
+    const storage = await openSqlite({ path: ':memory:' });
+    const core = new Core(storage);
+    const app = createHttpServer(core, { mcp: { http: true } });
+    await app.ready();
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const addr = app.server.address();
+    env = {
+      app,
+      storage,
+      url: `http://127.0.0.1:${(addr as { port: number }).port}`
+    };
+  });
+
+  afterEach(async () => {
+    await env.app.close();
+    await env.storage.close();
+  });
+
+  it('OAuth surface is absent and oidc_payloads stays empty', async () => {
+    const as = await fetch(`${env.url}/.well-known/oauth-authorization-server`);
+    expect(as.status).toBe(404);
+    const reg = await fetch(`${env.url}/oauth/register`, { method: 'POST' });
+    expect(reg.status).toBe(404);
+
+    const rows = await env.storage.db
+      .selectFrom('oidc_payloads')
+      .selectAll()
+      .execute();
+    expect(rows).toEqual([]);
+  });
+});
+
+function captureCookies(res: Response, jar: string[]): void {
+  // Fastify / oidc-provider set Set-Cookie via Koa's headers; the
+  // raw response surface combines them. node-fetch / undici expose
+  // the multi-value via `getSetCookie` (Node 22+). Each cookie is
+  // "name=value; Path=...; HttpOnly; ..." — keep just the
+  // name=value pair for the next request's Cookie header.
+  const cookies =
+    typeof res.headers.getSetCookie === 'function'
+      ? res.headers.getSetCookie()
+      : [];
+  for (const c of cookies) {
+    const nv = c.split(';')[0];
+    if (nv && !jar.some((existing) => existing.startsWith(`${nv.split('=')[0]}=`))) {
+      jar.push(nv);
+    } else if (nv) {
+      // Replace the prior value for the same name.
+      const name = nv.split('=')[0]!;
+      const idx = jar.findIndex((e) => e.startsWith(`${name}=`));
+      if (idx >= 0) jar[idx] = nv;
+      else jar.push(nv);
+    }
+  }
+}

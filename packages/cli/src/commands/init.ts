@@ -572,6 +572,12 @@ export const initCommand = defineCommand({
       type: 'boolean',
       description: 'Overwrite ledric.config.json if it already exists.',
       default: false
+    },
+    'require-reader-key': {
+      type: 'boolean',
+      description:
+        'Mint a reader key alongside the admin key, for closed-reads deployments. Default: skip (the reader key only matters with --require-reader-key on serve / http; mint later via `ledric keys create --role reader`).',
+      default: false
     }
   },
   async run({ args }) {
@@ -632,19 +638,25 @@ export const initCommand = defineCommand({
     if (answers.mintKeys) {
       const storage = await openSqlite({ path: answers.db });
       try {
-        const keys = await bootstrapApiKeysIfEmpty(storage, undefined, undefined);
+        const mintReader = args['require-reader-key'] === true;
+        const keys = await bootstrapApiKeysIfEmpty(
+          storage,
+          undefined,
+          undefined,
+          { mintReader }
+        );
         if (keys === null) {
           p.log.warn('Keys already exist in this DB — skipped minting.');
         } else {
-          p.note(
-            `admin:  ${keys.adminSecret}\nreader: ${keys.readerSecret}`,
-            'API keys (save these — not shown again)'
-          );
+          const noteBody = keys.readerSecret !== undefined
+            ? `admin:  ${keys.adminSecret}\nreader: ${keys.readerSecret}`
+            : `admin:  ${keys.adminSecret}`;
+          p.note(noteBody, 'API key (save it — not shown again)');
           const envPath = resolve(cwd, '.env.local');
-          const lines = [
-            `LEDRIC_ADMIN_KEY=${keys.adminSecret}`,
-            `LEDRIC_READER_KEY=${keys.readerSecret}`
-          ];
+          const lines = [`LEDRIC_ADMIN_KEY=${keys.adminSecret}`];
+          if (keys.readerSecret !== undefined) {
+            lines.push(`LEDRIC_READER_KEY=${keys.readerSecret}`);
+          }
           // The proxy scaffold reads LEDRIC_URL — add it when we know
           // we'll be writing a route that needs it.
           if (answers.scaffoldProxy) {

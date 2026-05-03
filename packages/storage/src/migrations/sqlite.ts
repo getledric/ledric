@@ -201,69 +201,34 @@ export const sqliteMigrations: Migration[] = [
     id: 3,
     name: '0003_oauth',
     sql: `
-      -- OAuth provider tables. Populated only when mcp.public is on;
-      -- otherwise they sit empty. Migrations always run, so the schema
-      -- is ready the moment the operator flips the flag.
+      -- Single payload store for the oidc-provider adapter. Replaces
+      -- four hand-rolled tables (clients, codes, refresh tokens,
+      -- signing keys) — oidc-provider models everything (clients,
+      -- AuthorizationCode, AccessToken, RefreshToken, Grant,
+      -- Interaction, Session, ReplayDetection, Keys, ...) through
+      -- one upsert/find/destroy interface, so one row schema covers
+      -- all of them, keyed by (model, id).
+      --
+      -- Populated only when mcp.public is on; sits empty otherwise.
+      -- Migrations always run, so the schema is ready the moment the
+      -- operator flips the flag.
 
-      CREATE TABLE oauth_clients (
-        id            BLOB    PRIMARY KEY,
-        env_id        BLOB    NOT NULL REFERENCES envs(id),
-        -- The public OAuth client_id string. Readable / loggable; the
-        -- secret_hash is what gates use of it. Null for public clients
-        -- (PKCE-only — the DCR default for our use).
-        client_id     TEXT    NOT NULL UNIQUE,
-        secret_hash   BLOB,
-        -- DCR-supplied display name. UNTRUSTED — always show client_id
-        -- alongside on consent UIs.
-        name          TEXT    NOT NULL,
-        redirect_uris TEXT    NOT NULL,
-        created_at    INTEGER NOT NULL,
-        revoked_at    INTEGER
+      CREATE TABLE oidc_payloads (
+        model       TEXT    NOT NULL,
+        id          TEXT    NOT NULL,
+        payload     TEXT    NOT NULL,            -- JSON, oidc-provider's AdapterPayload
+        grant_id    TEXT,                        -- set on AccessToken / RefreshToken / AuthorizationCode
+        user_code   TEXT,                        -- DeviceCode (we don't enable but the column lives here)
+        uid         TEXT,                        -- Session uid lookups
+        expires_at  INTEGER,                     -- unix seconds; null for Client rows (no TTL)
+        consumed_at INTEGER,
+        PRIMARY KEY (model, id)
       ) STRICT;
 
-      CREATE INDEX idx_oauth_clients_env ON oauth_clients (env_id);
-
-      CREATE TABLE oauth_codes (
-        code_hash      BLOB    PRIMARY KEY,
-        env_id         BLOB    NOT NULL REFERENCES envs(id),
-        client_id      TEXT    NOT NULL,
-        redirect_uri   TEXT    NOT NULL,
-        code_challenge TEXT    NOT NULL,
-        scope          TEXT    NOT NULL,
-        expires_at     INTEGER NOT NULL,
-        consumed_at    INTEGER
-      ) STRICT;
-
-      -- Cleanup queries scan by expiry; client lookups are rare so no
-      -- index there.
-      CREATE INDEX idx_oauth_codes_expiry ON oauth_codes (env_id, expires_at);
-
-      CREATE TABLE oauth_refresh_tokens (
-        token_hash        BLOB    PRIMARY KEY,
-        env_id            BLOB    NOT NULL REFERENCES envs(id),
-        client_id         TEXT    NOT NULL,
-        scope             TEXT    NOT NULL,
-        issued_at         INTEGER NOT NULL,
-        expires_at        INTEGER NOT NULL,
-        revoked_at        INTEGER,
-        -- Lineage for rotation: a refreshed token records its
-        -- predecessor so audit can trace a chain forward, and so a
-        -- replay of an already-rotated token can revoke the entire
-        -- chain (per spec).
-        parent_token_hash BLOB
-      ) STRICT;
-
-      CREATE INDEX idx_oauth_refresh_client ON oauth_refresh_tokens (env_id, client_id);
-
-      -- One signing keypair per env. Keyed by env_id as PK so we can't
-      -- accidentally end up with two — the first-boot generator does
-      -- INSERT OR IGNORE.
-      CREATE TABLE oauth_keys (
-        env_id      BLOB    PRIMARY KEY REFERENCES envs(id),
-        private_jwk TEXT    NOT NULL,
-        public_jwk  TEXT    NOT NULL,
-        created_at  INTEGER NOT NULL
-      ) STRICT;
+      CREATE INDEX idx_oidc_payloads_grant     ON oidc_payloads (grant_id);
+      CREATE INDEX idx_oidc_payloads_user_code ON oidc_payloads (user_code);
+      CREATE INDEX idx_oidc_payloads_uid       ON oidc_payloads (uid);
+      CREATE INDEX idx_oidc_payloads_expires   ON oidc_payloads (expires_at);
     `
   }
 ];

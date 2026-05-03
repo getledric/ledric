@@ -291,8 +291,9 @@ Six routes, all rooted at the configured `publicUrl`:
 | `GET /.well-known/oauth-authorization-server` | RFC 8414 discovery |
 | `GET /.well-known/oauth-protected-resource` | MCP authorization spec |
 | `POST /oauth/register` | DCR (RFC 7591) — public PKCE-only clients |
-| `GET /oauth/authorize` | Consent page (HTML) |
-| `POST /oauth/authorize` | Consume consent token, mint auth code, redirect |
+| `GET /oauth/authorize` | Auth-code flow start (handled by oidc-provider) |
+| `GET /oauth/consent/:uid` | Operator consent page (admin-key paste) |
+| `POST /oauth/consent/:uid` | Submit admin key, finalize the interaction |
 | `POST /oauth/token` | `authorization_code` and `refresh_token` grants |
 | `POST /oauth/revoke` | RFC 7009 |
 | `GET /oauth/jwks` | Ed25519 public key (single-key set, stable `kid`) |

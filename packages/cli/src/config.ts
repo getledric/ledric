@@ -49,12 +49,10 @@ export interface LedricConfig {
     allowedCidrs?: readonly string[];
   };
   oauth?: {
-    /** Allow Dynamic Client Registration. Default: true (when mcp.remote is on). */
+    /** Allow Dynamic Client Registration. Default: true (when mcp.public is on). */
     dcr?: boolean;
     accessTokenTtlSeconds?: number;
     refreshTokenTtlSeconds?: number;
-    /** Hostnames an OAuth client may register a redirect_uri under. */
-    allowedRedirectHosts?: readonly string[];
   };
 }
 

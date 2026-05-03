@@ -140,7 +140,8 @@ export const httpCommand = defineCommand({
     const bootstrapped = await bootstrapApiKeysIfEmpty(
       storage,
       envAdminKey,
-      envReaderKey
+      envReaderKey,
+      { mintReader: requireReaderKey }
     );
     if (bootstrapped !== null) printFirstBootKeys(bootstrapped);
 

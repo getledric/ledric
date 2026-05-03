@@ -162,14 +162,10 @@ export interface HttpServerOptions {
     allowedOrigins?: readonly string[];
     publicUrl?: string;
     allowedCidrs?: readonly string[];
-    /** OAuth: hostnames clients may register redirect_uris under. */
-    allowedRedirectHosts?: readonly string[];
     /** OAuth: enable/disable DCR. Default: enabled. */
     dcr?: boolean;
     accessTokenTtlSeconds?: number;
     refreshTokenTtlSeconds?: number;
-    /** Test seam — replaces process.stderr.write for the consent banner. */
-    printToStderr?: (s: string) => void;
   };
 }
 
@@ -252,23 +248,22 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     }
     const issuer = opts.mcp.publicUrl;
     app.register(async (instance) => {
-      const { verify } = await mountOAuthRoutes(instance, opts.auth!.storage as LedricStorage, {
-        issuer,
-        ...(opts.mcp?.allowedRedirectHosts !== undefined
-          ? { allowedRedirectHosts: opts.mcp.allowedRedirectHosts }
-          : {}),
-        ...(opts.mcp?.dcr !== undefined ? { dcr: opts.mcp.dcr } : {}),
-        ...(opts.mcp?.accessTokenTtlSeconds !== undefined
-          ? { accessTokenTtlSeconds: opts.mcp.accessTokenTtlSeconds }
-          : {}),
-        ...(opts.mcp?.refreshTokenTtlSeconds !== undefined
-          ? { refreshTokenTtlSeconds: opts.mcp.refreshTokenTtlSeconds }
-          : {}),
-        ...(opts.mcp?.printToStderr !== undefined
-          ? { printToStderr: opts.mcp.printToStderr }
-          : {})
-      });
+      const { verify, close } = await mountOAuthRoutes(
+        instance,
+        opts.auth!.storage as LedricStorage,
+        {
+          issuer,
+          ...(opts.mcp?.dcr !== undefined ? { dcr: opts.mcp.dcr } : {}),
+          ...(opts.mcp?.accessTokenTtlSeconds !== undefined
+            ? { accessTokenTtlSeconds: opts.mcp.accessTokenTtlSeconds }
+            : {}),
+          ...(opts.mcp?.refreshTokenTtlSeconds !== undefined
+            ? { refreshTokenTtlSeconds: opts.mcp.refreshTokenTtlSeconds }
+            : {})
+        }
+      );
       oauthVerifier = verify;
+      instance.addHook('onClose', async () => close());
     });
   }
 
@@ -1252,7 +1247,11 @@ function attachAuth(
       if (verifier) {
         try {
           const claims = await verifier(presented!);
-          role = SCOPE_TO_ROLE[claims.scope];
+          // claims.scope can be space-separated multi-scope; highest
+          // wins. ledric:write subsumes ledric:read on /mcp dispatch.
+          const scopes = claims.scope.split(/\s+/).filter(Boolean);
+          if (scopes.includes('ledric:write')) role = SCOPE_TO_ROLE['ledric:write'];
+          else if (scopes.includes('ledric:read')) role = SCOPE_TO_ROLE['ledric:read'];
         } catch {
           // Bad / expired JWT — fall through to API-key auth.
         }

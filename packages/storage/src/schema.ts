@@ -112,61 +112,33 @@ export interface ApiKeysTable {
   revoked_at: number | null;
 }
 
-// OAuth provider tables. Populated only when mcp.public is on; sit
-// empty otherwise. See packages/oauth/ for the business logic on top
-// of these.
-
-export interface OAuthClientsTable {
-  id: Buffer;
-  env_id: Buffer;
-  /** Public client_id string — the value advertised to OAuth clients. */
-  client_id: string;
-  /** SHA-256 of the client_secret. Null for public PKCE-only clients. */
-  secret_hash: Buffer | null;
-  /** DCR-supplied display name. UNTRUSTED — show client_id alongside on UIs. */
-  name: string;
-  /** JSON array of pre-registered redirect URIs. Stringified at write. */
-  redirect_uris: string;
-  created_at: number;
-  revoked_at: number | null;
-}
-
-export interface OAuthCodesTable {
-  /** SHA-256 of the auth code. The plaintext is never stored. */
-  code_hash: Buffer;
-  env_id: Buffer;
-  client_id: string;
-  redirect_uri: string;
-  /** PKCE S256 code_challenge (base64url, no padding). */
-  code_challenge: string;
-  /** Space-separated scope list. */
-  scope: string;
-  expires_at: number;
-  /** Set when the code is exchanged for a token; second use is rejected. */
+/**
+ * Single payload table for `oidc-provider`'s adapter interface. One
+ * row per (model, id) covers all of the library's models — clients,
+ * AuthorizationCode, AccessToken, RefreshToken, Grant, Interaction,
+ * Session, Keys, ReplayDetection, etc. Populated only when
+ * `mcp.public` is on. See `packages/oauth/src/adapter.ts` for the
+ * adapter wiring this table to the library's expected shape.
+ */
+export interface OidcPayloadsTable {
+  model: string;
+  id: string;
+  /** JSON-stringified `AdapterPayload` from oidc-provider. */
+  payload: string;
+  /** Set on AccessToken / RefreshToken / AuthorizationCode for revoke-by-grant. */
+  grant_id: string | null;
+  /** DeviceCode user_code lookup (we don't enable device flow but the column exists). */
+  user_code: string | null;
+  /** Session uid lookup. */
+  uid: string | null;
+  /**
+   * Unix-seconds. Null for Client rows — oidc-provider doesn't pass
+   * an `expiresIn` for those. The adapter's hydrate path treats null
+   * as "no expiry" (the row is always live until destroy).
+   */
+  expires_at: number | null;
+  /** Set on AuthorizationCode consume to enforce single-use. */
   consumed_at: number | null;
-}
-
-export interface OAuthRefreshTokensTable {
-  /** SHA-256 of the refresh token. The plaintext is never stored. */
-  token_hash: Buffer;
-  env_id: Buffer;
-  client_id: string;
-  scope: string;
-  issued_at: number;
-  expires_at: number;
-  revoked_at: number | null;
-  /** Hash of the refresh token this one rotated from, for lineage tracing. */
-  parent_token_hash: Buffer | null;
-}
-
-export interface OAuthKeysTable {
-  /** Primary key — one row per env. */
-  env_id: Buffer;
-  /** Private signing key as a JWK (Ed25519). JSON-stringified. */
-  private_jwk: string;
-  /** Public verification key as a JWK. JSON-stringified. */
-  public_jwk: string;
-  created_at: number;
 }
 
 export interface TagsTable {
@@ -229,10 +201,7 @@ export interface Database {
   asset_versions: AssetVersionsTable;
   asset_blobs: AssetBlobsTable;
   api_keys: ApiKeysTable;
-  oauth_clients: OAuthClientsTable;
-  oauth_codes: OAuthCodesTable;
-  oauth_refresh_tokens: OAuthRefreshTokensTable;
-  oauth_keys: OAuthKeysTable;
+  oidc_payloads: OidcPayloadsTable;
   tags: TagsTable;
   asset_tags: AssetTagsTable;
   entry_tags: EntryTagsTable;

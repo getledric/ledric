@@ -33,6 +33,10 @@
   },
   "dependencies": {
     "@ledric/storage": "workspace:*",
-    "jose": "^5.9.6"
+    "jose": "^5.9.6",
+    "oidc-provider": "^9.8.3"
+  },
+  "devDependencies": {
+    "@types/oidc-provider": "^9.5.0"
   }
 }

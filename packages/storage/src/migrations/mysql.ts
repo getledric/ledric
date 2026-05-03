@@ -212,51 +212,20 @@ export const mysqlMigrations: Migration[] = [
     id: 3,
     name: '0003_oauth',
     sql: `
-      CREATE TABLE oauth_clients (
-        id            VARBINARY(16) PRIMARY KEY,
-        env_id        VARBINARY(16) NOT NULL,
-        client_id     VARCHAR(191)  NOT NULL UNIQUE,
-        secret_hash   VARBINARY(64),
-        name          VARCHAR(255)  NOT NULL,
-        redirect_uris MEDIUMTEXT    NOT NULL,
-        created_at    BIGINT        NOT NULL,
-        revoked_at    BIGINT,
-        FOREIGN KEY (env_id) REFERENCES envs(id),
-        INDEX idx_oauth_clients_env (env_id)
-      ) ENGINE=InnoDB;
-
-      CREATE TABLE oauth_codes (
-        code_hash      VARBINARY(64) PRIMARY KEY,
-        env_id         VARBINARY(16) NOT NULL,
-        client_id      VARCHAR(191)  NOT NULL,
-        redirect_uri   VARCHAR(2048) NOT NULL,
-        code_challenge VARCHAR(255)  NOT NULL,
-        scope          VARCHAR(255)  NOT NULL,
-        expires_at     BIGINT        NOT NULL,
-        consumed_at    BIGINT,
-        FOREIGN KEY (env_id) REFERENCES envs(id),
-        INDEX idx_oauth_codes_expiry (env_id, expires_at)
-      ) ENGINE=InnoDB;
-
-      CREATE TABLE oauth_refresh_tokens (
-        token_hash        VARBINARY(64) PRIMARY KEY,
-        env_id            VARBINARY(16) NOT NULL,
-        client_id         VARCHAR(191)  NOT NULL,
-        scope             VARCHAR(255)  NOT NULL,
-        issued_at         BIGINT        NOT NULL,
-        expires_at        BIGINT        NOT NULL,
-        revoked_at        BIGINT,
-        parent_token_hash VARBINARY(64),
-        FOREIGN KEY (env_id) REFERENCES envs(id),
-        INDEX idx_oauth_refresh_client (env_id, client_id)
-      ) ENGINE=InnoDB;
-
-      CREATE TABLE oauth_keys (
-        env_id      VARBINARY(16) PRIMARY KEY,
-        private_jwk MEDIUMTEXT    NOT NULL,
-        public_jwk  MEDIUMTEXT    NOT NULL,
-        created_at  BIGINT        NOT NULL,
-        FOREIGN KEY (env_id) REFERENCES envs(id)
+      CREATE TABLE oidc_payloads (
+        model       VARCHAR(64)   NOT NULL,
+        id          VARCHAR(191)  NOT NULL,
+        payload     MEDIUMTEXT    NOT NULL,
+        grant_id    VARCHAR(191),
+        user_code   VARCHAR(191),
+        uid         VARCHAR(191),
+        expires_at  BIGINT,
+        consumed_at BIGINT,
+        PRIMARY KEY (model, id),
+        INDEX idx_oidc_payloads_grant     (grant_id),
+        INDEX idx_oidc_payloads_user_code (user_code),
+        INDEX idx_oidc_payloads_uid       (uid),
+        INDEX idx_oidc_payloads_expires   (expires_at)
       ) ENGINE=InnoDB;
     `
   }
