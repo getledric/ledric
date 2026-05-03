@@ -1,14 +1,29 @@
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import formbody from '@fastify/formbody';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
-import { promises as fs } from 'node:fs';
-import { join as pathJoin } from 'node:path';
+import { promises as fs, readFileSync } from 'node:fs';
+import { join as pathJoin, dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Read our own version once at module load. tsup bundles to
+// `dist/index.js`; `../package.json` resolves to the shipped manifest.
+const PKG_VERSION = (JSON.parse(
+  readFileSync(
+    resolvePath(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'),
+    'utf8'
+  )
+) as { version: string }).version;
 import type { Core } from '@ledric/core';
 import { parseTransformParams } from '@ledric/core';
-import type { Storage, ApiKeyRole } from '@ledric/storage';
+import { createStreamableHttpHandle } from '@ledric/mcp-server';
+import type { StreamableHttpHandle } from '@ledric/mcp-server';
+import { SCOPE_TO_ROLE } from '@ledric/oauth';
+import type { Storage, ApiKeyRole, LedricStorage } from '@ledric/storage';
 import { hashApiKey, parseApiKeyRole, looksLikeApiKey } from '@ledric/storage';
+import { mountOAuthRoutes, type AccessTokenVerifier } from './oauth-routes.js';
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -129,6 +144,39 @@ export interface HttpServerOptions {
    * middleware treats requests as anonymous (auth-off mode).
    */
   auth?: HttpAuthOptions;
+  /**
+   * Streamable HTTP MCP transport. Two modes, ordered by escalation:
+   *
+   * - `http: true` — mount `/mcp` (POST/GET/DELETE) on whatever bind
+   *   address the HTTP server is configured for. API-key bearer only;
+   *   per-tool auth mirrors `/rpc`. Origin allowlist tolerates
+   *   localhost-on-any-port for dev tooling. The natural setup for
+   *   multiple local clients (Claude Code, Cursor, Claude Desktop via
+   *   `mcp-remote`) sharing one ledric daemon. No `publicUrl` required.
+   *
+   * - `public: true` (implies `http`) — additionally mounts the OAuth
+   *   provider routes, accepts OAuth bearer tokens on `/mcp`, requires
+   *   `publicUrl`, and rejects non-allowlist Origins (no localhost
+   *   escape). The path you take when claude.ai or another cloud-hosted
+   *   client needs to reach in over the public internet.
+   *
+   * `allowedCidrs` is an optional pre-auth IP filter applied before any
+   * other check on `/mcp` (and `/oauth/*` when `public` is on). Empty
+   * or unset = allow all. Document Anthropic's published cloud IP
+   * ranges as the recommended production value but don't hardcode —
+   * they change.
+   */
+  mcp?: {
+    http?: boolean;
+    public?: boolean;
+    allowedOrigins?: readonly string[];
+    publicUrl?: string;
+    allowedCidrs?: readonly string[];
+    /** OAuth: enable/disable DCR. Default: enabled. */
+    dcr?: boolean;
+    accessTokenTtlSeconds?: number;
+    refreshTokenTtlSeconds?: number;
+  };
 }
 
 export function createHttpServer(core: Core, opts: HttpServerOptions = {}): FastifyInstance {
@@ -185,8 +233,52 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     limits: { fileSize: uploadLimit, files: 1 }
   });
 
+  // application/x-www-form-urlencoded — needed by OAuth's /oauth/token,
+  // /oauth/authorize POST, and /oauth/revoke per RFC 6749. Always
+  // registered (cheap; no body still parses to {}).
+  app.register(formbody);
+
+  // Mode flags pulled up here so attachAuth and the /mcp mount can
+  // both reference them. Validation (publicUrl required when public
+  // is on) happens at the /mcp mount further down — early exit there
+  // keeps the error message close to the route it concerns.
+  const mcpHttpFlag = opts.mcp?.http === true || opts.mcp?.public === true;
+  const mcpPublicFlag = opts.mcp?.public === true;
+
+  // OAuth routes mount BEFORE the auth preHandler so its `verify` is
+  // captured by the closure attachAuth holds. The mount itself is async
+  // (Ed25519 key load), so it goes through Fastify's plugin system —
+  // app.ready() awaits the registration.
+  let oauthVerifier: AccessTokenVerifier | null = null;
+  if (mcpPublicFlag) {
+    if (opts.mcp?.publicUrl === undefined || opts.mcp.publicUrl.length === 0) {
+      throw new Error(
+        'public-MCP mode requires `mcp.publicUrl` to be set (this is the OAuth issuer and Origin allowlist anchor — see docs/remote-mcp.md).'
+      );
+    }
+    const issuer = opts.mcp.publicUrl;
+    app.register(async (instance) => {
+      const { verify, close } = await mountOAuthRoutes(
+        instance,
+        opts.auth!.storage as LedricStorage,
+        {
+          issuer,
+          ...(opts.mcp?.dcr !== undefined ? { dcr: opts.mcp.dcr } : {}),
+          ...(opts.mcp?.accessTokenTtlSeconds !== undefined
+            ? { accessTokenTtlSeconds: opts.mcp.accessTokenTtlSeconds }
+            : {}),
+          ...(opts.mcp?.refreshTokenTtlSeconds !== undefined
+            ? { refreshTokenTtlSeconds: opts.mcp.refreshTokenTtlSeconds }
+            : {})
+        }
+      );
+      oauthVerifier = verify;
+      instance.addHook('onClose', async () => close());
+    });
+  }
+
   if (opts.auth !== undefined) {
-    attachAuth(app, opts.auth, opts.gui?.mountPath ?? null);
+    attachAuth(app, opts.auth, opts.gui?.mountPath ?? null, () => oauthVerifier);
   }
 
   if (opts.gui !== undefined) {
@@ -267,17 +359,41 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
 
   app.get('/', async () => ({
     name: 'ledric',
-    version: '0.0.0',
+    version: PKG_VERSION,
     endpoints: [
-      'GET  /types',
-      'GET  /types/:name',
-      'GET  /entries/:type',
-      'GET  /entries/:type/:slug',
-      'GET  /assets',
-      'GET  /assets/:id',
-      'GET  /assets/:id/meta',
-      'POST /assets        multipart upload',
-      'POST /rpc           { tool, args }'
+      'GET    /auth/status',
+      'GET    /types',
+      'GET    /types/:name',
+      'GET    /entries/:type',
+      'GET    /entries/:type/:slug',
+      'GET    /assets',
+      'POST   /assets             multipart upload',
+      'GET    /assets/:key        bytes (with imgix-style transforms)',
+      'GET    /assets/:key/meta',
+      'GET    /tags',
+      'POST   /rpc                { tool, args }',
+      ...(mcpHttpFlag
+        ? [
+            'POST   /mcp                Streamable HTTP MCP (JSON-RPC)',
+            'GET    /mcp                Streamable HTTP MCP (SSE stream)',
+            'DELETE /mcp                terminate session'
+          ]
+        : []),
+      ...(mcpPublicFlag
+        ? [
+            'GET    /.well-known/oauth-authorization-server',
+            'GET    /.well-known/oauth-protected-resource',
+            'GET    /.well-known/openid-configuration',
+            'POST   /oauth/register     Dynamic Client Registration (RFC 7591)',
+            'GET    /oauth/authorize    OAuth 2.1 auth-code start',
+            'GET    /oauth/consent/:uid operator consent page',
+            'POST   /oauth/consent/:uid submit consent (admin key)',
+            'POST   /oauth/token        auth_code / refresh_token grants',
+            'POST   /oauth/revoke       RFC 7009',
+            'POST   /oauth/introspection',
+            'GET    /oauth/jwks'
+          ]
+        : [])
     ],
     /**
      * Tool names accepted by POST /rpc — same surface as the MCP server
@@ -701,7 +817,216 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     }
   });
 
+  // Streamable HTTP MCP transport — disabled by default. Lives in
+  // mcp-server (createStreamableHttpHandle) so the tool catalogue stays
+  // in one place; we just plumb it onto Fastify here. Auth is handled
+  // up in the preHandler (per-method / per-tool, mirroring /rpc).
+  // Two modes: `mcp.http` (local, API-key only) is the default story;
+  // `mcp.public` (implies http) opens the OAuth provider routes and
+  // tightens Origin/CIDR. Public requires `publicUrl` to identify the
+  // OAuth issuer — fail loudly at boot if it's missing.
+  let mcpHandle: StreamableHttpHandle | null = null;
+  if (mcpHttpFlag) {
+    mcpHandle = createStreamableHttpHandle(core);
+    const allowedOrigins = computeAllowedOrigins(opts.mcp!, mcpPublicFlag);
+    const allowedCidrs = parseCidrs(opts.mcp?.allowedCidrs);
+    const handler = async (req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
+      if (!isClientIpAllowed(req.ip, allowedCidrs)) {
+        reply.code(403).send({
+          error: { code: 'FORBIDDEN', message: 'Client IP not in allowlist' }
+        });
+        return;
+      }
+      if (!isOriginAllowed(req.headers.origin, allowedOrigins, mcpPublicFlag)) {
+        reply.code(403).send({
+          error: {
+            code: 'FORBIDDEN',
+            message: `Origin ${String(req.headers.origin)} not in allowlist`
+          }
+        });
+        return;
+      }
+      // Hand the raw Node req/res to the SDK transport. Fastify must
+      // not write anything else after this — `hijack()` makes it stop.
+      reply.hijack();
+      try {
+        await mcpHandle!.handle(req.raw, reply.raw, req.body);
+      } catch (err) {
+        if (!reply.raw.headersSent) {
+          reply.raw.statusCode = 500;
+          reply.raw.setHeader('content-type', 'application/json');
+          reply.raw.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: {
+                code: -32603,
+                message: err instanceof Error ? err.message : String(err)
+              },
+              id: null
+            })
+          );
+        }
+      }
+    };
+    app.post('/mcp', handler);
+    app.get('/mcp', handler);
+    app.delete('/mcp', handler);
+
+    // Tear sessions down on server close so SIGINT doesn't leak them.
+    app.addHook('onClose', async () => {
+      if (mcpHandle !== null) await mcpHandle.close();
+    });
+  }
+
   return app;
+}
+
+/**
+ * Default Origin allowlist. In `http`-only (local) mode this is just a
+ * scaffold — the real check tolerates localhost-on-any-port via the
+ * fallback in isOriginAllowed. In `public` mode the allowlist is the
+ * sole gate: `publicUrl`'s origin plus `claude.ai` for browser-side
+ * OAuth flows. Non-browser clients (no Origin header) bypass the
+ * check entirely — they don't have a same-origin policy to subvert.
+ */
+function computeAllowedOrigins(
+  mcp: NonNullable<HttpServerOptions['mcp']>,
+  publicMode: boolean
+): Set<string> {
+  if (mcp.allowedOrigins !== undefined && mcp.allowedOrigins.length > 0) {
+    return new Set(mcp.allowedOrigins);
+  }
+  const out = new Set<string>();
+  if (mcp.publicUrl !== undefined) {
+    try {
+      out.add(new URL(mcp.publicUrl).origin);
+    } catch {
+      /* invalid URL — skip */
+    }
+  }
+  if (publicMode) {
+    // claude.ai is the canonical custom-connector origin. Add as a
+    // default convenience; operators can override with allowedOrigins.
+    out.add('https://claude.ai');
+  } else {
+    // Local mode: pre-populate localhost variants so explicit
+    // `allowedOrigins: undefined` still matches dev tooling. The
+    // localhost-port escape in isOriginAllowed catches the rest.
+    out.add('http://localhost');
+    out.add('http://127.0.0.1');
+    out.add('https://localhost');
+    out.add('https://127.0.0.1');
+  }
+  return out;
+}
+
+function isOriginAllowed(
+  rawOrigin: string | string[] | undefined,
+  allowed: Set<string>,
+  publicMode: boolean
+): boolean {
+  // No Origin header → not a browser request → not the threat model
+  // Origin validation is meant to address (DNS rebinding from a page
+  // running in the user's browser).
+  if (rawOrigin === undefined) return true;
+  const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
+  if (origin === undefined) return true;
+
+  // Direct match against the allowlist (scheme + host + port).
+  if (allowed.has(origin)) return true;
+
+  if (!publicMode) {
+    // Local mode: allow any port on localhost / 127.0.0.1 — dev
+    // tooling spins up ephemeral local origins that wouldn't all be
+    // in the allowlist. Public mode does NOT get this escape: a
+    // localhost-bound page on the same machine as a public ledric
+    // shouldn't be able to drive the public surface.
+    try {
+      const u = new URL(origin);
+      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return true;
+    } catch {
+      /* malformed origin — treat as disallowed */
+    }
+  }
+  return false;
+}
+
+/**
+ * Parse CIDR strings into a normalized form for fast matching. Returns
+ * null when no CIDRs are configured (no filtering). IPv4 only for now —
+ * IPv6 hosts can configure individual /128s if needed; full v6 CIDR
+ * matching is more complexity than the current threat model warrants.
+ */
+interface ParsedCidr {
+  // 32-bit network address (host bits zeroed) and the mask length.
+  network: number;
+  bits: number;
+}
+
+function parseCidrs(raw: readonly string[] | undefined): ParsedCidr[] | null {
+  if (raw === undefined || raw.length === 0) return null;
+  const out: ParsedCidr[] = [];
+  for (const entry of raw) {
+    const parsed = parseCidr(entry);
+    if (parsed !== null) out.push(parsed);
+  }
+  return out.length > 0 ? out : null;
+}
+
+function parseCidr(s: string): ParsedCidr | null {
+  // Accept "1.2.3.4" as a /32 single host.
+  const slash = s.indexOf('/');
+  const ipPart = slash === -1 ? s : s.slice(0, slash);
+  const bits = slash === -1 ? 32 : parseInt(s.slice(slash + 1), 10);
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return null;
+  const octets = ipPart.split('.');
+  if (octets.length !== 4) return null;
+  let ip = 0;
+  for (const o of octets) {
+    const n = parseInt(o, 10);
+    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
+    ip = (ip << 8) | n;
+  }
+  // Force unsigned 32-bit arithmetic.
+  ip = ip >>> 0;
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return { network: ip & mask, bits };
+}
+
+function isClientIpAllowed(ip: string, cidrs: ParsedCidr[] | null): boolean {
+  if (cidrs === null) return true;
+  // Strip IPv4-mapped IPv6 prefix (::ffff:1.2.3.4 — Node's default
+  // dual-stack form). Reject any other v6 address since we don't have
+  // v6 CIDR matching.
+  let v4 = ip;
+  if (v4.startsWith('::ffff:')) v4 = v4.slice(7);
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(v4)) return false;
+  const parsed = parseCidr(v4);
+  if (parsed === null) return false;
+  for (const c of cidrs) {
+    const mask = c.bits === 0 ? 0 : (0xffffffff << (32 - c.bits)) >>> 0;
+    if ((parsed.network & mask) === c.network) return true;
+  }
+  return false;
+}
+
+/**
+ * Pull a Bearer credential off either the `Authorization` header or
+ * the `X-Ledric-Key` shorthand. Returns the trimmed secret or
+ * undefined when neither is set / either is malformed.
+ */
+function extractBearer(req: import('fastify').FastifyRequest): string | undefined {
+  const authz = req.headers.authorization;
+  const xKey = req.headers['x-ledric-key'];
+  if (typeof authz === 'string' && authz.toLowerCase().startsWith('bearer ')) {
+    const v = authz.slice(7).trim();
+    return v.length > 0 ? v : undefined;
+  }
+  if (typeof xKey === 'string') {
+    const v = xKey.trim();
+    return v.length > 0 ? v : undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -840,7 +1165,8 @@ async function dispatchTool(
 function attachAuth(
   app: FastifyInstance,
   auth: HttpAuthOptions,
-  guiMountPath: string | null
+  guiMountPath: string | null,
+  oauthVerifierGetter?: () => AccessTokenVerifier | null
 ): void {
   const requireReaderKey = auth.requireReaderKey === true;
   const envKeys = new Map<string, ApiKeyRole>();
@@ -856,6 +1182,11 @@ function attachAuth(
     if (urlPath === '/auth/status') return true;
     if (guiMountPath !== null && urlPath === guiMountPath) return true;
     if (guiPrefix !== null && urlPath.startsWith(guiPrefix)) return true;
+    // OAuth discovery + auth-flow endpoints are intentionally
+    // unauthenticated — they ARE the auth layer. /oauth/token validates
+    // grants internally; /oauth/authorize validates the consent token.
+    if (urlPath.startsWith('/.well-known/')) return true;
+    if (urlPath.startsWith('/oauth/')) return true;
     return false;
   }
 
@@ -877,13 +1208,25 @@ function attachAuth(
     const path = (req.url.split('?', 1)[0] ?? req.url);
     if (isPublicPath(path)) return;
 
-    // Auth-off when nothing is configured. Cheap path — count is a
-    // single COUNT(*) on a tiny table.
-    const dbKeys = await auth.storage.countActiveApiKeys();
-    if (dbKeys === 0 && envKeys.size === 0) return;
+    // Detect a presented bearer up front. JWTs MUST always be honored
+    // (an OAuth-scoped read-only token has to be enforced as read-only
+    // even when api-keys aren't configured), so the auth-off shortcut
+    // below only fires when nothing was presented at all.
+    const presentedBearer = extractBearer(req);
+    const looksLikeJwt =
+      presentedBearer !== undefined &&
+      presentedBearer.startsWith('ey') &&
+      presentedBearer.includes('.');
 
-    // Required role for this request. /rpc looks at the dispatched
-    // tool to decide; everything else uses HTTP-method semantics.
+    // Auth-off when nothing is configured AND the caller didn't show
+    // up with a JWT. Cheap path — count is a single COUNT(*) on a
+    // tiny table.
+    const dbKeys = await auth.storage.countActiveApiKeys();
+    if (dbKeys === 0 && envKeys.size === 0 && !looksLikeJwt) return;
+
+    // Required role for this request. /rpc and /mcp peek at the
+    // dispatched tool to decide; everything else uses HTTP-method
+    // semantics.
     let required: ApiKeyRole | null = null;
     if (path === '/rpc') {
       const body = req.body as { tool?: unknown } | undefined;
@@ -893,6 +1236,32 @@ function attachAuth(
       } else {
         required = 'admin';
       }
+    } else if (path === '/mcp') {
+      // /mcp follows the same per-tool model as /rpc, but the body is
+      // JSON-RPC framed: { method: 'tools/call', params: { name, … } }.
+      // Protocol-level methods (`initialize`, `tools/list`, etc.) and
+      // read-only tool calls accept reader; everything else needs admin.
+      // GET (SSE) and DELETE (session terminate) are protocol reads.
+      if (req.method === 'GET' || req.method === 'DELETE') {
+        required = requireReaderKey ? 'reader' : null;
+      } else {
+        const body = req.body as
+          | { method?: unknown; params?: { name?: unknown } }
+          | undefined;
+        const rpcMethod = typeof body?.method === 'string' ? body.method : null;
+        if (rpcMethod === 'tools/call') {
+          const toolName =
+            typeof body?.params?.name === 'string' ? body.params.name : null;
+          if (toolName !== null && READ_RPC_TOOLS.has(toolName)) {
+            required = requireReaderKey ? 'reader' : null;
+          } else {
+            required = 'admin';
+          }
+        } else {
+          // initialize, tools/list, prompts/list, ping, etc.
+          required = requireReaderKey ? 'reader' : null;
+        }
+      }
     } else if (req.method === 'POST') {
       required = 'admin';
     } else if (requireReaderKey) {
@@ -900,44 +1269,56 @@ function attachAuth(
     }
     if (required === null) return;
 
-    // Extract presented secret.
-    const authz = req.headers.authorization;
-    const xKey = req.headers['x-ledric-key'];
-    let presented: string | undefined;
-    if (typeof authz === 'string' && authz.toLowerCase().startsWith('bearer ')) {
-      presented = authz.slice(7).trim();
-    } else if (typeof xKey === 'string') {
-      presented = xKey.trim();
-    }
-    if (!presented || !looksLikeApiKey(presented)) {
-      reply.code(401).send({
-        error: { code: 'UNAUTHORIZED', message: 'Missing or malformed API key' }
-      });
-      return reply;
-    }
+    const presented = presentedBearer;
 
-    // Resolve to a role.
-    let role: ApiKeyRole | null = envKeys.get(presented) ?? null;
+    // OAuth bearer first — JWTs always start with `ey` (base64url of `{"`).
+    // Falls through to API-key auth on parse / verify failure so a
+    // bad JWT doesn't dead-end clients that ALSO happen to send a key.
+    let role: ApiKeyRole | null = null;
     let keyId: Uint8Array | null = null;
+    if (looksLikeJwt) {
+      const verifier = oauthVerifierGetter?.();
+      if (verifier) {
+        try {
+          const claims = await verifier(presented!);
+          // claims.scope can be space-separated multi-scope; highest
+          // wins. ledric:write subsumes ledric:read on /mcp dispatch.
+          const scopes = claims.scope.split(/\s+/).filter(Boolean);
+          if (scopes.includes('ledric:write')) role = SCOPE_TO_ROLE['ledric:write'];
+          else if (scopes.includes('ledric:read')) role = SCOPE_TO_ROLE['ledric:read'];
+        } catch {
+          // Bad / expired JWT — fall through to API-key auth.
+        }
+      }
+    }
 
     if (role === null) {
-      const found = await auth.storage.findApiKeyByHash(hashApiKey(presented));
-      if (found && found.revoked_at === null) {
-        role = found.role;
-        keyId = found.id;
+      if (!presented || !looksLikeApiKey(presented)) {
+        reply.code(401).send({
+          error: { code: 'UNAUTHORIZED', message: 'Missing or malformed bearer credential' }
+        });
+        return reply;
+      }
+      role = envKeys.get(presented) ?? null;
+      if (role === null) {
+        const found = await auth.storage.findApiKeyByHash(hashApiKey(presented));
+        if (found && found.revoked_at === null) {
+          role = found.role;
+          keyId = found.id;
+        }
       }
     }
 
     if (role === null) {
       // Soft hint when the prefix is recognizable — helps debugging
       // without leaking which exact key would have matched.
-      const hinted = parseApiKeyRole(presented);
+      const hinted = parseApiKeyRole(presented ?? '');
       reply.code(401).send({
         error: {
           code: 'UNAUTHORIZED',
           message: hinted
             ? 'API key is unknown or revoked'
-            : 'Invalid API key'
+            : 'Invalid credential'
         }
       });
       return reply;

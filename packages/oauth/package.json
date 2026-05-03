@@ -1,12 +1,12 @@
 {
-  "name": "@ledric/http-server",
+  "name": "@ledric/oauth",
   "version": "0.3.0",
-  "description": "ledric HTTP server: tool-shaped POST /rpc + REST GET projections, built on Fastify, binding @ledric/core.",
+  "description": "OAuth 2.1 provider for ledric — DCR + auth code + PKCE + JWT/JWKS, single-process, no external IdP. Mounted by @ledric/http-server when mcp.public is on.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getledric/ledric.git",
-    "directory": "packages/http-server"
+    "directory": "packages/oauth"
   },
   "bugs": "https://github.com/getledric/ledric/issues",
   "homepage": "https://github.com/getledric/ledric#readme",
@@ -32,19 +32,11 @@
     "access": "public"
   },
   "dependencies": {
-    "@fastify/cors": "^11.1.0",
-    "@fastify/formbody": "^8.0.2",
-    "@fastify/multipart": "^9.0.1",
-    "@fastify/static": "^8.0.4",
-    "@ledric/core": "workspace:*",
-    "@ledric/mcp-server": "workspace:*",
-    "@ledric/oauth": "workspace:*",
     "@ledric/storage": "workspace:*",
-    "fastify": "^5.1.0",
-    "jose": "^5.9.6"
+    "jose": "^5.9.6",
+    "oidc-provider": "^9.8.3"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "sharp": "^0.34.5"
+    "@types/oidc-provider": "^9.5.0"
   }
 }

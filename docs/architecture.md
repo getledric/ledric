@@ -122,15 +122,22 @@ What's actually running when `ledric serve --gui` boots.
 ### The MCP server (`packages/mcp-server`)
 
 Registers the 20 tools listed in
-[`mcp-tools.md`](./mcp-tools.md). Listens on stdio by default
-(which is what desktop MCP clients like Claude Desktop expect). It
-dispatches every `CallToolRequest` to `core`, wraps errors into
-the structured ledric error shape, and returns the result.
+[`mcp-tools.md`](./mcp-tools.md). Three transports, same `core`
+dispatch:
 
-The same tool surface is available over HTTP at `POST /rpc` —
-that path lives in `http-server`, but the dispatch goes through
-exactly the same `core` methods. There is no second
-implementation.
+- **Stdio** (default) — what desktop MCP clients spawn as a child.
+- **Streamable HTTP** at `/mcp` — opt in with `serve --http-mcp`.
+  Lets multiple local clients share one ledric daemon.
+- **Streamable HTTP, public-facing** at `/mcp` — opt in with
+  `serve --public-mcp`. Adds the OAuth provider for claude.ai
+  custom connectors.
+
+The same tool surface is also available over `POST /rpc` (one tool
+per request, JSON envelope). All four paths dispatch through
+exactly the same `core` methods. There is no second implementation.
+
+See [`remote-mcp.md`](./remote-mcp.md) for the local-vs-public
+mode split, the OAuth flow, and deployment shape.
 
 ### The HTTP server (`packages/http-server`)
 
@@ -149,6 +156,10 @@ GET  /assets/:id              — metadata
 GET  /assets/:id/meta         — explicit metadata
 GET  /assets/<ref_key>        — bytes (with imgix-style transforms)
 POST /rpc                     — generic dispatch to any of the 20 tools
+ANY  /mcp                     — Streamable HTTP MCP transport
+                                (when --http-mcp or --public-mcp is on)
+GET  /.well-known/oauth-*     — OAuth discovery (public-mcp only)
+ANY  /oauth/*                 — OAuth provider endpoints (public-mcp only)
 GET  /admin/*                 — static GUI files (when --gui is on)
 GET  /admin/inline.js         — the inline editor loader script
 ```

@@ -196,5 +196,39 @@ export const sqliteMigrations: Migration[] = [
         tokenize = 'porter unicode61 remove_diacritics 2'
       );
     `
+  },
+  {
+    id: 3,
+    name: '0003_oauth',
+    sql: `
+      -- Single payload store for the oidc-provider adapter. Replaces
+      -- four hand-rolled tables (clients, codes, refresh tokens,
+      -- signing keys) — oidc-provider models everything (clients,
+      -- AuthorizationCode, AccessToken, RefreshToken, Grant,
+      -- Interaction, Session, ReplayDetection, Keys, ...) through
+      -- one upsert/find/destroy interface, so one row schema covers
+      -- all of them, keyed by (model, id).
+      --
+      -- Populated only when mcp.public is on; sits empty otherwise.
+      -- Migrations always run, so the schema is ready the moment the
+      -- operator flips the flag.
+
+      CREATE TABLE oidc_payloads (
+        model       TEXT    NOT NULL,
+        id          TEXT    NOT NULL,
+        payload     TEXT    NOT NULL,            -- JSON, oidc-provider's AdapterPayload
+        grant_id    TEXT,                        -- set on AccessToken / RefreshToken / AuthorizationCode
+        user_code   TEXT,                        -- DeviceCode (we don't enable but the column lives here)
+        uid         TEXT,                        -- Session uid lookups
+        expires_at  INTEGER,                     -- unix seconds; null for Client rows (no TTL)
+        consumed_at INTEGER,
+        PRIMARY KEY (model, id)
+      ) STRICT;
+
+      CREATE INDEX idx_oidc_payloads_grant     ON oidc_payloads (grant_id);
+      CREATE INDEX idx_oidc_payloads_user_code ON oidc_payloads (user_code);
+      CREATE INDEX idx_oidc_payloads_uid       ON oidc_payloads (uid);
+      CREATE INDEX idx_oidc_payloads_expires   ON oidc_payloads (expires_at);
+    `
   }
 ];

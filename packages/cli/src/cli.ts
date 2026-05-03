@@ -11,6 +11,7 @@ import { keysCommand } from './commands/keys.js';
 import { tagCommand, untagCommand, tagsCommand } from './commands/tag.js';
 import { initCommand } from './commands/init.js';
 import { typesCommand } from './commands/types.js';
+import { oauthCommand } from './commands/oauth.js';
 
 const CONFIG_HELP = `
 ledric — MCP/LLM-native self-hosted CMS
@@ -22,6 +23,8 @@ USAGE
   ledric serve                       MCP stdio (default; uses ./ledric.db)
   ledric serve --http                 … plus the HTTP API on :3000
   ledric serve --gui                 … plus HTTP and the admin GUI at /admin
+  ledric serve --http-mcp            … plus Streamable HTTP MCP at /mcp (local clients)
+  ledric serve --public-mcp          … plus the OAuth provider for claude.ai connectors
   ledric http                        HTTP-only (no MCP)
   ledric http --port 8080             … on a different port
   ledric http --gui                  … with the admin UI
@@ -45,6 +48,8 @@ USAGE
   ledric types                       generate ledric.types.ts from the live schema
   ledric types --from <url>          … against a remote ledric instance over HTTP
   ledric types --augment-sdk         … and augment @ledric/sdk's LedricEntries
+  ledric oauth clients list          list OAuth clients registered via DCR
+  ledric oauth clients revoke <id>   revoke an OAuth client
 
 HOOK IT UP TO YOUR MCP CLIENT
 
@@ -87,7 +92,8 @@ const main = defineCommand({
     tag: tagCommand,
     untag: untagCommand,
     tags: tagsCommand,
-    types: typesCommand
+    types: typesCommand,
+    oauth: oauthCommand
   },
   run() {
     // Citty invokes the parent's `run` even when a subcommand matches; only

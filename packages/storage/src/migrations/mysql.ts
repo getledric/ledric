@@ -207,5 +207,26 @@ export const mysqlMigrations: Migration[] = [
         FULLTEXT INDEX ftx_fts_entries_value (value)
       ) ENGINE=InnoDB;
     `
+  },
+  {
+    id: 3,
+    name: '0003_oauth',
+    sql: `
+      CREATE TABLE oidc_payloads (
+        model       VARCHAR(64)   NOT NULL,
+        id          VARCHAR(191)  NOT NULL,
+        payload     MEDIUMTEXT    NOT NULL,
+        grant_id    VARCHAR(191),
+        user_code   VARCHAR(191),
+        uid         VARCHAR(191),
+        expires_at  BIGINT,
+        consumed_at BIGINT,
+        PRIMARY KEY (model, id),
+        INDEX idx_oidc_payloads_grant     (grant_id),
+        INDEX idx_oidc_payloads_user_code (user_code),
+        INDEX idx_oidc_payloads_uid       (uid),
+        INDEX idx_oidc_payloads_expires   (expires_at)
+      ) ENGINE=InnoDB;
+    `
   }
 ];

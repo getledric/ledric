@@ -112,6 +112,35 @@ export interface ApiKeysTable {
   revoked_at: number | null;
 }
 
+/**
+ * Single payload table for `oidc-provider`'s adapter interface. One
+ * row per (model, id) covers all of the library's models — clients,
+ * AuthorizationCode, AccessToken, RefreshToken, Grant, Interaction,
+ * Session, Keys, ReplayDetection, etc. Populated only when
+ * `mcp.public` is on. See `packages/oauth/src/adapter.ts` for the
+ * adapter wiring this table to the library's expected shape.
+ */
+export interface OidcPayloadsTable {
+  model: string;
+  id: string;
+  /** JSON-stringified `AdapterPayload` from oidc-provider. */
+  payload: string;
+  /** Set on AccessToken / RefreshToken / AuthorizationCode for revoke-by-grant. */
+  grant_id: string | null;
+  /** DeviceCode user_code lookup (we don't enable device flow but the column exists). */
+  user_code: string | null;
+  /** Session uid lookup. */
+  uid: string | null;
+  /**
+   * Unix-seconds. Null for Client rows — oidc-provider doesn't pass
+   * an `expiresIn` for those. The adapter's hydrate path treats null
+   * as "no expiry" (the row is always live until destroy).
+   */
+  expires_at: number | null;
+  /** Set on AuthorizationCode consume to enforce single-use. */
+  consumed_at: number | null;
+}
+
 export interface TagsTable {
   id: Buffer;
   env_id: Buffer;
@@ -172,6 +201,7 @@ export interface Database {
   asset_versions: AssetVersionsTable;
   asset_blobs: AssetBlobsTable;
   api_keys: ApiKeysTable;
+  oidc_payloads: OidcPayloadsTable;
   tags: TagsTable;
   asset_tags: AssetTagsTable;
   entry_tags: EntryTagsTable;

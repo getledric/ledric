@@ -7,3 +7,5 @@ export {
   SERVER_INSTRUCTIONS
 } from './server.js';
 export { runStdio } from './stdio.js';
+export { createStreamableHttpHandle } from './streamable-http.js';
+export type { StreamableHttpHandle } from './streamable-http.js';

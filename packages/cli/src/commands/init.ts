@@ -23,6 +23,12 @@ export interface InitAnswers {
   mintKeys: boolean;
   updateGitignore: boolean;
   scaffoldProxy: boolean;
+  /** Mount /mcp on Streamable HTTP for local clients. Default Y. */
+  enableHttpMcp: boolean;
+  /** Expose to claude.ai over the public internet. Default N. Implies enableHttpMcp. */
+  enablePublicMcp: boolean;
+  /** Required when enablePublicMcp is true; null otherwise. */
+  publicUrl: string | null;
 }
 
 export const DEFAULTS: InitAnswers = {
@@ -35,13 +41,16 @@ export const DEFAULTS: InitAnswers = {
   configureClaudeDesktop: false,
   mintKeys: true,
   updateGitignore: true,
-  scaffoldProxy: true
+  scaffoldProxy: true,
+  enableHttpMcp: true,
+  enablePublicMcp: false,
+  publicUrl: null
 };
 
 // Version pin for the @ledric/proxy dep we add to a consumer's
 // package.json. Kept in lockstep with the CLI's own version — bump on
 // each release that ships a proxy change.
-export const PROXY_DEP_VERSION = '^0.2.0';
+export const PROXY_DEP_VERSION = '^0.3.0';
 
 const LEDRIC_GITIGNORE_LINES: readonly string[] = [
   '# ledric',
@@ -64,6 +73,14 @@ export function buildConfig(a: InitAnswers): LedricConfig {
   };
   if (a.assetsBackend === 'local' && a.assetsPath !== null && cfg.assets) {
     cfg.assets.path = a.assetsPath;
+  }
+  if (a.enablePublicMcp) {
+    cfg.mcp = { http: true, public: true };
+    if (a.publicUrl !== null && a.publicUrl.length > 0) {
+      cfg.publicUrl = a.publicUrl;
+    }
+  } else if (a.enableHttpMcp) {
+    cfg.mcp = { http: true };
   }
   return cfg;
 }
@@ -469,7 +486,44 @@ async function runPrompts(framework: Framework): Promise<InitAnswers> {
           message: `Detected ${framework} — scaffold an @ledric/proxy route file?`,
           initialValue: true
         });
-      }
+      },
+      // Two MCP-mode questions, asked independently so the user thinks
+      // about local-vs-public separately. The local case ships /mcp on
+      // 127.0.0.1 with API-key auth; the public case adds the OAuth
+      // provider and binds 0.0.0.0.
+      enableHttpMcp: () =>
+        p.confirm({
+          message:
+            'Enable HTTP MCP for local clients? (Lets multiple Claude Code / Cursor / Claude Desktop sessions share one ledric daemon over /mcp.)',
+          initialValue: true
+        }),
+      enablePublicMcp: ({ results }) =>
+        results.enableHttpMcp === false
+          ? Promise.resolve(false)
+          : p.confirm({
+              message:
+                'Make this instance reachable from claude.ai over the public internet? (Adds the OAuth provider; only do this if you actually need it.)',
+              initialValue: false
+            }),
+      publicUrl: ({ results }) =>
+        results.enablePublicMcp === true
+          ? p.text({
+              message: 'Public URL where this ledric will be reachable',
+              placeholder: 'https://ledric.example.com',
+              validate: (v) => {
+                if (typeof v !== 'string' || v.length === 0) return 'required';
+                try {
+                  const u = new URL(v);
+                  if (u.protocol !== 'https:' && u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') {
+                    return 'must be https (loopback http allowed for testing)';
+                  }
+                } catch {
+                  return 'not a valid URL';
+                }
+                return undefined;
+              }
+            })
+          : Promise.resolve(undefined)
     },
     {
       onCancel: () => {
@@ -493,7 +547,10 @@ async function runPrompts(framework: Framework): Promise<InitAnswers> {
     configureClaudeDesktop: responses.configureClaudeDesktop === true,
     mintKeys: responses.mintKeys === true,
     updateGitignore: responses.updateGitignore === true,
-    scaffoldProxy: responses.scaffoldProxy === true
+    scaffoldProxy: responses.scaffoldProxy === true,
+    enableHttpMcp: responses.enableHttpMcp === true || responses.enablePublicMcp === true,
+    enablePublicMcp: responses.enablePublicMcp === true,
+    publicUrl: typeof responses.publicUrl === 'string' ? responses.publicUrl : null
   };
 }
 
@@ -514,6 +571,12 @@ export const initCommand = defineCommand({
     force: {
       type: 'boolean',
       description: 'Overwrite ledric.config.json if it already exists.',
+      default: false
+    },
+    'require-reader-key': {
+      type: 'boolean',
+      description:
+        'Mint a reader key alongside the admin key, for closed-reads deployments. Default: skip (the reader key only matters with --require-reader-key on serve / http; mint later via `ledric keys create --role reader`).',
       default: false
     }
   },
@@ -575,19 +638,25 @@ export const initCommand = defineCommand({
     if (answers.mintKeys) {
       const storage = await openSqlite({ path: answers.db });
       try {
-        const keys = await bootstrapApiKeysIfEmpty(storage, undefined, undefined);
+        const mintReader = args['require-reader-key'] === true;
+        const keys = await bootstrapApiKeysIfEmpty(
+          storage,
+          undefined,
+          undefined,
+          { mintReader }
+        );
         if (keys === null) {
           p.log.warn('Keys already exist in this DB — skipped minting.');
         } else {
-          p.note(
-            `admin:  ${keys.adminSecret}\nreader: ${keys.readerSecret}`,
-            'API keys (save these — not shown again)'
-          );
+          const noteBody = keys.readerSecret !== undefined
+            ? `admin:  ${keys.adminSecret}\nreader: ${keys.readerSecret}`
+            : `admin:  ${keys.adminSecret}`;
+          p.note(noteBody, 'API key (save it — not shown again)');
           const envPath = resolve(cwd, '.env.local');
-          const lines = [
-            `LEDRIC_ADMIN_KEY=${keys.adminSecret}`,
-            `LEDRIC_READER_KEY=${keys.readerSecret}`
-          ];
+          const lines = [`LEDRIC_ADMIN_KEY=${keys.adminSecret}`];
+          if (keys.readerSecret !== undefined) {
+            lines.push(`LEDRIC_READER_KEY=${keys.readerSecret}`);
+          }
           // The proxy scaffold reads LEDRIC_URL — add it when we know
           // we'll be writing a route that needs it.
           if (answers.scaffoldProxy) {

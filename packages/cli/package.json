@@ -1,6 +1,6 @@
 {
   "name": "ledric",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "ledric CLI — single-binary entry point.",
   "license": "Apache-2.0",
   "repository": {
@@ -35,6 +35,7 @@
     "@ledric/gui": "workspace:*",
     "@ledric/http-server": "workspace:*",
     "@ledric/mcp-server": "workspace:*",
+    "@ledric/oauth": "workspace:*",
     "@ledric/schema": "workspace:*",
     "@ledric/storage": "workspace:*",
     "citty": "^0.1.6"

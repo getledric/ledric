@@ -72,13 +72,29 @@ export const httpCommand = defineCommand({
       description:
         'Require a reader key on every GET (closed-reads mode). Default: GETs are open and only writes need an admin key.',
       default: false
+    },
+    'http-mcp': {
+      type: 'boolean',
+      description:
+        'Mount the Streamable HTTP MCP transport at /mcp for local clients. Bearer-key auth only.',
+      default: false
+    },
+    'public-mcp': {
+      type: 'boolean',
+      description:
+        'Expose this ledric on the public internet for claude.ai custom connectors. Implies --http-mcp; requires publicUrl; binds 0.0.0.0 by default.',
+      default: false
     }
   },
   async run({ args }) {
     const cfg = loadConfig();
     const dbPath = resolveDb(args.db);
     const portStr = args.port ?? (cfg.http?.port !== undefined ? String(cfg.http.port) : '3000');
-    const host = args.host ?? cfg.http?.host ?? '127.0.0.1';
+    const publicMcp = args['public-mcp'] === true || cfg.mcp?.public === true;
+    const httpMcp =
+      publicMcp || args['http-mcp'] === true || cfg.mcp?.http === true;
+    const hostDefault = publicMcp ? '0.0.0.0' : '127.0.0.1';
+    const host = args.host ?? cfg.http?.host ?? hostDefault;
     const assetsBackend = args['assets-backend'] ?? cfg.assets?.backend;
     const assetsRoot = args['assets-root'] ?? cfg.assets?.path;
     const requireReaderKey =
@@ -124,7 +140,8 @@ export const httpCommand = defineCommand({
     const bootstrapped = await bootstrapApiKeysIfEmpty(
       storage,
       envAdminKey,
-      envReaderKey
+      envReaderKey,
+      { mintReader: requireReaderKey }
     );
     if (bootstrapped !== null) printFirstBootKeys(bootstrapped);
 
@@ -136,10 +153,31 @@ export const httpCommand = defineCommand({
           }
         : undefined;
 
+    const publicUrl = cfg.publicUrl;
+    if (publicMcp && (publicUrl === undefined || publicUrl.length === 0)) {
+      process.stderr.write(
+        'ledric: --public-mcp requires `publicUrl` to be set in ledric.config.json (it identifies this server as an OAuth issuer and anchors the Origin allowlist). See docs/remote-mcp.md.\n'
+      );
+      process.exit(2);
+    }
+    const mcpOpts = httpMcp
+      ? {
+          http: true as const,
+          ...(publicMcp ? { public: true as const } : {}),
+          ...(publicUrl !== undefined ? { publicUrl } : {}),
+          ...(Array.isArray(cfg.mcp?.allowedOrigins)
+            ? { allowedOrigins: cfg.mcp.allowedOrigins }
+            : {}),
+          ...(Array.isArray(cfg.mcp?.allowedCidrs)
+            ? { allowedCidrs: cfg.mcp.allowedCidrs }
+            : {})
+        }
+      : undefined;
     const { url, close } = await runHttp(core, {
       port: parseInt(portStr, 10),
       host,
       ...(guiOpts !== undefined ? { gui: guiOpts } : {}),
+      ...(mcpOpts !== undefined ? { mcp: mcpOpts } : {}),
       auth: {
         storage,
         requireReaderKey,

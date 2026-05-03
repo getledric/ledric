@@ -18,6 +18,42 @@ export interface LedricConfig {
   auth?: {
     requireReaderKey?: boolean;
   };
+  /**
+   * Public URL the operator advertises this ledric on. Used as the
+   * OAuth issuer when `mcp.public` is on, and as the Origin allowlist
+   * anchor. Required when `mcp.public` is enabled.
+   */
+  publicUrl?: string;
+  mcp?: {
+    /**
+     * Mount Streamable HTTP MCP transport at /mcp. API-key bearer auth
+     * only; binds 127.0.0.1 by default. The natural setup for multiple
+     * local clients sharing one ledric daemon. Implied by `public`.
+     */
+    http?: boolean;
+    /**
+     * Expose ledric to the public internet for claude.ai custom
+     * connectors. Implies `http`; mounts the OAuth provider, accepts
+     * OAuth bearers on /mcp, requires `publicUrl`, and defaults the
+     * bind to 0.0.0.0.
+     */
+    public?: boolean;
+    /** Override the Origin-header allowlist. */
+    allowedOrigins?: readonly string[];
+    /**
+     * Optional pre-auth IP allowlist (CIDR notation). Empty / unset =
+     * allow all. Recommended in public-mode production deployments —
+     * use Anthropic's published cloud IP ranges (their list drifts, so
+     * we don't ship defaults).
+     */
+    allowedCidrs?: readonly string[];
+  };
+  oauth?: {
+    /** Allow Dynamic Client Registration. Default: true (when mcp.public is on). */
+    dcr?: boolean;
+    accessTokenTtlSeconds?: number;
+    refreshTokenTtlSeconds?: number;
+  };
 }
 
 const FILENAME = 'ledric.config.json';

@@ -193,5 +193,27 @@ export const postgresMigrations: Migration[] = [
       CREATE INDEX idx_fts_entries_ts ON fts_entries USING GIN (ts);
       CREATE INDEX idx_fts_entries_type ON fts_entries (type);
     `
+  },
+  {
+    id: 3,
+    name: '0003_oauth',
+    sql: `
+      CREATE TABLE oidc_payloads (
+        model       TEXT    NOT NULL,
+        id          TEXT    NOT NULL,
+        payload     TEXT    NOT NULL,
+        grant_id    TEXT,
+        user_code   TEXT,
+        uid         TEXT,
+        expires_at  BIGINT,
+        consumed_at BIGINT,
+        PRIMARY KEY (model, id)
+      );
+
+      CREATE INDEX idx_oidc_payloads_grant     ON oidc_payloads (grant_id);
+      CREATE INDEX idx_oidc_payloads_user_code ON oidc_payloads (user_code);
+      CREATE INDEX idx_oidc_payloads_uid       ON oidc_payloads (uid);
+      CREATE INDEX idx_oidc_payloads_expires   ON oidc_payloads (expires_at);
+    `
   }
 ];
