@@ -230,5 +230,27 @@ export const sqliteMigrations: Migration[] = [
       CREATE INDEX idx_oidc_payloads_uid       ON oidc_payloads (uid);
       CREATE INDEX idx_oidc_payloads_expires   ON oidc_payloads (expires_at);
     `
+  },
+  {
+    id: 4,
+    name: '0004_signing_keys',
+    sql: `
+      -- Persistent JWT signing keys for the OAuth provider. Without
+      -- these, oidc-provider auto-generates dev-mode keys at boot —
+      -- which means every \`serve\` restart invalidates every issued
+      -- JWT. claude.ai connectors persist across sessions and would
+      -- silently lose their connection on each restart.
+      --
+      -- One row per active key. Multi-row layout is for future
+      -- rotation; today we only ever populate a single RS256 key on
+      -- first boot in public mode.
+
+      CREATE TABLE oidc_signing_keys (
+        kid        TEXT    PRIMARY KEY,
+        jwk        TEXT    NOT NULL,    -- private JWK as JSON
+        alg        TEXT    NOT NULL,    -- 'RS256' for now
+        created_at INTEGER NOT NULL
+      ) STRICT;
+    `
   }
 ];

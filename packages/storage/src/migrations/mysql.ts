@@ -228,5 +228,17 @@ export const mysqlMigrations: Migration[] = [
         INDEX idx_oidc_payloads_expires   (expires_at)
       ) ENGINE=InnoDB;
     `
+  },
+  {
+    id: 4,
+    name: '0004_signing_keys',
+    sql: `
+      CREATE TABLE oidc_signing_keys (
+        kid        VARCHAR(191) PRIMARY KEY,
+        jwk        TEXT         NOT NULL,
+        alg        VARCHAR(32)  NOT NULL,
+        created_at BIGINT       NOT NULL
+      ) ENGINE=InnoDB;
+    `
   }
 ];
