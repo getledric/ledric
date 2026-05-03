@@ -265,6 +265,42 @@ over MCP.
 ]
 ```
 
+### `ANY /mcp` (when `--http-mcp` or `--public-mcp` is on)
+
+Streamable HTTP MCP transport. POST for client→server JSON-RPC, GET
+for the optional server→client SSE stream, DELETE to terminate a
+session. Session correlation via the `Mcp-Session-Id` header per
+[the MCP spec](https://modelcontextprotocol.io/specification).
+
+Auth on `/mcp` is per-tool, mirroring `/rpc`: protocol-level reads
+(`initialize`, `tools/list`, etc.) and read-only `tools/call` invocations
+accept reader keys; writes need admin. Public mode also accepts
+OAuth bearer JWTs (scope → role per the table in
+[`auth.md`](./auth.md#oauth-tokens-third-path---public-mcp-only)).
+Routes 404 when the flag isn't set.
+
+See [`remote-mcp.md`](./remote-mcp.md) for the local-vs-public mode
+split.
+
+### OAuth provider (when `--public-mcp` is on)
+
+Six routes, all rooted at the configured `publicUrl`:
+
+| Path | Purpose |
+|---|---|
+| `GET /.well-known/oauth-authorization-server` | RFC 8414 discovery |
+| `GET /.well-known/oauth-protected-resource` | MCP authorization spec |
+| `POST /oauth/register` | DCR (RFC 7591) — public PKCE-only clients |
+| `GET /oauth/authorize` | Consent page (HTML) |
+| `POST /oauth/authorize` | Consume consent token, mint auth code, redirect |
+| `POST /oauth/token` | `authorization_code` and `refresh_token` grants |
+| `POST /oauth/revoke` | RFC 7009 |
+| `GET /oauth/jwks` | Ed25519 public key (single-key set, stable `kid`) |
+
+Tokens are Ed25519-signed JWTs. Default access TTL is 1h, refresh TTL
+30d, refresh rotation enabled. Replaying an already-rotated refresh
+token revokes the entire lineage forward.
+
 ### `POST /rpc`
 
 Catch-all dispatch for the MCP tool surface. Same input shape as

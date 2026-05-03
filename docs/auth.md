@@ -49,6 +49,23 @@ password.
 A `reader` key only matters when [closed-reads mode](#closed-reads-mode)
 is on — under the default (reads_open) mode you don't need one.
 
+### OAuth tokens (third path, `--public-mcp` only)
+
+When `serve --public-mcp` is on, ledric also accepts OAuth 2.1 JWT
+bearers on `/mcp`. They map to the same admin/reader roles via scope:
+
+| OAuth scope | Maps to ledric role |
+|---|---|
+| `ledric:read` | `reader` |
+| `ledric:write` | `admin` |
+
+Auth precedence on `/mcp` is: presented JWT first (looks like a JWT
+when it starts with `ey` and contains `.`), API-key bearer as the
+fallback. A bad JWT falls through to API-key auth — clients sending
+both don't dead-end on a misconfigured token. The OAuth provider
+itself lives at `/.well-known/*` and `/oauth/*`; see
+[`remote-mcp.md`](./remote-mcp.md) for the flow.
+
 ---
 
 ## How keys get minted

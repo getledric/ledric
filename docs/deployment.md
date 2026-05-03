@@ -122,6 +122,38 @@ CDN gotcha: if your CDN is fronting `/assets/<ref_key>` and you're in closed-rea
 
 ---
 
+## Exposing remote MCP publicly
+
+If you're running `ledric serve --public-mcp` so claude.ai's custom-connector flow can reach in, the deployment shape tightens up a few notches.
+
+**Required:**
+
+- `publicUrl` set in `ledric.config.json` (or `--public-url`). Must be the canonical HTTPS URL Anthropic's cloud will hit. ledric refuses to boot in public mode without it — it's the OAuth issuer and the JWT `iss` claim.
+- TLS terminating at your reverse proxy. ledric itself doesn't speak TLS.
+- Bind ledric to `127.0.0.1` (or a private network interface) and let the reverse proxy be the only public-facing thing. Set `--http-host=127.0.0.1` to override the public-mode default of `0.0.0.0`.
+
+**Strongly recommended:**
+
+- **CIDR allowlist** via `mcp.allowedCidrs` in `ledric.config.json`. Pre-auth IP filter applied before any other check on `/mcp` and `/oauth/*`. Anthropic publishes the IP ranges their cloud uses to reach custom connectors — use those as your starting point.
+
+  ```json
+  { "mcp": { "allowedCidrs": ["8.8.4.0/22", "203.0.113.0/24"] } }
+  ```
+
+  ledric does **not** ship a hardcoded default — Anthropic's list drifts and a stale embedded default would lock you out (or worse, let in IPs that Anthropic no longer uses). Look the values up before you set the allowlist.
+
+  Make sure your reverse proxy passes `X-Forwarded-For` so `req.ip` is the real client and not the proxy.
+
+- Rate-limit `/oauth/*` at the reverse proxy. ledric's DCR endpoint is open by default (the spec assumes it is) but doesn't rate-limit on its own. A flood of registrations would fill the `oauth_clients` table.
+
+- Run with the `--require-reader-key` flag too if you also use `/rpc` from a server-side consumer — closed-reads mode keeps the API-key path tight even though OAuth tokens are the primary credential on `/mcp`.
+
+**Cloudflare Tunnel** is a sane laptop-as-deployment-target option: it gives you a stable hostname, terminates TLS, lets you put a Cloudflare Access policy in front, and forwards through to ledric on `127.0.0.1`. Useful for "I just want to add this to my claude.ai" without wrangling a VPS.
+
+See [`remote-mcp.md`](./remote-mcp.md) for the OAuth flow itself.
+
+---
+
 ## Backups
 
 ### SQLite
