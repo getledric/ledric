@@ -17,6 +17,10 @@ or Opus) actually behaves over MCP, not a literal recording.
 > shape of Claude's tool calls. **What's illustrative:** specific
 > response wording and turn counts will vary by model and session.
 
+If "type", "entry", "slug", "version", or "ref" are unfamiliar
+words on a ledric page, [`concepts.md`](./concepts.md) is the
+five-minute primer that grounds the rest.
+
 - [Before you start](#before-you-start)
 - [Setting up the schema](#setting-up-the-schema)
 - [Seeding some content](#seeding-some-content)
