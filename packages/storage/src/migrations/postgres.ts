@@ -193,5 +193,56 @@ export const postgresMigrations: Migration[] = [
       CREATE INDEX idx_fts_entries_ts ON fts_entries USING GIN (ts);
       CREATE INDEX idx_fts_entries_type ON fts_entries (type);
     `
+  },
+  {
+    id: 3,
+    name: '0003_oauth',
+    sql: `
+      CREATE TABLE oauth_clients (
+        id            BYTEA   PRIMARY KEY,
+        env_id        BYTEA   NOT NULL REFERENCES envs(id),
+        client_id     TEXT    NOT NULL UNIQUE,
+        secret_hash   BYTEA,
+        name          TEXT    NOT NULL,
+        redirect_uris TEXT    NOT NULL,
+        created_at    BIGINT  NOT NULL,
+        revoked_at    BIGINT
+      );
+
+      CREATE INDEX idx_oauth_clients_env ON oauth_clients (env_id);
+
+      CREATE TABLE oauth_codes (
+        code_hash      BYTEA   PRIMARY KEY,
+        env_id         BYTEA   NOT NULL REFERENCES envs(id),
+        client_id      TEXT    NOT NULL,
+        redirect_uri   TEXT    NOT NULL,
+        code_challenge TEXT    NOT NULL,
+        scope          TEXT    NOT NULL,
+        expires_at     BIGINT  NOT NULL,
+        consumed_at    BIGINT
+      );
+
+      CREATE INDEX idx_oauth_codes_expiry ON oauth_codes (env_id, expires_at);
+
+      CREATE TABLE oauth_refresh_tokens (
+        token_hash        BYTEA   PRIMARY KEY,
+        env_id            BYTEA   NOT NULL REFERENCES envs(id),
+        client_id         TEXT    NOT NULL,
+        scope             TEXT    NOT NULL,
+        issued_at         BIGINT  NOT NULL,
+        expires_at        BIGINT  NOT NULL,
+        revoked_at        BIGINT,
+        parent_token_hash BYTEA
+      );
+
+      CREATE INDEX idx_oauth_refresh_client ON oauth_refresh_tokens (env_id, client_id);
+
+      CREATE TABLE oauth_keys (
+        env_id      BYTEA   PRIMARY KEY REFERENCES envs(id),
+        private_jwk TEXT    NOT NULL,
+        public_jwk  TEXT    NOT NULL,
+        created_at  BIGINT  NOT NULL
+      );
+    `
   }
 ];

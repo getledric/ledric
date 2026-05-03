@@ -186,6 +186,16 @@ export class LedricStorage implements Storage {
     return Buffer.from(this.mainEnvId);
   }
 
+  /**
+   * Public env-id accessor for adapter packages (e.g. `@ledric/oauth`)
+   * that talk to their own tables via `storage.db` and need to scope
+   * their queries to the same env. Returns a fresh Buffer copy each
+   * call — callers are free to mutate without affecting internal state.
+   */
+  envId(): Buffer {
+    return Buffer.from(this.mainEnvId);
+  }
+
   async createType(input: CreateTypeInput): Promise<CreateTypeResult> {
     const { definition, author } = input;
     const envId = this.envIdBuf();

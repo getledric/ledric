@@ -196,5 +196,74 @@ export const sqliteMigrations: Migration[] = [
         tokenize = 'porter unicode61 remove_diacritics 2'
       );
     `
+  },
+  {
+    id: 3,
+    name: '0003_oauth',
+    sql: `
+      -- OAuth provider tables. Populated only when mcp.public is on;
+      -- otherwise they sit empty. Migrations always run, so the schema
+      -- is ready the moment the operator flips the flag.
+
+      CREATE TABLE oauth_clients (
+        id            BLOB    PRIMARY KEY,
+        env_id        BLOB    NOT NULL REFERENCES envs(id),
+        -- The public OAuth client_id string. Readable / loggable; the
+        -- secret_hash is what gates use of it. Null for public clients
+        -- (PKCE-only — the DCR default for our use).
+        client_id     TEXT    NOT NULL UNIQUE,
+        secret_hash   BLOB,
+        -- DCR-supplied display name. UNTRUSTED — always show client_id
+        -- alongside on consent UIs.
+        name          TEXT    NOT NULL,
+        redirect_uris TEXT    NOT NULL,
+        created_at    INTEGER NOT NULL,
+        revoked_at    INTEGER
+      ) STRICT;
+
+      CREATE INDEX idx_oauth_clients_env ON oauth_clients (env_id);
+
+      CREATE TABLE oauth_codes (
+        code_hash      BLOB    PRIMARY KEY,
+        env_id         BLOB    NOT NULL REFERENCES envs(id),
+        client_id      TEXT    NOT NULL,
+        redirect_uri   TEXT    NOT NULL,
+        code_challenge TEXT    NOT NULL,
+        scope          TEXT    NOT NULL,
+        expires_at     INTEGER NOT NULL,
+        consumed_at    INTEGER
+      ) STRICT;
+
+      -- Cleanup queries scan by expiry; client lookups are rare so no
+      -- index there.
+      CREATE INDEX idx_oauth_codes_expiry ON oauth_codes (env_id, expires_at);
+
+      CREATE TABLE oauth_refresh_tokens (
+        token_hash        BLOB    PRIMARY KEY,
+        env_id            BLOB    NOT NULL REFERENCES envs(id),
+        client_id         TEXT    NOT NULL,
+        scope             TEXT    NOT NULL,
+        issued_at         INTEGER NOT NULL,
+        expires_at        INTEGER NOT NULL,
+        revoked_at        INTEGER,
+        -- Lineage for rotation: a refreshed token records its
+        -- predecessor so audit can trace a chain forward, and so a
+        -- replay of an already-rotated token can revoke the entire
+        -- chain (per spec).
+        parent_token_hash BLOB
+      ) STRICT;
+
+      CREATE INDEX idx_oauth_refresh_client ON oauth_refresh_tokens (env_id, client_id);
+
+      -- One signing keypair per env. Keyed by env_id as PK so we can't
+      -- accidentally end up with two — the first-boot generator does
+      -- INSERT OR IGNORE.
+      CREATE TABLE oauth_keys (
+        env_id      BLOB    PRIMARY KEY REFERENCES envs(id),
+        private_jwk TEXT    NOT NULL,
+        public_jwk  TEXT    NOT NULL,
+        created_at  INTEGER NOT NULL
+      ) STRICT;
+    `
   }
 ];
