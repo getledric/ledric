@@ -204,6 +204,86 @@ opinions about CMS permission models to drive the design.
 
 ---
 
+## Unconfirmed (lifted from internal specs)
+
+Items the early design docs described that aren't built and aren't
+otherwise classified above. Kept here as an audit trail rather than
+a commitment — each one will graduate to **Planned**, get folded
+into a shipped feature, or move to **Explicitly out of scope** as we
+decide. Until then, these are open questions, not promises.
+
+- **`patch` MCP tool (RFC 6902 JSON Patch).** A token-efficient entry-update
+  path with `op: 'test'` for path-level optimistic concurrency. Today
+  only `merge_patch` (RFC 7396) exists, and only on `alter_type` /
+  `migrate_entries`.
+- **`validate` MCP tool.** Pure validation without writing — agents pre-check
+  field shapes before calling `draft`.
+- **`purge` / `purge_type` hard-delete tools.** GDPR-path bypass of
+  the soft-delete tombstone.
+- **`events` change-feed table + cursor-resumable stream.** Backs the
+  planned `subscribe` tool and webhook retry semantics. Without it,
+  restart-resume of subscribers can't be correct.
+- **`subscriptions` table.** Webhook targets + SSE cursors + HMAC
+  secret. Same dependency story as `events`.
+- **`refs_out` materialised reverse-reference index.** Powers
+  "who references X" queries and a `references_from` field in
+  `describe_model`.
+- **`references_from` in `describe_model`.** Advertises which fields on
+  other types reference this one. Depends on `refs_out`.
+- **`:::ref{... version="published"}` symbolic pin.** Numeric `@version`
+  pinning works; the symbolic `published` pin (always tracks the
+  published pointer) doesn't.
+- **`depth: 'list' | 'summary' | 'full'` three-level projection.**
+  Today's `summary: boolean` covers two of the three; `depth: 'list'`
+  returning only `{ id, slug, type }` is the cheapest shape and isn't
+  there.
+- **`select` ad-hoc field mask + `include` per-field expansion.**
+  Per-call projection beyond the type's declared `summary_fields`.
+  `expand_assets` / `resolve_references` cover slices of this; the
+  general form doesn't exist.
+- **`max_tokens` + smart truncation + `continue_cursor`.**
+  Token-budget-aware reads where the server truncates and hands back
+  a cursor. Nothing budgets responses today.
+- **`as_of: { time: ISO }` time-travel reads.** Read-by-version exists
+  (`?version=N`); read-by-timestamp doesn't.
+- **`include_meta: true` → `_meta` sidecar.** Version, env,
+  schema_version, content_hash, request_id. The data is stored
+  (content_hash per row); it's not exposed on the wire, and there's
+  no ETag derived from it.
+- **`change_class` column on `type_versions`.** Stamps each schema
+  version with its `safe | needs_backfill | destructive`
+  classification at write time. Currently computed on demand, not
+  persisted.
+- **`conflicting_paths[]` on `VERSION_CONFLICT` errors.** Today's
+  conflict response carries `current_version` and
+  `your_parent_version`; path-level conflicts would let agents do
+  surgical retries.
+- **Reserved error codes never raised.** `REFERENCE_TOMBSTONED`,
+  `TOKEN_BUDGET_EXCEEDED`, `SCHEMA_CHANGE_UNSAFE`, `TYPE_IN_USE`,
+  `RATE_LIMITED`, `SCHEMA_MISMATCH` — listed in the spec, not produced
+  anywhere in the source.
+- **Agent-vs-user identity split + scope axes.** `api_keys.role` is
+  `admin | reader` only; spec defined `kind: 'user' | 'agent'` with
+  separate audit / rate limits and per-resource scope axes
+  (`content:*`, `schema:*`, `ops:*`, per-type / per-field grants).
+- **Persisted queries.** Listed as a v1 open question in the spec —
+  never designed, never built.
+- **`ledric prune` CLI.** Entry-version GC with `keep_last_n` /
+  `keep_since` / `keep_published` knobs. Retention is "keep forever
+  by default" today; the prune verb doesn't exist.
+- **`ledric export` portable JSON dump.** The anti-lock-in
+  deliverable from the spec — bulk-export every type and entry as
+  portable JSON.
+- **`:::html{...}:::` fenced-HTML directive.** Per-field `html:
+  'allow' | 'sanitize' | 'forbid'` policy works; the named directive
+  (the trusted-iframe escape hatch with its own per-block flags)
+  doesn't.
+- **`ledric env branch` CLI stub.** Spec reserved the verb so future
+  CLI shape would stay stable, even if branching itself is v2 — the
+  stub doesn't exist today.
+
+---
+
 ## Explicitly out of scope
 
 Lifted from the original spec, with caveats. These are decisions,
@@ -265,11 +345,11 @@ managed hosting on top of the open-source core, that's fine
 
 Roughly:
 
-1. **Spec drift is reconciled toward the code.** When the
-   [original spec](./internal/original-spec.md) and the
-   shipping behaviour diverge, the docs reflect what ships. The
-   spec is preserved as a record of intent, not a
-   forward-looking promise.
+1. **Spec drift is reconciled toward the code.** Where the
+   original spec and the shipping behaviour diverged, the docs
+   reflect what ships. Items the spec described that never landed
+   live in the **Unconfirmed** section above as an audit trail —
+   not a forward-looking promise.
 2. **GitHub issues and Discussions are the input channel.**
    "I tried X and it broke" issues get fixed faster than design
    debates, but design debates are read.
@@ -288,5 +368,3 @@ every time.
 - [FAQ](./faq.md) — the questions this page sets up.
 - [Why ledric](./why.md) — the comparative argument and "when
   ledric is the wrong choice".
-- [Original spec](./internal/original-spec.md) — what was
-  intended; useful as historical context.

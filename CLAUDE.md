@@ -137,5 +137,5 @@ When making a common change, these are the files in roughly the order you should
 - `docs/concepts.md` — types/entries, ids, versions, references vs inline refs, assets, locales, the wire format.
 - `docs/mcp-tools.md` — the full 20-tool surface; same args/returns as `POST /rpc`.
 - `docs/http-api.md` — REST routes, query params, error codes.
-- `docs/storage.md` and `docs/internal/storage.md` — table layout, indexing, migrations.
+- `docs/storage.md` — table layout, indexing, migrations.
 - `docs/agent-recipes.md` — agent-facing prompt examples for common ledric workflows.
