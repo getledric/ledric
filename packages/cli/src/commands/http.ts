@@ -72,6 +72,12 @@ export const httpCommand = defineCommand({
       description:
         'Require a reader key on every GET (closed-reads mode). Default: GETs are open and only writes need an admin key.',
       default: false
+    },
+    'remote-mcp': {
+      type: 'boolean',
+      description:
+        'Mount the Streamable HTTP MCP transport at /mcp so remote clients can connect over the public internet. Disabled by default.',
+      default: false
     }
   },
   async run({ args }) {
@@ -83,6 +89,7 @@ export const httpCommand = defineCommand({
     const assetsRoot = args['assets-root'] ?? cfg.assets?.path;
     const requireReaderKey =
       args['require-reader-key'] === true || cfg.auth?.requireReaderKey === true;
+    const remoteMcp = args['remote-mcp'] === true || cfg.mcp?.remote === true;
 
     const assetsConfig = assetsConfigFromArgs({
       'assets-backend': assetsBackend,
@@ -136,10 +143,21 @@ export const httpCommand = defineCommand({
           }
         : undefined;
 
+    const publicUrl = cfg.publicUrl ?? httpBase;
+    const mcpOpts = remoteMcp
+      ? {
+          remote: true as const,
+          publicUrl,
+          ...(Array.isArray(cfg.mcp?.allowedOrigins)
+            ? { allowedOrigins: cfg.mcp.allowedOrigins }
+            : {})
+        }
+      : undefined;
     const { url, close } = await runHttp(core, {
       port: parseInt(portStr, 10),
       host,
       ...(guiOpts !== undefined ? { gui: guiOpts } : {}),
+      ...(mcpOpts !== undefined ? { mcp: mcpOpts } : {}),
       auth: {
         storage,
         requireReaderKey,

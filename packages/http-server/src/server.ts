@@ -7,6 +7,8 @@ import { promises as fs } from 'node:fs';
 import { join as pathJoin } from 'node:path';
 import type { Core } from '@ledric/core';
 import { parseTransformParams } from '@ledric/core';
+import { createStreamableHttpHandle } from '@ledric/mcp-server';
+import type { StreamableHttpHandle } from '@ledric/mcp-server';
 import type { Storage, ApiKeyRole } from '@ledric/storage';
 import { hashApiKey, parseApiKeyRole, looksLikeApiKey } from '@ledric/storage';
 
@@ -129,6 +131,23 @@ export interface HttpServerOptions {
    * middleware treats requests as anonymous (auth-off mode).
    */
   auth?: HttpAuthOptions;
+  /**
+   * Streamable HTTP MCP transport. When `remote: true`, mounts the MCP
+   * endpoints under `/mcp` (POST for JSON-RPC, GET for SSE, DELETE for
+   * session termination). Auth on `/mcp` follows the same per-tool
+   * model as `/rpc` — protocol reads (`initialize`, `tools/list`, etc.)
+   * and read-only tool calls accept reader keys; everything else needs
+   * admin. Disabled by default; enable with `serve --remote-mcp`.
+   *
+   * `allowedOrigins` is the DNS-rebinding allowlist for browser
+   * clients — defaults to localhost variants plus `publicUrl`'s origin
+   * when set. Non-browser clients (no `Origin` header) bypass the check.
+   */
+  mcp?: {
+    remote: boolean;
+    allowedOrigins?: readonly string[];
+    publicUrl?: string;
+  };
 }
 
 export function createHttpServer(core: Core, opts: HttpServerOptions = {}): FastifyInstance {
@@ -701,7 +720,108 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     }
   });
 
+  // Streamable HTTP MCP transport — disabled by default. Lives in
+  // mcp-server (createStreamableHttpHandle) so the tool catalogue stays
+  // in one place; we just plumb it onto Fastify here. Auth is handled
+  // up in the preHandler (per-method / per-tool, mirroring /rpc).
+  let mcpHandle: StreamableHttpHandle | null = null;
+  if (opts.mcp?.remote === true) {
+    mcpHandle = createStreamableHttpHandle(core);
+    const allowedOrigins = computeAllowedOrigins(opts.mcp);
+    const handler = async (req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
+      if (!isOriginAllowed(req.headers.origin, allowedOrigins)) {
+        reply.code(403).send({
+          error: {
+            code: 'FORBIDDEN',
+            message: `Origin ${String(req.headers.origin)} not in allowlist`
+          }
+        });
+        return;
+      }
+      // Hand the raw Node req/res to the SDK transport. Fastify must
+      // not write anything else after this — `hijack()` makes it stop.
+      reply.hijack();
+      try {
+        await mcpHandle!.handle(req.raw, reply.raw, req.body);
+      } catch (err) {
+        if (!reply.raw.headersSent) {
+          reply.raw.statusCode = 500;
+          reply.raw.setHeader('content-type', 'application/json');
+          reply.raw.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: {
+                code: -32603,
+                message: err instanceof Error ? err.message : String(err)
+              },
+              id: null
+            })
+          );
+        }
+      }
+    };
+    app.post('/mcp', handler);
+    app.get('/mcp', handler);
+    app.delete('/mcp', handler);
+
+    // Tear sessions down on server close so SIGINT doesn't leak them.
+    app.addHook('onClose', async () => {
+      if (mcpHandle !== null) await mcpHandle.close();
+    });
+  }
+
   return app;
+}
+
+/**
+ * Default Origin allowlist when none is configured: localhost variants
+ * for local dev, plus the configured publicUrl's origin for production.
+ * Non-browser clients (no Origin header) bypass the check entirely —
+ * they don't have a same-origin policy to subvert in the first place.
+ */
+function computeAllowedOrigins(mcp: NonNullable<HttpServerOptions['mcp']>): Set<string> {
+  if (mcp.allowedOrigins !== undefined && mcp.allowedOrigins.length > 0) {
+    return new Set(mcp.allowedOrigins);
+  }
+  const out = new Set<string>([
+    'http://localhost',
+    'http://127.0.0.1',
+    'https://localhost',
+    'https://127.0.0.1'
+  ]);
+  if (mcp.publicUrl !== undefined) {
+    try {
+      out.add(new URL(mcp.publicUrl).origin);
+    } catch {
+      /* invalid URL — skip */
+    }
+  }
+  return out;
+}
+
+function isOriginAllowed(
+  rawOrigin: string | string[] | undefined,
+  allowed: Set<string>
+): boolean {
+  // No Origin header → not a browser request → not the threat model
+  // Origin validation is meant to address (DNS rebinding from a page
+  // running in the user's browser).
+  if (rawOrigin === undefined) return true;
+  const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
+  if (origin === undefined) return true;
+
+  // Direct match against the allowlist (scheme + host + port).
+  if (allowed.has(origin)) return true;
+
+  // Allow any port on localhost / 127.0.0.1 — dev tooling spins up
+  // ephemeral local origins that wouldn't all be in the allowlist.
+  try {
+    const u = new URL(origin);
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return true;
+  } catch {
+    /* malformed origin — treat as disallowed */
+  }
+  return false;
 }
 
 /**
@@ -882,8 +1002,9 @@ function attachAuth(
     const dbKeys = await auth.storage.countActiveApiKeys();
     if (dbKeys === 0 && envKeys.size === 0) return;
 
-    // Required role for this request. /rpc looks at the dispatched
-    // tool to decide; everything else uses HTTP-method semantics.
+    // Required role for this request. /rpc and /mcp peek at the
+    // dispatched tool to decide; everything else uses HTTP-method
+    // semantics.
     let required: ApiKeyRole | null = null;
     if (path === '/rpc') {
       const body = req.body as { tool?: unknown } | undefined;
@@ -892,6 +1013,32 @@ function attachAuth(
         required = requireReaderKey ? 'reader' : null;
       } else {
         required = 'admin';
+      }
+    } else if (path === '/mcp') {
+      // /mcp follows the same per-tool model as /rpc, but the body is
+      // JSON-RPC framed: { method: 'tools/call', params: { name, … } }.
+      // Protocol-level methods (`initialize`, `tools/list`, etc.) and
+      // read-only tool calls accept reader; everything else needs admin.
+      // GET (SSE) and DELETE (session terminate) are protocol reads.
+      if (req.method === 'GET' || req.method === 'DELETE') {
+        required = requireReaderKey ? 'reader' : null;
+      } else {
+        const body = req.body as
+          | { method?: unknown; params?: { name?: unknown } }
+          | undefined;
+        const rpcMethod = typeof body?.method === 'string' ? body.method : null;
+        if (rpcMethod === 'tools/call') {
+          const toolName =
+            typeof body?.params?.name === 'string' ? body.params.name : null;
+          if (toolName !== null && READ_RPC_TOOLS.has(toolName)) {
+            required = requireReaderKey ? 'reader' : null;
+          } else {
+            required = 'admin';
+          }
+        } else {
+          // initialize, tools/list, prompts/list, ping, etc.
+          required = requireReaderKey ? 'reader' : null;
+        }
       }
     } else if (req.method === 'POST') {
       required = 'admin';

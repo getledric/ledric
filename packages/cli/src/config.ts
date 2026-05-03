@@ -18,6 +18,26 @@ export interface LedricConfig {
   auth?: {
     requireReaderKey?: boolean;
   };
+  /**
+   * Public URL the operator advertises this ledric on. Used as the
+   * OAuth issuer when `mcp.remote` is on, and as the default Origin
+   * allowlist entry. Required when remote MCP is enabled.
+   */
+  publicUrl?: string;
+  mcp?: {
+    /** Mount Streamable HTTP MCP transport at /mcp. Disabled by default. */
+    remote?: boolean;
+    /** Override the Origin-header allowlist. Defaults to localhost + publicUrl. */
+    allowedOrigins?: readonly string[];
+  };
+  oauth?: {
+    /** Allow Dynamic Client Registration. Default: true (when mcp.remote is on). */
+    dcr?: boolean;
+    accessTokenTtlSeconds?: number;
+    refreshTokenTtlSeconds?: number;
+    /** Hostnames an OAuth client may register a redirect_uri under. */
+    allowedRedirectHosts?: readonly string[];
+  };
 }
 
 const FILENAME = 'ledric.config.json';

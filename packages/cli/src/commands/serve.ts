@@ -78,6 +78,12 @@ export const serveCommand = defineCommand({
       description:
         'Require a reader key on every GET (closed-reads mode). Default: GETs are open and only writes need an admin key.',
       default: false
+    },
+    'remote-mcp': {
+      type: 'boolean',
+      description:
+        'Mount the Streamable HTTP MCP transport at /mcp so remote clients (claude.ai custom connectors, mcp-remote bridges) can connect over the public internet. Implies --http. Disabled by default.',
+      default: false
     }
   },
   async run({ args }) {
@@ -91,7 +97,8 @@ export const serveCommand = defineCommand({
     const requireReaderKey =
       args['require-reader-key'] === true || cfg.auth?.requireReaderKey === true;
     const wantGui = args.gui === true || cfg.gui?.enabled === true;
-    const wantHttp = args.http === true || wantGui;
+    const remoteMcp = args['remote-mcp'] === true || cfg.mcp?.remote === true;
+    const wantHttp = args.http === true || wantGui || remoteMcp;
 
     const assetsConfig = assetsConfigFromArgs({
       'assets-backend': assetsBackend,
@@ -153,10 +160,21 @@ export const serveCommand = defineCommand({
             mountPath: guiMount
           }
         : undefined;
+      const publicUrl = cfg.publicUrl ?? httpBase;
+      const mcpOpts = remoteMcp
+        ? {
+            remote: true as const,
+            ...(publicUrl !== undefined ? { publicUrl } : {}),
+            ...(Array.isArray(cfg.mcp?.allowedOrigins)
+              ? { allowedOrigins: cfg.mcp.allowedOrigins }
+              : {})
+          }
+        : undefined;
       httpServer = await runHttp(core, {
         port: parseInt(httpPortStr, 10),
         host: httpHost,
         ...(guiOpts !== undefined ? { gui: guiOpts } : {}),
+        ...(mcpOpts !== undefined ? { mcp: mcpOpts } : {}),
         auth: {
           storage,
           requireReaderKey,

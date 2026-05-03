@@ -94,6 +94,9 @@ importers:
       '@ledric/core':
         specifier: workspace:*
         version: link:../core
+      '@ledric/mcp-server':
+        specifier: workspace:*
+        version: link:../mcp-server
       '@ledric/storage':
         specifier: workspace:*
         version: link:../storage
@@ -101,6 +104,9 @@ importers:
         specifier: ^5.1.0
         version: 5.8.5
     devDependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@3.25.76)
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
