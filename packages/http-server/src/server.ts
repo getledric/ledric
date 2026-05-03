@@ -4,8 +4,18 @@ import cors from '@fastify/cors';
 import formbody from '@fastify/formbody';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
-import { promises as fs } from 'node:fs';
-import { join as pathJoin } from 'node:path';
+import { promises as fs, readFileSync } from 'node:fs';
+import { join as pathJoin, dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Read our own version once at module load. tsup bundles to
+// `dist/index.js`; `../package.json` resolves to the shipped manifest.
+const PKG_VERSION = (JSON.parse(
+  readFileSync(
+    resolvePath(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'),
+    'utf8'
+  )
+) as { version: string }).version;
 import type { Core } from '@ledric/core';
 import { parseTransformParams } from '@ledric/core';
 import { createStreamableHttpHandle } from '@ledric/mcp-server';
@@ -349,17 +359,41 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
 
   app.get('/', async () => ({
     name: 'ledric',
-    version: '0.0.0',
+    version: PKG_VERSION,
     endpoints: [
-      'GET  /types',
-      'GET  /types/:name',
-      'GET  /entries/:type',
-      'GET  /entries/:type/:slug',
-      'GET  /assets',
-      'GET  /assets/:id',
-      'GET  /assets/:id/meta',
-      'POST /assets        multipart upload',
-      'POST /rpc           { tool, args }'
+      'GET    /auth/status',
+      'GET    /types',
+      'GET    /types/:name',
+      'GET    /entries/:type',
+      'GET    /entries/:type/:slug',
+      'GET    /assets',
+      'POST   /assets             multipart upload',
+      'GET    /assets/:key        bytes (with imgix-style transforms)',
+      'GET    /assets/:key/meta',
+      'GET    /tags',
+      'POST   /rpc                { tool, args }',
+      ...(mcpHttpFlag
+        ? [
+            'POST   /mcp                Streamable HTTP MCP (JSON-RPC)',
+            'GET    /mcp                Streamable HTTP MCP (SSE stream)',
+            'DELETE /mcp                terminate session'
+          ]
+        : []),
+      ...(mcpPublicFlag
+        ? [
+            'GET    /.well-known/oauth-authorization-server',
+            'GET    /.well-known/oauth-protected-resource',
+            'GET    /.well-known/openid-configuration',
+            'POST   /oauth/register     Dynamic Client Registration (RFC 7591)',
+            'GET    /oauth/authorize    OAuth 2.1 auth-code start',
+            'GET    /oauth/consent/:uid operator consent page',
+            'POST   /oauth/consent/:uid submit consent (admin key)',
+            'POST   /oauth/token        auth_code / refresh_token grants',
+            'POST   /oauth/revoke       RFC 7009',
+            'POST   /oauth/introspection',
+            'GET    /oauth/jwks'
+          ]
+        : [])
     ],
     /**
      * Tool names accepted by POST /rpc — same surface as the MCP server

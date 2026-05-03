@@ -4,7 +4,19 @@ import {
   ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Core } from '@ledric/core';
+
+// Read our own version once at module load. tsup bundles to
+// `dist/index.js`; `../package.json` resolves to the shipped manifest.
+const PKG_VERSION = (JSON.parse(
+  readFileSync(
+    resolvePath(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'),
+    'utf8'
+  )
+) as { version: string }).version;
 
 // Some MCP clients serialize a free-form object as a JSON string when the
 // tool's inputSchema uses `additionalProperties: true`. Accept either shape.
@@ -217,7 +229,7 @@ const ListAssetsArgsSchema = z
   .strict();
 
 export const SERVER_NAME = 'ledric';
-export const SERVER_VERSION = '0.0.0';
+export const SERVER_VERSION = PKG_VERSION;
 
 export const SERVER_INSTRUCTIONS = `ledric is a self-hosted, MCP-native CMS. You can fully define and evolve the content model AND author content through this MCP — schemas and entries are both first-class data here.
 
