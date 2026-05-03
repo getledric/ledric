@@ -1,14 +1,13 @@
 import type { Core } from '@ledric/core';
 import { createHttpServer } from './server.js';
-import type { HttpAuthOptions } from './server.js';
+import type { HttpServerOptions } from './server.js';
 
-export interface RunHttpOptions {
+// Extends HttpServerOptions so any field added there is automatically
+// forwarded — adding a field to HttpServerOptions and forgetting to
+// thread it through this runner is what shipped /mcp as a 404 in 0.3.0.
+export interface RunHttpOptions extends HttpServerOptions {
   port?: number;
   host?: string;
-  logger?: boolean;
-  gui?: { assetsPath: string; mountPath?: string };
-  uploadLimitBytes?: number;
-  auth?: HttpAuthOptions;
 }
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
@@ -36,12 +35,7 @@ export async function runHttp(core: Core, opts: RunHttpOptions = {}): Promise<{
     );
   }
 
-  const serverOpts: Parameters<typeof createHttpServer>[1] = {
-    logger: opts.logger ?? false
-  };
-  if (opts.gui !== undefined) serverOpts.gui = opts.gui;
-  if (opts.uploadLimitBytes !== undefined) serverOpts.uploadLimitBytes = opts.uploadLimitBytes;
-  if (opts.auth !== undefined) serverOpts.auth = opts.auth;
+  const { port: _port, host: _host, ...serverOpts } = opts;
   const app = createHttpServer(core, serverOpts);
 
   // fastify.listen() returns the actual bound URL — important when port is 0

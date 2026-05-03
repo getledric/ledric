@@ -1,6 +1,6 @@
 {
   "name": "@ledric/schema",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "ledric schema definition helpers: defineType, field.*, JSON emit, Zod codegen.",
   "license": "Apache-2.0",
   "repository": {
