@@ -56,6 +56,9 @@ importers:
       '@ledric/mcp-server':
         specifier: workspace:*
         version: link:../mcp-server
+      '@ledric/oauth':
+        specifier: workspace:*
+        version: link:../oauth
       '@ledric/schema':
         specifier: workspace:*
         version: link:../schema

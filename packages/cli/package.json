@@ -35,6 +35,7 @@
     "@ledric/gui": "workspace:*",
     "@ledric/http-server": "workspace:*",
     "@ledric/mcp-server": "workspace:*",
+    "@ledric/oauth": "workspace:*",
     "@ledric/schema": "workspace:*",
     "@ledric/storage": "workspace:*",
     "citty": "^0.1.6"
