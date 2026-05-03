@@ -3,6 +3,7 @@ import type { LedricStorage } from '@ledric/storage';
 import { hashApiKey } from '@ledric/storage';
 import {
   buildProvider,
+  loadOrCreateSigningKey,
   reapExpiredOidcPayloads,
   SCOPE_TO_ROLE,
   type AccessTokenClaims,
@@ -40,8 +41,15 @@ export async function mountOAuthRoutes(
   storage: LedricStorage,
   opts: OAuthMountOptions
 ): Promise<{ verify: AccessTokenVerifier; close: () => void }> {
+  // Load (or first-boot mint) the persistent signing key. Without
+  // this oidc-provider auto-generates dev-mode keys per process —
+  // every restart invalidates issued JWTs and claude.ai connectors
+  // silently lose their connection.
+  const signingKey = await loadOrCreateSigningKey(storage);
+
   const provider = buildProvider(storage, {
     issuer: opts.issuer,
+    jwks: { keys: [signingKey] },
     ...(opts.dcr !== undefined ? { dcr: opts.dcr } : {}),
     ...(opts.accessTokenTtlSeconds !== undefined
       ? { accessTokenTtlSeconds: opts.accessTokenTtlSeconds }

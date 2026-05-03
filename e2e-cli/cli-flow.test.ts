@@ -52,7 +52,14 @@ async function reservePort(): Promise<number> {
   });
 }
 
-async function bootCli(): Promise<Env> {
+interface BootOpts {
+  /** Reuse an existing tmpdir + DB + config for restart-persistence tests. */
+  tmpdir?: string;
+  /** Reuse an existing port (so issuer URL stays stable across restarts). */
+  port?: number;
+}
+
+async function bootCli(opts: BootOpts = {}): Promise<Env> {
   if (!existsSync(CLI_PATH)) {
     throw new Error(
       `CLI dist missing at ${CLI_PATH}. Run \`pnpm build\` first — this e2e ` +
@@ -60,13 +67,15 @@ async function bootCli(): Promise<Env> {
     );
   }
 
-  const port = await reservePort();
+  const port = opts.port ?? (await reservePort());
   const issuer = `http://127.0.0.1:${port}`;
-  const tmp = await mkdtemp(join(tmpdir(), 'ledric-e2e-'));
-  await writeFile(
-    join(tmp, 'ledric.config.json'),
-    JSON.stringify({ db: './ledric.db', publicUrl: issuer }, null, 2)
-  );
+  const tmp = opts.tmpdir ?? (await mkdtemp(join(tmpdir(), 'ledric-e2e-')));
+  if (opts.tmpdir === undefined) {
+    await writeFile(
+      join(tmp, 'ledric.config.json'),
+      JSON.stringify({ db: './ledric.db', publicUrl: issuer }, null, 2)
+    );
+  }
 
   const proc = spawn(
     'node',
@@ -112,10 +121,15 @@ async function bootCli(): Promise<Env> {
     if (!ready) {
       ready = stderrBuf.includes('ledric: HTTP server at');
     }
+    // Restart-mode (existing tmpdir): bootstrap is skipped because
+    // the DB already has keys, so the admin-key banner never prints.
+    // Treat readiness alone as boot-complete in that case.
+    if (opts.tmpdir !== undefined && ready) break;
     if (adminKey !== undefined && ready) break;
     await new Promise((r) => setTimeout(r, 50));
   }
-  if (adminKey === undefined || !ready) {
+  const adminRequired = opts.tmpdir === undefined;
+  if ((adminRequired && adminKey === undefined) || !ready) {
     proc.kill('SIGTERM');
     throw new Error(
       `CLI did not boot fully within ${BOOT_TIMEOUT_MS}ms. ` +
@@ -128,26 +142,29 @@ async function bootCli(): Promise<Env> {
     proc,
     url: issuer,
     issuer,
-    adminKey,
+    adminKey: adminKey ?? '',
     tmpdir: tmp,
     stderrBuf
   };
 }
 
-async function teardown(env: Env): Promise<void> {
-  if (env.proc.exitCode === null) {
-    env.proc.kill('SIGTERM');
-    await new Promise<void>((r) => {
-      const t = setTimeout(() => {
-        env.proc.kill('SIGKILL');
-        r();
-      }, 3000);
-      env.proc.once('exit', () => {
-        clearTimeout(t);
-        r();
-      });
+async function killProc(env: Env): Promise<void> {
+  if (env.proc.exitCode !== null) return;
+  env.proc.kill('SIGTERM');
+  await new Promise<void>((r) => {
+    const t = setTimeout(() => {
+      env.proc.kill('SIGKILL');
+      r();
+    }, 3000);
+    env.proc.once('exit', () => {
+      clearTimeout(t);
+      r();
     });
-  }
+  });
+}
+
+async function teardown(env: Env): Promise<void> {
+  await killProc(env);
   await rm(env.tmpdir, { recursive: true, force: true });
 }
 
@@ -385,5 +402,55 @@ describe('e2e: CLI public-MCP flow against the built binary', () => {
     expect(initRes.status).toBe(200);
     const sessionId = initRes.headers.get('mcp-session-id');
     expect(sessionId, 'mcp-session-id header missing on initialize').not.toBeNull();
+  });
+});
+
+// Regression: signing keys must persist across `serve` restarts.
+// Without persistence, oidc-provider auto-mints dev-mode keys at boot
+// — every restart invalidates issued JWTs and claude.ai connectors
+// silently lose their connection. The test boots the CLI, captures
+// /oauth/jwks, kills the subprocess, boots again on the SAME tmpdir,
+// captures /oauth/jwks a second time, and asserts the keys (kid, kty,
+// modulus n) match. Drift means we lost persistence.
+describe('e2e: OAuth signing keys persist across restart', () => {
+  let env1: Env | undefined;
+  let env2: Env | undefined;
+
+  afterAll(async () => {
+    if (env2) await teardown(env2);
+    else if (env1) await teardown(env1);
+  });
+
+  it('issues the same JWKS kid + n after a full restart', async () => {
+    env1 = await bootCli();
+    const jwks1 = (await (
+      await fetch(`${env1.url}/oauth/jwks`)
+    ).json()) as { keys: Array<{ kid: string; kty: string; n?: string }> };
+    expect(jwks1.keys.length).toBeGreaterThan(0);
+    const k1 = jwks1.keys[0]!;
+
+    // oidc-provider's dev-mode fallback uses a hardcoded keystore
+    // shipped in npm — `kid: keystore-CHANGE-ME` with a fixed RSA
+    // key that ANY oidc-provider install can sign with. That's a
+    // forge-tokens-for-anyone bug masquerading as a quick-start
+    // convenience. If kid is that sentinel, persistence isn't wired.
+    expect(k1.kid, 'using oidc-provider dev keystore — persistence not wired').not.toBe(
+      'keystore-CHANGE-ME'
+    );
+
+    // Kill subprocess but keep tmpdir + DB.
+    await killProc(env1);
+
+    const port1 = Number(new URL(env1.url).port);
+    env2 = await bootCli({ tmpdir: env1.tmpdir, port: port1 });
+    const jwks2 = (await (
+      await fetch(`${env2.url}/oauth/jwks`)
+    ).json()) as { keys: Array<{ kid: string; kty: string; n?: string }> };
+    expect(jwks2.keys.length).toBeGreaterThan(0);
+    const k2 = jwks2.keys[0]!;
+
+    expect(k2.kid).toBe(k1.kid);
+    expect(k2.kty).toBe(k1.kty);
+    expect(k2.n).toBe(k1.n);
   });
 });

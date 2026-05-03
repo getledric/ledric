@@ -215,5 +215,17 @@ export const postgresMigrations: Migration[] = [
       CREATE INDEX idx_oidc_payloads_uid       ON oidc_payloads (uid);
       CREATE INDEX idx_oidc_payloads_expires   ON oidc_payloads (expires_at);
     `
+  },
+  {
+    id: 4,
+    name: '0004_signing_keys',
+    sql: `
+      CREATE TABLE oidc_signing_keys (
+        kid        TEXT   PRIMARY KEY,
+        jwk        TEXT   NOT NULL,
+        alg        TEXT   NOT NULL,
+        created_at BIGINT NOT NULL
+      );
+    `
   }
 ];

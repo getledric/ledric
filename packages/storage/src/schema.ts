@@ -141,6 +141,22 @@ export interface OidcPayloadsTable {
   consumed_at: number | null;
 }
 
+/**
+ * Persistent OAuth signing keys. Without these, oidc-provider falls
+ * back to dev-mode auto-keys at boot — restarting `serve` would
+ * silently invalidate every issued JWT (claude.ai connectors lose
+ * their connection). One row per active key; multi-row layout is
+ * for future rotation.
+ */
+export interface OidcSigningKeysTable {
+  kid: string;
+  /** JSON-stringified private JWK. */
+  jwk: string;
+  alg: string;
+  /** Unix milliseconds. */
+  created_at: number;
+}
+
 export interface TagsTable {
   id: Buffer;
   env_id: Buffer;
@@ -202,6 +218,7 @@ export interface Database {
   asset_blobs: AssetBlobsTable;
   api_keys: ApiKeysTable;
   oidc_payloads: OidcPayloadsTable;
+  oidc_signing_keys: OidcSigningKeysTable;
   tags: TagsTable;
   asset_tags: AssetTagsTable;
   entry_tags: EntryTagsTable;

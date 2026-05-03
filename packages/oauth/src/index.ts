@@ -8,3 +8,5 @@ export { buildProvider, KyselyOidcAdapter, reapExpiredOidcPayloads } from './pro
 
 export type { ClientSummary } from './clients.js';
 export { listClients, revokeClient } from './clients.js';
+
+export { loadOrCreateSigningKey } from './keys.js';

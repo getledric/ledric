@@ -17,6 +17,7 @@ const TABLES = [
   'asset_tags',
   'tags',
   'api_keys',
+  'oidc_signing_keys',
   'oidc_payloads',
   'entries_slugs',
   'slug_history',

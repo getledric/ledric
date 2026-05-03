@@ -1,5 +1,5 @@
 import Provider from 'oidc-provider';
-import type { Configuration, KoaContextWithOIDC, Account, FindAccount } from 'oidc-provider';
+import type { Configuration, KoaContextWithOIDC, Account, FindAccount, JWKS } from 'oidc-provider';
 import type { LedricStorage } from '@ledric/storage';
 import { KyselyOidcAdapter } from './adapter.js';
 
@@ -10,6 +10,14 @@ export interface BuildProviderOptions {
   dcr?: boolean;
   accessTokenTtlSeconds?: number;
   refreshTokenTtlSeconds?: number;
+  /**
+   * Persistent signing keys. When omitted, oidc-provider generates
+   * dev-mode keys at boot — fine for unit tests, broken for real use
+   * because every restart invalidates issued JWTs. Production path
+   * (and the public-MCP serve flow) supplies keys from
+   * `loadOrCreateSigningKey(storage)`.
+   */
+  jwks?: JWKS;
 }
 
 /**
@@ -95,14 +103,34 @@ export function buildProvider(
       RefreshToken: refreshTokenTtl,
       Session: 7 * 24 * 3600,
       Interaction: 600,
-      Grant: refreshTokenTtl
+      Grant: refreshTokenTtl,
+      // We don't issue ID tokens (no openid scope, userinfo disabled),
+      // but oidc-provider still resolves ttl.IdToken at config time
+      // and logs a NOTICE if the default placeholder fires. Set a
+      // value to silence it — never actually used.
+      IdToken: 3600
     },
+    // claude.ai (and other browser-launched connector setups) make
+    // CORS requests against the OAuth endpoints. The default returns
+    // false, which logs a "default clientBasedCORS function called"
+    // NOTICE on every browser hit. Allow CORS for any registered
+    // client — security still gates on PKCE + admin-key consent +
+    // audience-bound JWTs. (The outer @fastify/cors plugin already
+    // adds wire-level Access-Control-* headers; this just silences
+    // the NOTICE and keeps oidc-provider's view of CORS coherent.)
+    clientBasedCORS: () => true,
     // Always mint refresh tokens for confirmed grants — resource-server
     // JWTs are short-lived and clients need a way to extend their
     // session without re-prompting for consent.
     issueRefreshToken: async (_ctx, _client, code) =>
       code.scopes !== undefined && code.scopes.size > 0,
     findAccount,
+    // Persistent signing keys (when supplied — see @ledric/oauth's
+    // `loadOrCreateSigningKey`). Without this, oidc-provider mints
+    // dev-mode keys at boot and prints "quick start development-only
+    // signing keys are used". JWTs signed by those keys don't survive
+    // a restart, so claude.ai connectors silently break.
+    ...(opts.jwks !== undefined ? { jwks: opts.jwks } : {}),
     interactions: {
       url: (_ctx, interaction) => `/oauth/consent/${interaction.uid}`
     },
