@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Core } from '@ledric/core';
 import { openSqlite, type LedricStorage, generateApiKey } from '@ledric/storage';
 import { createHash } from 'node:crypto';
+import { createServer } from 'node:net';
 import { createHttpServer } from './server.js';
 import type { FastifyInstance } from 'fastify';
-
-const ISSUER = 'http://127.0.0.1';
 
 interface Env {
   app: FastifyInstance;
   storage: LedricStorage;
+  issuer: string;
   url: string;
   adminKey: string;
 }
@@ -17,9 +17,28 @@ interface Env {
 /**
  * The full DCR-through-call-/mcp dance needs a real port — the
  * provider issues redirects with absolute URLs and we want to drive
- * it from a fetch client. Spin a Fastify listener on an ephemeral
- * port; tear down in afterEach.
+ * it from a fetch client. Reserve a port up front so the configured
+ * issuer (and therefore JWT iss + JWKS URL) matches the actual
+ * listen address; without this the verifier's JWKS fetch would
+ * hit the wrong port and 401 every otherwise-valid token.
  */
+async function reservePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.unref();
+    probe.on('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const addr = probe.address();
+      if (addr === null || typeof addr !== 'object') {
+        reject(new Error('probe address null'));
+        return;
+      }
+      const port = addr.port;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
 async function bootPublicMcp(): Promise<Env> {
   const storage = await openSqlite({ path: ':memory:' });
   const core = new Core(storage);
@@ -33,20 +52,20 @@ async function bootPublicMcp(): Promise<Env> {
     key_prefix: admin.prefix
   });
 
+  const port = await reservePort();
+  const issuer = `http://127.0.0.1:${port}`;
+
   const app = createHttpServer(core, {
-    mcp: { http: true, public: true, publicUrl: ISSUER },
+    mcp: { http: true, public: true, publicUrl: issuer },
     auth: { storage }
   });
   await app.ready();
-  await app.listen({ port: 0, host: '127.0.0.1' });
-  const addr = app.server.address();
-  if (addr === null || typeof addr !== 'object') {
-    throw new Error('listen returned no address');
-  }
+  await app.listen({ port, host: '127.0.0.1' });
   return {
     app,
     storage,
-    url: `http://127.0.0.1:${addr.port}`,
+    issuer,
+    url: issuer,
     adminKey: admin.secret
   };
 }
@@ -86,7 +105,7 @@ describe('OAuth provider (oidc-provider) — end-to-end against /mcp', () => {
     const as = await fetch(`${env.url}/.well-known/oauth-authorization-server`);
     expect(as.status).toBe(200);
     const asBody = (await as.json()) as Record<string, unknown>;
-    expect(asBody.issuer).toBe(ISSUER);
+    expect(asBody.issuer).toBe(env.issuer);
     // oidc-provider derives endpoint URLs from the request host, so the
     // test's ephemeral-port URL appears here instead of the configured
     // issuer. Production sets `publicUrl` to the actual reachable URL
@@ -98,8 +117,8 @@ describe('OAuth provider (oidc-provider) — end-to-end against /mcp', () => {
     const pr = await fetch(`${env.url}/.well-known/oauth-protected-resource`);
     expect(pr.status).toBe(200);
     expect((await pr.json()) as Record<string, unknown>).toMatchObject({
-      resource: `${ISSUER}/mcp`,
-      authorization_servers: [ISSUER]
+      resource: `${env.issuer}/mcp`,
+      authorization_servers: [env.issuer]
     });
 
     const jwks = await fetch(`${env.url}/oauth/jwks`);
@@ -145,7 +164,7 @@ describe('OAuth provider (oidc-provider) — end-to-end against /mcp', () => {
         redirect_uri: 'http://127.0.0.1:9999/cb',
         response_type: 'code',
         scope: 'ledric:write',
-        resource: `${ISSUER}/mcp`,
+        resource: `${env.issuer}/mcp`,
         state,
         code_challenge: challenge,
         code_challenge_method: 'S256'
@@ -330,7 +349,7 @@ describe('OAuth provider (oidc-provider) — end-to-end against /mcp', () => {
           redirect_uri: 'http://127.0.0.1:9999/cb',
           response_type: 'code',
           scope: 'ledric:read',
-          resource: `${ISSUER}/mcp`,
+          resource: `${env.issuer}/mcp`,
           code_challenge: pkceS256(verifier),
           code_challenge_method: 'S256'
         }).toString(),

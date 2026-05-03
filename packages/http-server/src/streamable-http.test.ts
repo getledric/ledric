@@ -185,6 +185,46 @@ describe('Streamable HTTP MCP transport', () => {
     });
   });
 
+  // Regression: public-MCP must always challenge for auth, even when
+  // no API keys are configured. Otherwise the OAuth gate is bypassable
+  // and `/mcp` is open to anyone on the public internet. The 401 must
+  // also carry RFC 9728's `WWW-Authenticate: Bearer resource_metadata=...`
+  // pointer so MCP Inspector (and other spec-compliant clients) can
+  // bootstrap OAuth discovery from the failed request.
+  describe('public-MCP auth challenge', () => {
+    it('challenges anonymous /mcp with 401 + RFC 9728 WWW-Authenticate', async () => {
+      env = await bootHttp({ public: true, publicUrl: 'https://cms.example.com' });
+      const res = await fetch(`${env.url}/mcp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream'
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      });
+      expect(res.status).toBe(401);
+      const wwwAuth = res.headers.get('www-authenticate');
+      expect(wwwAuth).not.toBeNull();
+      expect(wwwAuth).toMatch(/Bearer/);
+      expect(wwwAuth).toContain(
+        'resource_metadata="https://cms.example.com/.well-known/oauth-protected-resource"'
+      );
+    });
+
+    it('http-only mode keeps auth-off behavior (no challenge when no keys)', async () => {
+      env = await bootHttp({ http: true });
+      const res = await fetch(`${env.url}/mcp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream'
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      });
+      expect(res.status).not.toBe(401);
+    });
+  });
+
   describe('concurrent transports (no shared-state corruption)', () => {
     it('stdio-style InMemoryTransport and Streamable HTTP serve the same Core simultaneously', async () => {
       env = await bootHttp({ http: true });

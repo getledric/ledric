@@ -278,7 +278,14 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
   }
 
   if (opts.auth !== undefined) {
-    attachAuth(app, opts.auth, opts.gui?.mountPath ?? null, () => oauthVerifier);
+    attachAuth(
+      app,
+      opts.auth,
+      opts.gui?.mountPath ?? null,
+      mcpPublicFlag,
+      opts.mcp?.publicUrl,
+      () => oauthVerifier
+    );
   }
 
   if (opts.gui !== undefined) {
@@ -830,22 +837,29 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     mcpHandle = createStreamableHttpHandle(core);
     const allowedOrigins = computeAllowedOrigins(opts.mcp!, mcpPublicFlag);
     const allowedCidrs = parseCidrs(opts.mcp?.allowedCidrs);
-    const handler = async (req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
+    // Origin + CIDR check as an onRequest hook so it runs BEFORE the
+    // global auth preHandler. Otherwise a bad-origin anonymous request
+    // in public mode gets a 401 + WWW-Authenticate (leaking the OAuth
+    // challenge) before the route handler can 403 it.
+    const gateHook = async (
+      req: import('fastify').FastifyRequest,
+      reply: import('fastify').FastifyReply
+    ) => {
       if (!isClientIpAllowed(req.ip, allowedCidrs)) {
-        reply.code(403).send({
+        return reply.code(403).send({
           error: { code: 'FORBIDDEN', message: 'Client IP not in allowlist' }
         });
-        return;
       }
       if (!isOriginAllowed(req.headers.origin, allowedOrigins, mcpPublicFlag)) {
-        reply.code(403).send({
+        return reply.code(403).send({
           error: {
             code: 'FORBIDDEN',
             message: `Origin ${String(req.headers.origin)} not in allowlist`
           }
         });
-        return;
       }
+    };
+    const handler = async (req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
       // Hand the raw Node req/res to the SDK transport. Fastify must
       // not write anything else after this — `hijack()` makes it stop.
       reply.hijack();
@@ -868,9 +882,9 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
         }
       }
     };
-    app.post('/mcp', handler);
-    app.get('/mcp', handler);
-    app.delete('/mcp', handler);
+    app.post('/mcp', { onRequest: gateHook }, handler);
+    app.get('/mcp', { onRequest: gateHook }, handler);
+    app.delete('/mcp', { onRequest: gateHook }, handler);
 
     // Tear sessions down on server close so SIGINT doesn't leak them.
     app.addHook('onClose', async () => {
@@ -1166,12 +1180,37 @@ function attachAuth(
   app: FastifyInstance,
   auth: HttpAuthOptions,
   guiMountPath: string | null,
+  mcpPublic: boolean,
+  publicUrl: string | undefined,
   oauthVerifierGetter?: () => AccessTokenVerifier | null
 ): void {
-  const requireReaderKey = auth.requireReaderKey === true;
+  // Public-MCP implies require-reader: every /mcp call must carry an
+  // OAuth bearer (or API key), otherwise the OAuth gate is bypassable
+  // and protocol-level initialize from an anonymous client would
+  // never trigger the WWW-Authenticate challenge that bootstraps
+  // discovery.
+  const requireReaderKey = auth.requireReaderKey === true || mcpPublic;
   const envKeys = new Map<string, ApiKeyRole>();
   if (auth.envAdminKey) envKeys.set(auth.envAdminKey, 'admin');
   if (auth.envReaderKey) envKeys.set(auth.envReaderKey, 'reader');
+
+  // RFC 9728 — when we serve the OAuth provider, every 401 from a
+  // protected route must point clients at the protected-resource
+  // metadata URL so they can discover the issuer + token endpoint.
+  // MCP Inspector (and any spec-compliant client) won't bootstrap
+  // the OAuth flow without this header.
+  const wwwAuthenticate =
+    mcpPublic && publicUrl !== undefined
+      ? `Bearer realm="ledric", resource_metadata="${publicUrl}/.well-known/oauth-protected-resource"`
+      : null;
+  function send401(
+    reply: import('fastify').FastifyReply,
+    message: string
+  ): import('fastify').FastifyReply {
+    if (wwwAuthenticate !== null) reply.header('WWW-Authenticate', wwwAuthenticate);
+    reply.code(401).send({ error: { code: 'UNAUTHORIZED', message } });
+    return reply;
+  }
 
   const guiPrefix = guiMountPath
     ? guiMountPath.endsWith('/') ? guiMountPath : `${guiMountPath}/`
@@ -1220,9 +1259,11 @@ function attachAuth(
 
     // Auth-off when nothing is configured AND the caller didn't show
     // up with a JWT. Cheap path — count is a single COUNT(*) on a
-    // tiny table.
+    // tiny table. Public-MCP mode opts out: missing keys must still
+    // challenge so the OAuth flow can bootstrap, otherwise /mcp would
+    // be open to anyone on the public internet.
     const dbKeys = await auth.storage.countActiveApiKeys();
-    if (dbKeys === 0 && envKeys.size === 0 && !looksLikeJwt) return;
+    if (!mcpPublic && dbKeys === 0 && envKeys.size === 0 && !looksLikeJwt) return;
 
     // Required role for this request. /rpc and /mcp peek at the
     // dispatched tool to decide; everything else uses HTTP-method
@@ -1294,10 +1335,7 @@ function attachAuth(
 
     if (role === null) {
       if (!presented || !looksLikeApiKey(presented)) {
-        reply.code(401).send({
-          error: { code: 'UNAUTHORIZED', message: 'Missing or malformed bearer credential' }
-        });
-        return reply;
+        return send401(reply, 'Missing or malformed bearer credential');
       }
       role = envKeys.get(presented) ?? null;
       if (role === null) {
@@ -1313,15 +1351,10 @@ function attachAuth(
       // Soft hint when the prefix is recognizable — helps debugging
       // without leaking which exact key would have matched.
       const hinted = parseApiKeyRole(presented ?? '');
-      reply.code(401).send({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: hinted
-            ? 'API key is unknown or revoked'
-            : 'Invalid credential'
-        }
-      });
-      return reply;
+      return send401(
+        reply,
+        hinted ? 'API key is unknown or revoked' : 'Invalid credential'
+      );
     }
 
     if (required === 'admin' && role !== 'admin') {
