@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import formbody from '@fastify/formbody';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import { promises as fs } from 'node:fs';
@@ -9,8 +10,10 @@ import type { Core } from '@ledric/core';
 import { parseTransformParams } from '@ledric/core';
 import { createStreamableHttpHandle } from '@ledric/mcp-server';
 import type { StreamableHttpHandle } from '@ledric/mcp-server';
-import type { Storage, ApiKeyRole } from '@ledric/storage';
+import { SCOPE_TO_ROLE } from '@ledric/oauth';
+import type { Storage, ApiKeyRole, LedricStorage } from '@ledric/storage';
 import { hashApiKey, parseApiKeyRole, looksLikeApiKey } from '@ledric/storage';
+import { mountOAuthRoutes, type AccessTokenVerifier } from './oauth-routes.js';
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -159,6 +162,14 @@ export interface HttpServerOptions {
     allowedOrigins?: readonly string[];
     publicUrl?: string;
     allowedCidrs?: readonly string[];
+    /** OAuth: hostnames clients may register redirect_uris under. */
+    allowedRedirectHosts?: readonly string[];
+    /** OAuth: enable/disable DCR. Default: enabled. */
+    dcr?: boolean;
+    accessTokenTtlSeconds?: number;
+    refreshTokenTtlSeconds?: number;
+    /** Test seam — replaces process.stderr.write for the consent banner. */
+    printToStderr?: (s: string) => void;
   };
 }
 
@@ -216,8 +227,53 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     limits: { fileSize: uploadLimit, files: 1 }
   });
 
+  // application/x-www-form-urlencoded — needed by OAuth's /oauth/token,
+  // /oauth/authorize POST, and /oauth/revoke per RFC 6749. Always
+  // registered (cheap; no body still parses to {}).
+  app.register(formbody);
+
+  // Mode flags pulled up here so attachAuth and the /mcp mount can
+  // both reference them. Validation (publicUrl required when public
+  // is on) happens at the /mcp mount further down — early exit there
+  // keeps the error message close to the route it concerns.
+  const mcpHttpFlag = opts.mcp?.http === true || opts.mcp?.public === true;
+  const mcpPublicFlag = opts.mcp?.public === true;
+
+  // OAuth routes mount BEFORE the auth preHandler so its `verify` is
+  // captured by the closure attachAuth holds. The mount itself is async
+  // (Ed25519 key load), so it goes through Fastify's plugin system —
+  // app.ready() awaits the registration.
+  let oauthVerifier: AccessTokenVerifier | null = null;
+  if (mcpPublicFlag) {
+    if (opts.mcp?.publicUrl === undefined || opts.mcp.publicUrl.length === 0) {
+      throw new Error(
+        'public-MCP mode requires `mcp.publicUrl` to be set (this is the OAuth issuer and Origin allowlist anchor — see docs/remote-mcp.md).'
+      );
+    }
+    const issuer = opts.mcp.publicUrl;
+    app.register(async (instance) => {
+      const { verify } = await mountOAuthRoutes(instance, opts.auth!.storage as LedricStorage, {
+        issuer,
+        ...(opts.mcp?.allowedRedirectHosts !== undefined
+          ? { allowedRedirectHosts: opts.mcp.allowedRedirectHosts }
+          : {}),
+        ...(opts.mcp?.dcr !== undefined ? { dcr: opts.mcp.dcr } : {}),
+        ...(opts.mcp?.accessTokenTtlSeconds !== undefined
+          ? { accessTokenTtlSeconds: opts.mcp.accessTokenTtlSeconds }
+          : {}),
+        ...(opts.mcp?.refreshTokenTtlSeconds !== undefined
+          ? { refreshTokenTtlSeconds: opts.mcp.refreshTokenTtlSeconds }
+          : {}),
+        ...(opts.mcp?.printToStderr !== undefined
+          ? { printToStderr: opts.mcp.printToStderr }
+          : {})
+      });
+      oauthVerifier = verify;
+    });
+  }
+
   if (opts.auth !== undefined) {
-    attachAuth(app, opts.auth, opts.gui?.mountPath ?? null);
+    attachAuth(app, opts.auth, opts.gui?.mountPath ?? null, () => oauthVerifier);
   }
 
   if (opts.gui !== undefined) {
@@ -740,17 +796,10 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
   // `mcp.public` (implies http) opens the OAuth provider routes and
   // tightens Origin/CIDR. Public requires `publicUrl` to identify the
   // OAuth issuer — fail loudly at boot if it's missing.
-  const mcpHttpEnabled = opts.mcp?.http === true || opts.mcp?.public === true;
-  const mcpPublic = opts.mcp?.public === true;
-  if (mcpPublic && (opts.mcp?.publicUrl === undefined || opts.mcp.publicUrl.length === 0)) {
-    throw new Error(
-      'public-MCP mode requires `mcp.publicUrl` to be set (this is the OAuth issuer and Origin allowlist anchor — see docs/remote-mcp.md).'
-    );
-  }
   let mcpHandle: StreamableHttpHandle | null = null;
-  if (mcpHttpEnabled) {
+  if (mcpHttpFlag) {
     mcpHandle = createStreamableHttpHandle(core);
-    const allowedOrigins = computeAllowedOrigins(opts.mcp!, mcpPublic);
+    const allowedOrigins = computeAllowedOrigins(opts.mcp!, mcpPublicFlag);
     const allowedCidrs = parseCidrs(opts.mcp?.allowedCidrs);
     const handler = async (req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
       if (!isClientIpAllowed(req.ip, allowedCidrs)) {
@@ -759,7 +808,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
         });
         return;
       }
-      if (!isOriginAllowed(req.headers.origin, allowedOrigins, mcpPublic)) {
+      if (!isOriginAllowed(req.headers.origin, allowedOrigins, mcpPublicFlag)) {
         reply.code(403).send({
           error: {
             code: 'FORBIDDEN',
@@ -933,6 +982,25 @@ function isClientIpAllowed(ip: string, cidrs: ParsedCidr[] | null): boolean {
 }
 
 /**
+ * Pull a Bearer credential off either the `Authorization` header or
+ * the `X-Ledric-Key` shorthand. Returns the trimmed secret or
+ * undefined when neither is set / either is malformed.
+ */
+function extractBearer(req: import('fastify').FastifyRequest): string | undefined {
+  const authz = req.headers.authorization;
+  const xKey = req.headers['x-ledric-key'];
+  if (typeof authz === 'string' && authz.toLowerCase().startsWith('bearer ')) {
+    const v = authz.slice(7).trim();
+    return v.length > 0 ? v : undefined;
+  }
+  if (typeof xKey === 'string') {
+    const v = xKey.trim();
+    return v.length > 0 ? v : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Surface as much structured detail as the thrown Error carries — code,
  * errors[], and any relevant fields on storage-layer errors — instead of
  * collapsing everything to .message. Generic catches stay readable too.
@@ -1068,7 +1136,8 @@ async function dispatchTool(
 function attachAuth(
   app: FastifyInstance,
   auth: HttpAuthOptions,
-  guiMountPath: string | null
+  guiMountPath: string | null,
+  oauthVerifierGetter?: () => AccessTokenVerifier | null
 ): void {
   const requireReaderKey = auth.requireReaderKey === true;
   const envKeys = new Map<string, ApiKeyRole>();
@@ -1084,6 +1153,11 @@ function attachAuth(
     if (urlPath === '/auth/status') return true;
     if (guiMountPath !== null && urlPath === guiMountPath) return true;
     if (guiPrefix !== null && urlPath.startsWith(guiPrefix)) return true;
+    // OAuth discovery + auth-flow endpoints are intentionally
+    // unauthenticated — they ARE the auth layer. /oauth/token validates
+    // grants internally; /oauth/authorize validates the consent token.
+    if (urlPath.startsWith('/.well-known/')) return true;
+    if (urlPath.startsWith('/oauth/')) return true;
     return false;
   }
 
@@ -1105,10 +1179,21 @@ function attachAuth(
     const path = (req.url.split('?', 1)[0] ?? req.url);
     if (isPublicPath(path)) return;
 
-    // Auth-off when nothing is configured. Cheap path — count is a
-    // single COUNT(*) on a tiny table.
+    // Detect a presented bearer up front. JWTs MUST always be honored
+    // (an OAuth-scoped read-only token has to be enforced as read-only
+    // even when api-keys aren't configured), so the auth-off shortcut
+    // below only fires when nothing was presented at all.
+    const presentedBearer = extractBearer(req);
+    const looksLikeJwt =
+      presentedBearer !== undefined &&
+      presentedBearer.startsWith('ey') &&
+      presentedBearer.includes('.');
+
+    // Auth-off when nothing is configured AND the caller didn't show
+    // up with a JWT. Cheap path — count is a single COUNT(*) on a
+    // tiny table.
     const dbKeys = await auth.storage.countActiveApiKeys();
-    if (dbKeys === 0 && envKeys.size === 0) return;
+    if (dbKeys === 0 && envKeys.size === 0 && !looksLikeJwt) return;
 
     // Required role for this request. /rpc and /mcp peek at the
     // dispatched tool to decide; everything else uses HTTP-method
@@ -1155,44 +1240,52 @@ function attachAuth(
     }
     if (required === null) return;
 
-    // Extract presented secret.
-    const authz = req.headers.authorization;
-    const xKey = req.headers['x-ledric-key'];
-    let presented: string | undefined;
-    if (typeof authz === 'string' && authz.toLowerCase().startsWith('bearer ')) {
-      presented = authz.slice(7).trim();
-    } else if (typeof xKey === 'string') {
-      presented = xKey.trim();
-    }
-    if (!presented || !looksLikeApiKey(presented)) {
-      reply.code(401).send({
-        error: { code: 'UNAUTHORIZED', message: 'Missing or malformed API key' }
-      });
-      return reply;
-    }
+    const presented = presentedBearer;
 
-    // Resolve to a role.
-    let role: ApiKeyRole | null = envKeys.get(presented) ?? null;
+    // OAuth bearer first — JWTs always start with `ey` (base64url of `{"`).
+    // Falls through to API-key auth on parse / verify failure so a
+    // bad JWT doesn't dead-end clients that ALSO happen to send a key.
+    let role: ApiKeyRole | null = null;
     let keyId: Uint8Array | null = null;
+    if (looksLikeJwt) {
+      const verifier = oauthVerifierGetter?.();
+      if (verifier) {
+        try {
+          const claims = await verifier(presented!);
+          role = SCOPE_TO_ROLE[claims.scope];
+        } catch {
+          // Bad / expired JWT — fall through to API-key auth.
+        }
+      }
+    }
 
     if (role === null) {
-      const found = await auth.storage.findApiKeyByHash(hashApiKey(presented));
-      if (found && found.revoked_at === null) {
-        role = found.role;
-        keyId = found.id;
+      if (!presented || !looksLikeApiKey(presented)) {
+        reply.code(401).send({
+          error: { code: 'UNAUTHORIZED', message: 'Missing or malformed bearer credential' }
+        });
+        return reply;
+      }
+      role = envKeys.get(presented) ?? null;
+      if (role === null) {
+        const found = await auth.storage.findApiKeyByHash(hashApiKey(presented));
+        if (found && found.revoked_at === null) {
+          role = found.role;
+          keyId = found.id;
+        }
       }
     }
 
     if (role === null) {
       // Soft hint when the prefix is recognizable — helps debugging
       // without leaking which exact key would have matched.
-      const hinted = parseApiKeyRole(presented);
+      const hinted = parseApiKeyRole(presented ?? '');
       reply.code(401).send({
         error: {
           code: 'UNAUTHORIZED',
           message: hinted
             ? 'API key is unknown or revoked'
-            : 'Invalid API key'
+            : 'Invalid credential'
         }
       });
       return reply;

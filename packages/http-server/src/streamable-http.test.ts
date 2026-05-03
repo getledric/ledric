@@ -37,7 +37,14 @@ async function bootHttp(opts: BootOpts = {}): Promise<Listening> {
           : {})
       }
     : undefined;
-  const app = createHttpServer(core, mcp !== undefined ? { mcp } : {});
+  // Public-MCP mode mounts the OAuth provider, which needs storage.
+  // Auth is otherwise off (no keys minted) — auth-off mode lets the
+  // tests focus on Origin/CIDR semantics.
+  const auth = opts.public === true ? { storage } : undefined;
+  const app = createHttpServer(core, {
+    ...(mcp !== undefined ? { mcp } : {}),
+    ...(auth !== undefined ? { auth } : {})
+  });
   await app.ready();
   // Port 0 → kernel-assigned ephemeral port. Pull the actual address
   // back from `server.address()` so the client knows where to connect.

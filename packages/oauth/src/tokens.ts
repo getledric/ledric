@@ -1,4 +1,5 @@
 import { SignJWT, jwtVerify } from 'jose';
+import { randomBytes } from 'node:crypto';
 import type { LedricStorage } from '@ledric/storage';
 import { randomToken, sha256 } from './hash.js';
 import type { SigningKeys } from './keys.js';
@@ -38,8 +39,13 @@ export async function mintTokens(
   const refreshTtl = opts.refreshTtlSeconds ?? DEFAULT_REFRESH_TTL;
   const now = Math.floor(Date.now() / 1000);
 
+  // jti distinguishes tokens minted within the same second — without
+  // it, Ed25519's deterministic signing would produce identical JWTs
+  // for back-to-back mints (e.g. fast refresh exchanges in tests).
+  const jti = randomBytes(12).toString('base64url');
   const access_token = await new SignJWT({ scope: input.scope })
     .setProtectedHeader({ alg: 'EdDSA', kid: keys.kid, typ: 'JWT' })
+    .setJti(jti)
     .setIssuer(opts.issuer)
     .setAudience(opts.audience ?? AUDIENCE)
     .setSubject(input.client_id)
