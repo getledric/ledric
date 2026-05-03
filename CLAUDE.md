@@ -22,11 +22,12 @@ pnpm workspace, Node 22+, ESM-only TypeScript. Nine packages under `packages/`, 
 
 ```bash
 # Workspace-wide
-pnpm build                     # tsup builds every package; required before e2e runs
-pnpm test                      # vitest, sqlite-only (~360 tests)
+pnpm build                     # tsup builds every package; required before any test run
+pnpm test                      # vitest — unit suites + e2e-cli/ (sqlite-only)
 pnpm test:watch                # interactive vitest
+pnpm test:cli                  # build then run only e2e-cli/ (pre-publish smoke)
 pnpm typecheck                 # tsc --noEmit, root only
-pnpm e2e                       # Playwright; needs `pnpm exec playwright install chromium` once
+pnpm e2e                       # Playwright — GUI; needs `pnpm exec playwright install chromium` once
 pnpm e2e:ui                    # interactive Playwright runner
 pnpm cli serve --gui           # run the dev tree's CLI
 
@@ -116,6 +117,7 @@ When making a common change, these are the files in roughly the order you should
 - **The light/dark palette is a script-applied inversion.** When extending the GUI, mind that the zinc palette ranges 50→950 are inverted from the original dark theme. Status accents (red/green/amber 600/700) are tuned for light backgrounds; amber CTA buttons keep dark text (`text-zinc-950`) for contrast against amber-500 fills.
 - **Asset URL builder takes a `ref_key`, not an `id`.** `api.bytesUrl(refKey)` in `packages/gui/web/lib/api.js`. The previous `api.assetUrl(id)` was renamed because every caller of it was broken. If you have only an id, fetch metadata via `api.asset(id)` to get the ref_key.
 - **Reserved content keys start with `_`** (`_locale`, `_redirect`, `_refs`, `_warnings`). Field names must not start with `_`.
+- **Unit tests don't exercise the published surface.** `packages/*/src/**.test.ts` import source modules directly and call library functions — they do *not* spawn the CLI binary or route through `runHttp`. A test that says "passes" against `createHttpServer` may still ship a broken `dist/cli.js` (esbuild emits external imports verbatim — ESM only verifies them at module-load) or a broken runner (option-drop bugs are invisible if no test boots through it). 0.3.0 (`listClients` ESM crash), 0.3.2 (runner dropped `mcp` opts → /mcp 404), and 0.3.3 (public-mode auth-off bypass) all shipped past green unit suites for that reason. The harness in `e2e-cli/` boots the actual binary on a fresh tmpdir and walks the full MCP-Inspector flow (anonymous /mcp → 401 + RFC 9728 WWW-Authenticate → DCR → consent → token → tools/list). When you add a new product-surface concern (CLI flag, route, spec compliance), add an assertion there — not just a unit test against the underlying function.
 
 ## Conventions worth knowing
 
