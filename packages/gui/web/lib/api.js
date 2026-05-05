@@ -1,7 +1,16 @@
 // Tiny fetch wrapper for the ledric HTTP API. Mirrors @ledric/sdk's surface
 // but uses the page origin (since the GUI is mounted on the same server).
+//
+// When the GUI is reached through a reverse proxy that prefixes URLs
+// (e.g. ledric/laravel mounting at /ledric-admin/...), the host server
+// injects `<script>window.LEDRIC_BASE_URL = "/ledric-admin"</script>`
+// into the index. fetch() resolves bare paths against current origin,
+// so a path-only base URL works for both inline-mode and proxy-mode.
 
-const ROOT = window.location.origin;
+const ROOT =
+  typeof window !== 'undefined' && typeof window.LEDRIC_BASE_URL === 'string'
+    ? window.LEDRIC_BASE_URL.replace(/\/+$/, '')
+    : window.location.origin;
 
 // localStorage key the admin paste-prompt writes to. Same origin as
 // the API, so the inline-editor iframe and the /admin SPA share it.

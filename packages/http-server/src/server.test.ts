@@ -545,6 +545,45 @@ describe('HTTP server with GUI mount', () => {
     expect(res.statusCode).toBe(404);
     expect(JSON.parse(res.body).error.code).toBe('NOT_FOUND');
   });
+
+  it('X-Forwarded-Prefix overrides <base href> so the proxy prefix wins', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/admin/',
+      headers: { accept: 'text/html', 'x-forwarded-prefix': '/ledric-admin' }
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('<base href="/ledric-admin/">');
+  });
+
+  it('X-Forwarded-Prefix injects window.LEDRIC_BASE_URL for api.js', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/admin/',
+      headers: { accept: 'text/html', 'x-forwarded-prefix': '/ledric-admin' }
+    });
+    expect(res.body).toContain('window.LEDRIC_BASE_URL="/ledric-admin"');
+  });
+
+  it('no X-Forwarded-Prefix → no LEDRIC_BASE_URL script (falls back to window.location.origin)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/admin/',
+      headers: { accept: 'text/html' }
+    });
+    expect(res.body).not.toContain('LEDRIC_BASE_URL');
+  });
+
+  it('SPA deep-refresh under proxy prefix carries through to the injected base', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/admin/types/blog_post/nested',
+      headers: { accept: 'text/html', 'x-forwarded-prefix': '/ledric-admin/' }
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('<base href="/ledric-admin/">');
+    expect(res.body).toContain('window.LEDRIC_BASE_URL="/ledric-admin"');
+  });
 });
 
 describe('HTTP server with auth (admin-protects-writes default)', () => {
