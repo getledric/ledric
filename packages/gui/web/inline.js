@@ -226,8 +226,83 @@
     mutTimer = setTimeout(() => scan(document), 150);
   }
 
+  // ---- preview toggle ----------------------------------------------------
+  // Visible only when the host page sets `window.LEDRIC_PREVIEW_AVAILABLE`
+  // = true (the admin user's renderer opts in). State comes from
+  // `window.LEDRIC_PREVIEW`. Click POSTs to `<mountPath>/preview-toggle`
+  // and reloads — Laravel's package handles that route by toggling a
+  // cookie. Standalone ledric installs ignore both globals (nothing is
+  // emitted), so this is a no-op outside the proxy setup.
+
+  function ensurePreviewToggle() {
+    if (!window.LEDRIC_PREVIEW_AVAILABLE) return;
+    if (document.getElementById('ledric-preview-toggle')) return;
+
+    const active = window.LEDRIC_PREVIEW === true;
+    const btn = document.createElement('button');
+    btn.id = 'ledric-preview-toggle';
+    btn.type = 'button';
+    btn.textContent = active ? 'Preview: ON' : 'Preview: OFF';
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    Object.assign(btn.style, {
+      position: 'fixed',
+      bottom: '16px',
+      right: '16px',
+      zIndex: '2147483645',
+      padding: '8px 14px',
+      borderRadius: '999px',
+      border: 'none',
+      background: active ? '#f59e0b' : '#3f3f46',
+      color: active ? '#18181b' : '#fafafa',
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+      fontSize: '13px',
+      fontWeight: '600',
+      cursor: 'pointer',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+      transition: 'transform 0.1s ease'
+    });
+    btn.addEventListener('mouseenter', () => { btn.style.transform = 'scale(1.05)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.transform = 'scale(1)'; });
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.style.opacity = '0.7';
+      try {
+        const res = await fetch(apiBase + mountPath + '/preview-toggle', {
+          method: 'POST',
+          credentials: 'same-origin'
+        });
+        if (res.ok) {
+          location.reload();
+          return;
+        }
+      } catch { /* fall through */ }
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    });
+
+    if (active) {
+      // Thin top banner so it's hard to forget you're looking at drafts.
+      const banner = document.createElement('div');
+      banner.id = 'ledric-preview-banner';
+      Object.assign(banner.style, {
+        position: 'fixed',
+        top: '0',
+        left: '0',
+        right: '0',
+        height: '3px',
+        background: '#f59e0b',
+        zIndex: '2147483645',
+        pointerEvents: 'none'
+      });
+      document.body.appendChild(banner);
+    }
+
+    document.body.appendChild(btn);
+  }
+
   function init() {
     scan(document);
+    ensurePreviewToggle();
     const mo = new MutationObserver(onMutation);
     mo.observe(document.body, {
       childList: true,

@@ -1,6 +1,6 @@
 {
   "name": "@ledric/oauth",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "OAuth 2.1 provider for ledric — DCR + auth code + PKCE + JWT/JWKS, single-process, no external IdP. Mounted by @ledric/http-server when mcp.public is on.",
   "license": "Apache-2.0",
   "repository": {

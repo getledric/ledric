@@ -13,6 +13,7 @@ exists.
 - [The packages](#the-packages)
 - [Inside the ledric process](#inside-the-ledric-process)
 - [The two-process consumer pattern](#the-two-process-consumer-pattern)
+- [Locked-down deployments (Laravel + nginx)](#locked-down-deployments-laravel--nginx)
 - [Storage adapters](#storage-adapters)
 - [The asset pipeline](#the-asset-pipeline)
 - [The inline editor](#the-inline-editor)
@@ -288,6 +289,106 @@ asset uploads, write operations) without leaking the admin key
 into the browser, it mounts `@ledric/proxy` server-side. The
 proxy holds the admin key in environment variables and exposes
 a curated subset of ledric's surface to the browser.
+
+---
+
+## Locked-down deployments (Laravel + nginx)
+
+Some deployments don't want ledric reachable from the public
+internet at all — corporate networks, regulated stacks, or "I
+already run a Laravel app and that's the only public surface I
+want to maintain." The `ledric/laravel` Composer package covers
+this case: it makes Laravel the single public face, with ledric
+listening only on `127.0.0.1`.
+
+```
+┌──────────────┐      ┌────────────────────────┐    ┌────────────┐
+│  Browser     │      │  Laravel (public)      │    │  ledric    │
+│  / CDN       ├─────►│  - admin GUI proxy      ├───►│ 127.0.0.1  │
+│              │      │  - asset proxy + cache  │    │ (no public │
+│              │      │  - reader/admin API     │    │  binding)  │
+└──────────────┘      └────────────────────────┘    └────────────┘
+                                                          ▲
+                            ┌────────────┐                │
+   MCP clients ────────────►│  nginx     ├────────────────┘
+   (claude.ai connectors)   │  /mcp + .well-known/*
+                            │  proxied directly
+                            └────────────┘
+```
+
+The Laravel package handles every *human-driven* surface:
+
+- The inline admin GUI: every `/ledric-admin/*` request streams
+  through the package's `AdminProxyController`, gated by an
+  allow-list of Laravel user IDs.
+- Asset bytes: `/ledric-assets/<ref_key>` is fetched from ledric
+  on first hit, cached in Laravel's cache (immutable — `ref_key`
+  rotates on every byte replacement), and served with
+  `Cache-Control: public, max-age=31536000, immutable`.
+- Reader/admin API calls from the consumer site go through
+  `Ledric::find()` etc., cached with stale-while-error so a
+  ledric outage degrades gracefully instead of blanking the site.
+
+### Why MCP doesn't go through Laravel
+
+Public-MCP uses Streamable HTTP — long-lived connections that
+stay open for the lifetime of the MCP session. Under PHP-FPM
+that's one tied-up worker per connected client. A pool of 8–32
+workers gets exhausted by 8–32 simultaneous claude.ai
+connections. The whole point of public-MCP is *agents at scale*,
+which is exactly what FPM is bad at.
+
+So the MCP surface bypasses Laravel and goes directly to
+ledric via a small nginx (or Caddy) location block:
+
+```nginx
+# /etc/nginx/sites-available/example.com
+server {
+  server_name example.com;
+  listen 443 ssl http2;
+  # ... TLS config ...
+
+  # MCP + OAuth metadata go straight to ledric.
+  # ledric's OAuth provider handles auth — no app-level gating needed.
+  location /mcp {
+    proxy_pass http://127.0.0.1:3030;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-Host  $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_buffering off;            # streamable HTTP needs no buffering
+    proxy_read_timeout 24h;         # MCP sessions are long-lived
+    proxy_send_timeout 24h;
+  }
+
+  location /.well-known/oauth-authorization-server {
+    proxy_pass http://127.0.0.1:3030;
+  }
+  location /.well-known/oauth-protected-resource {
+    proxy_pass http://127.0.0.1:3030;
+  }
+  # /auth, /token, /register, /jwks, /consent — same shape.
+  location ~ ^/(auth|token|register|jwks|consent) {
+    proxy_pass http://127.0.0.1:3030;
+  }
+
+  # Everything else is the Laravel app.
+  location / {
+    try_files $uri /index.php?$query_string;
+    # ... standard Laravel + php-fpm config ...
+  }
+}
+```
+
+ledric still needs to know its public issuer URL so JWTs are
+minted with the right `iss` claim — set `mcp.publicUrl` (or
+`LEDRIC_MCP_PUBLIC_URL`) to `https://example.com`. The
+authorization server discovery doc and JWKS will then be
+correctly addressed.
+
+Both Laravel and the MCP paths share the same ledric process
+and the same database; they're just different access routes
+into it.
 
 ---
 

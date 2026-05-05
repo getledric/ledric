@@ -89,12 +89,53 @@ function parseOrderParam(raw: string | undefined): Array<{ field: string; dir: '
   return out;
 }
 
-function injectBaseHref(html: string, basePath: string): string {
-  const tag = `<base href="${basePath}">`;
-  if (/<base\s/i.test(html)) {
-    return html.replace(/<base\s[^>]*>/i, tag);
+/**
+ * Resolve the externally-visible mount prefix from a request. When
+ * fronted by a reverse proxy (ledric/laravel, nginx, traefik, etc.)
+ * the `X-Forwarded-Prefix` header carries the prefix the browser
+ * sees; without it we use the local GUI mount path. Always returns
+ * a trailing-slashed prefix.
+ */
+function resolveExternalPrefix(
+  headers: Record<string, string | string[] | undefined>,
+  fallback: string
+): string {
+  const raw = headers['x-forwarded-prefix'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const prefix = (typeof value === 'string' && value.length > 0 ? value : fallback).trim();
+  if (prefix.length === 0) return '/';
+  return prefix.endsWith('/') ? prefix : `${prefix}/`;
+}
+
+function injectGuiBootstrap(
+  html: string,
+  basePath: string,
+  externalPrefix: string
+): string {
+  // <base href="…/"> — fixes relative asset/script imports for SPA deep
+  // refresh. In proxy mode this must be the externally-visible prefix
+  // so `./app.js` resolves to a path the proxy will catch.
+  const baseTag = `<base href="${externalPrefix}">`;
+  let out = /<base\s/i.test(html)
+    ? html.replace(/<base\s[^>]*>/i, baseTag)
+    : html.replace(/<head[^>]*>/i, (m) => `${m}\n    ${baseTag}`);
+
+  // <base> doesn't help string-concatenation URLs (window.location.origin
+  // + "/types"). When proxied, also inject an explicit base URL the
+  // GUI's api.js reads. Skip when local mountPath equals externalPrefix
+  // — the existing window.location.origin fallback already produces the
+  // right URL there.
+  if (externalPrefix !== basePath) {
+    const trimmed = externalPrefix.replace(/\/+$/, '');
+    const script = `<script>window.LEDRIC_BASE_URL=${JSON.stringify(trimmed)};</script>`;
+    if (/<\/head>/i.test(out)) {
+      out = out.replace(/<\/head>/i, `    ${script}\n  </head>`);
+    } else {
+      out = out.replace(/<head[^>]*>/i, (m) => `${m}\n    ${script}`);
+    }
   }
-  return html.replace(/<head[^>]*>/i, (m) => `${m}\n    ${tag}`);
+
+  return out;
 }
 
 function guessKindFromMime(mime: string | undefined): string {
@@ -300,10 +341,11 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     // and can inject <base href>. Without that, deep SPA paths like
     // /admin/types/blog_post/foo break relative imports (./app.js resolves
     // against the current URL, not the mount root).
-    const serveIndex = async (_req: unknown, reply: import('fastify').FastifyReply) => {
+    const serveIndex = async (req: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply) => {
       try {
         const raw = await fs.readFile(indexPath, 'utf-8');
-        reply.code(200).type('text/html; charset=utf-8').send(injectBaseHref(raw, prefix));
+        const externalPrefix = resolveExternalPrefix(req.headers, prefix);
+        reply.code(200).type('text/html; charset=utf-8').send(injectGuiBootstrap(raw, prefix, externalPrefix));
       } catch (err) {
         reply.code(500).send({
           error: {
@@ -337,7 +379,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       if (inMount && wantsHtml) {
         try {
           const raw = await fs.readFile(indexPath, 'utf-8');
-          reply.code(200).type('text/html; charset=utf-8').send(injectBaseHref(raw, prefix));
+          const externalPrefix = resolveExternalPrefix(req.headers, prefix);
+          reply.code(200).type('text/html; charset=utf-8').send(injectGuiBootstrap(raw, prefix, externalPrefix));
           return;
         } catch {
           // fall through to default
