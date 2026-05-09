@@ -1,6 +1,6 @@
 {
   "name": "@ledric/http-server",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "ledric HTTP server: tool-shaped POST /rpc + REST GET projections, built on Fastify, binding @ledric/core.",
   "license": "Apache-2.0",
   "repository": {

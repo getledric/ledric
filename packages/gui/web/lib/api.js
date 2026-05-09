@@ -6,11 +6,18 @@
 // injects `<script>window.LEDRIC_BASE_URL = "/ledric-admin"</script>`
 // into the index. fetch() resolves bare paths against current origin,
 // so a path-only base URL works for both inline-mode and proxy-mode.
+//
+// Proxy mode also handles auth — the proxy injects an admin Bearer
+// outbound and strips inbound Authorization headers. The GUI must NOT
+// prompt for a key (the proxy is doing the work) and must NOT send its
+// own Authorization (it would be stripped anyway). PROXIED gates both.
 
-const ROOT =
-  typeof window !== 'undefined' && typeof window.LEDRIC_BASE_URL === 'string'
-    ? window.LEDRIC_BASE_URL.replace(/\/+$/, '')
-    : window.location.origin;
+const PROXIED =
+  typeof window !== 'undefined' && typeof window.LEDRIC_BASE_URL === 'string';
+
+const ROOT = PROXIED
+  ? window.LEDRIC_BASE_URL.replace(/\/+$/, '')
+  : window.location.origin;
 
 // localStorage key the admin paste-prompt writes to. Same origin as
 // the API, so the inline-editor iframe and the /admin SPA share it.
@@ -28,9 +35,12 @@ export const auth = {
   },
   /**
    * Hit the public /auth/status probe so callers can decide whether to
-   * show a key prompt without burning a 401.
+   * show a key prompt without burning a 401. In proxy mode the
+   * upstream proxy is handling auth on our behalf, so we lie to the
+   * AuthGate: no client-side key needed.
    */
   async status() {
+    if (PROXIED) return { required: false, reads_open: true };
     try {
       const res = await fetch(`${ROOT}/auth/status`);
       if (!res.ok) return { required: false, reads_open: true };
@@ -55,6 +65,9 @@ function fireUnauthorized() {
 }
 
 function authHeaders() {
+  // In proxy mode the proxy injects the Bearer; whatever we'd send
+  // here gets stripped by `scrubInboundHeaders` upstream anyway.
+  if (PROXIED) return {};
   const k = auth.key;
   return k ? { Authorization: `Bearer ${k}` } : {};
 }
