@@ -1,6 +1,6 @@
 {
   "name": "@ledric/core",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "ledric core: schema engine, versioning, refs, validation, ACL. DB-agnostic.",
   "license": "Apache-2.0",
   "repository": {

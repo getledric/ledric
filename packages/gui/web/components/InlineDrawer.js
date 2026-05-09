@@ -102,7 +102,14 @@ export function InlineDrawer() {
     postToParent({ type: 'ledric:close' });
   }
 
-  async function save() {
+  // Two save modes — mirrors the full-page editor's split:
+  //   - saveDraft(): just `draft`. Leaves the live published version
+  //     alone; the editor closes and the consumer site keeps showing
+  //     the previously-published copy. Useful when reviewing in
+  //     preview mode without affecting visitors.
+  //   - savePublish(): `draft` then `publish`. The published_version
+  //     advances to the new draft so visitors see the change.
+  async function persist({ publish }) {
     if (!typeDef || saving) return;
     setSaving(true);
     setError(null);
@@ -113,16 +120,23 @@ export function InlineDrawer() {
         ref: { type, slug },
         parent_version: parentVersion
       });
-      // Publish what we just drafted. If validation fails here, the
-      // draft is left in place — same behaviour as the full /admin
-      // editor, and on retry the user's edits aren't lost.
-      const published = await api.rpc('publish', {
-        ref: { type, slug },
-        version: drafted.version
-      });
+      let published = null;
+      if (publish) {
+        // Publish what we just drafted. If validation fails here, the
+        // draft is left in place — same behaviour as the full /admin
+        // editor, and on retry the user's edits aren't lost.
+        published = await api.rpc('publish', {
+          ref: { type, slug },
+          version: drafted.version
+        });
+        setPublishedVersion(published.published_version);
+      }
       setParentVersion(drafted.version);
-      setPublishedVersion(published.published_version);
-      postToParent({ type: 'ledric:saved', version: published.published_version });
+      postToParent({
+        type: 'ledric:saved',
+        version: published ? published.published_version : drafted.version,
+        published: Boolean(published)
+      });
     } catch (e) {
       setError(e);
       // Refresh parent_version so a retry has a chance — covers the
@@ -137,6 +151,9 @@ export function InlineDrawer() {
       setSaving(false);
     }
   }
+
+  const saveDraft   = () => persist({ publish: false });
+  const savePublish = () => persist({ publish: true });
 
   const headerTitle =
     typeDef && content[typeDef.display_field ?? 'title']
@@ -216,7 +233,13 @@ export function InlineDrawer() {
             >cancel</button>
             <button
               type="button"
-              onClick=${save}
+              onClick=${saveDraft}
+              disabled=${saving}
+              className="border border-zinc-300 disabled:bg-zinc-100 disabled:text-zinc-400 text-zinc-700 hover:bg-zinc-100 transition px-3 py-1.5 rounded text-sm font-medium"
+            >${saving ? '…' : 'save draft'}</button>
+            <button
+              type="button"
+              onClick=${savePublish}
               disabled=${saving}
               className="bg-amber-500 disabled:bg-zinc-300 disabled:text-zinc-500 text-zinc-950 hover:bg-amber-400 transition px-4 py-1.5 rounded text-sm font-medium"
             >${saving ? 'saving…' : 'save & publish'}</button>
