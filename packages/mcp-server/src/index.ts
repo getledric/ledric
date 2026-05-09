@@ -4,7 +4,8 @@ export {
   createMcpServer,
   SERVER_NAME,
   SERVER_VERSION,
-  SERVER_INSTRUCTIONS
+  SERVER_INSTRUCTIONS,
+  entryToWireShape
 } from './server.js';
 export { runStdio } from './stdio.js';
 export { createStreamableHttpHandle } from './streamable-http.js';

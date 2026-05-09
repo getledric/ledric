@@ -459,6 +459,78 @@ describe('HTTP server', () => {
     expect(body.statusCode).toBeUndefined();
     expect(body.message).toBeUndefined();
   });
+
+  // /rpc has historically returned the raw core result, leaking the
+  // legacy `content` field that MCP renames to `fields` at its tool
+  // boundary. These tests pin the rename so the two surfaces stay
+  // consistent.
+  it('POST /rpc { tool: read } returns fields (not content)', async () => {
+    await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'create_type', args: {
+        name: 'post',
+        fields: { title: { type: 'string', required: true }, slug: { type: 'slug', from: 'title' } },
+        opts: { identifier_field: 'slug', display_field: 'title' }
+      }}
+    });
+    await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'draft', args: { type: 'post', fields: { title: 'Hello' } } }
+    });
+    const res = await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'read', args: { ref: { type: 'post', slug: 'hello' } } }
+    });
+    const body = JSON.parse(res.body);
+    expect(body.result).not.toBeNull();
+    expect(body.result.fields).toMatchObject({ title: 'Hello' });
+    expect(body.result.content).toBeUndefined();
+  });
+
+  it('POST /rpc { tool: find } projects fields on every result entry', async () => {
+    await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'create_type', args: {
+        name: 'post',
+        fields: { title: { type: 'string', required: true }, slug: { type: 'slug', from: 'title' } },
+        opts: { identifier_field: 'slug', display_field: 'title' }
+      }}
+    });
+    for (const title of ['A', 'B']) {
+      await app.inject({
+        method: 'POST', url: '/rpc',
+        payload: { tool: 'draft', args: { type: 'post', fields: { title } } }
+      });
+    }
+    const res = await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'find', args: { type: 'post' } }
+    });
+    const body = JSON.parse(res.body);
+    expect(body.result.results.length).toBe(2);
+    for (const entry of body.result.results) {
+      expect(entry.fields).toBeDefined();
+      expect(entry.content).toBeUndefined();
+    }
+  });
+
+  it('POST /rpc { tool: draft } returns the new entry with fields, not content', async () => {
+    await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'create_type', args: {
+        name: 'post',
+        fields: { title: { type: 'string', required: true }, slug: { type: 'slug', from: 'title' } },
+        opts: { identifier_field: 'slug', display_field: 'title' }
+      }}
+    });
+    const res = await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'draft', args: { type: 'post', fields: { title: 'Hi' } } }
+    });
+    const body = JSON.parse(res.body);
+    expect(body.result.fields).toMatchObject({ title: 'Hi' });
+    expect(body.result.content).toBeUndefined();
+  });
 });
 
 describe('HTTP server with GUI mount', () => {

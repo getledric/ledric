@@ -18,7 +18,7 @@ const PKG_VERSION = (JSON.parse(
 ) as { version: string }).version;
 import type { Core } from '@ledric/core';
 import { parseTransformParams } from '@ledric/core';
-import { createStreamableHttpHandle } from '@ledric/mcp-server';
+import { createStreamableHttpHandle, entryToWireShape } from '@ledric/mcp-server';
 import type { StreamableHttpHandle } from '@ledric/mcp-server';
 import { SCOPE_TO_ROLE } from '@ledric/oauth';
 import type { Storage, ApiKeyRole, LedricStorage } from '@ledric/storage';
@@ -860,7 +860,11 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     }
     try {
       const result = await dispatchTool(core, tool, args);
-      return { result: toJsonSafe(result) };
+      // Apply the same wire-shape rename (`content` → `fields`) MCP
+      // applies, so /rpc consumers get the documented envelope. Without
+      // this, `read`/`find`/`draft`/`publish` returned the legacy core
+      // shape and broke any client that targeted both surfaces.
+      return { result: toJsonSafe(applyWireShape(tool, result)) };
     } catch (err) {
       reply.code(400);
       return { error: { tool, ...serializeToolError(err) } };
@@ -1200,6 +1204,46 @@ async function dispatchTool(
     default:
       throw new Error(`Unknown tool "${tool}"`);
   }
+}
+
+/**
+ * Tools whose results contain entry shapes that need the wire-shape
+ * rename (`content` → `fields`). MCP applies this in the tool-handler
+ * layer; /rpc has historically returned the bare core result, which
+ * leaks the legacy `content` field and breaks consumers that target
+ * both surfaces.
+ */
+const ENTRY_RETURNING_TOOLS = new Set([
+  'read',
+  'draft',
+  'publish',
+  'rename_entry'
+]);
+
+const ENTRY_LIST_RETURNING_TOOLS = new Set(['find']);
+
+function applyWireShape(tool: string, result: unknown): unknown {
+  if (result === null || result === undefined) return result;
+
+  if (ENTRY_RETURNING_TOOLS.has(tool) && typeof result === 'object') {
+    return entryToWireShape(result as Record<string, unknown>);
+  }
+
+  if (ENTRY_LIST_RETURNING_TOOLS.has(tool) && typeof result === 'object') {
+    const obj = result as Record<string, unknown>;
+    if (Array.isArray(obj.results)) {
+      return {
+        ...obj,
+        results: obj.results.map((r) =>
+          r !== null && typeof r === 'object'
+            ? entryToWireShape(r as Record<string, unknown>)
+            : r
+        )
+      };
+    }
+  }
+
+  return result;
 }
 
 /**

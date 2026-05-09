@@ -1049,7 +1049,7 @@ function isJsonScalar(v: unknown): boolean {
  * (schema_version, content_hash, current_version) — those are useful
  * for agents introspecting versioning and content identity.
  */
-function entryToWireShape(entry: Record<string, unknown>): Record<string, unknown> {
+export function entryToWireShape(entry: Record<string, unknown>): Record<string, unknown> {
   if (!('content' in entry)) return entry;
   const { content, ...rest } = entry as Record<string, unknown> & {
     content?: unknown;
