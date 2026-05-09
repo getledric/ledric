@@ -72,12 +72,40 @@ function authHeaders() {
   return k ? { Authorization: `Bearer ${k}` } : {};
 }
 
+// Laravel-flavoured SPA CSRF: when proxied through ledric/laravel the
+// host app's `web` middleware sets an `XSRF-TOKEN` cookie. Reading it
+// and forwarding as `X-XSRF-TOKEN` is the documented Laravel pattern
+// (and Angular's, and a de-facto SPA convention) for passing CSRF
+// without an in-band form token. Standalone ledric never sets the
+// cookie, so the branch is a no-op outside the proxy. We send the
+// header on every request rather than just writes — Laravel's
+// VerifyCsrfToken skips reads internally, and the upfront check keeps
+// the code small.
+function csrfHeaders() {
+  if (!PROXIED || typeof document === 'undefined') return {};
+  const m = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+  if (!m) return {};
+  try {
+    return { 'X-XSRF-TOKEN': decodeURIComponent(m[1]) };
+  } catch {
+    return {};
+  }
+}
+
 async function authedFetch(url, init = {}) {
-  const headers = { ...(init.headers ?? {}), ...authHeaders() };
+  const headers = { ...(init.headers ?? {}), ...authHeaders(), ...csrfHeaders() };
   const res = await fetch(url, { ...init, headers });
   if (res.status === 401) {
     auth.clear();
     fireUnauthorized();
+  }
+  if (res.status === 419) {
+    // Laravel: CSRF token expired/rotated. Reloading is the cheapest
+    // path back to a working session — it grabs a fresh XSRF-TOKEN
+    // cookie and the user can retry. We hang the returned promise so
+    // callers don't see a partial response while the navigation runs.
+    if (typeof location !== 'undefined') location.reload();
+    return new Promise(() => {});
   }
   return res;
 }

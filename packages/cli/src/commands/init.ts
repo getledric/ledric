@@ -50,7 +50,7 @@ export const DEFAULTS: InitAnswers = {
 // Version pin for the @ledric/proxy dep we add to a consumer's
 // package.json. Kept in lockstep with the CLI's own version — bump on
 // each release that ships a proxy change.
-export const PROXY_DEP_VERSION = '^0.3.7';
+export const PROXY_DEP_VERSION = '^0.3.8';
 
 const LEDRIC_GITIGNORE_LINES: readonly string[] = [
   '# ledric',

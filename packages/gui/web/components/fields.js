@@ -293,7 +293,7 @@ function MarkdownField({ name, def, value, onChange }) {
         `}
         ${tab === 'preview' && html`
           <div
-            className="prose prose-invert prose-sm max-w-none px-4 py-3 min-h-[12rem] bg-zinc-50"
+            className="prose prose-sm max-w-none px-4 py-3 min-h-[12rem] bg-zinc-50"
             dangerouslySetInnerHTML=${{ __html: previewHtml || '<p class="text-zinc-400">empty</p>' }}
           />
         `}

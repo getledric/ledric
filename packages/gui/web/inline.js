@@ -267,11 +267,25 @@
       btn.disabled = true;
       btn.style.opacity = '0.7';
       try {
+        // Match api.js's CSRF passthrough: when the host app sets an
+        // XSRF-TOKEN cookie (Laravel's `web` middleware does this),
+        // forward it as X-XSRF-TOKEN. Reload on 419 so a stale token
+        // self-heals the same way it does for the admin GUI.
+        const xsrfMatch = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+        const headers = {};
+        if (xsrfMatch) {
+          try { headers['X-XSRF-TOKEN'] = decodeURIComponent(xsrfMatch[1]); } catch { /* ignore */ }
+        }
         const res = await fetch(apiBase + mountPath + '/preview-toggle', {
           method: 'POST',
-          credentials: 'same-origin'
+          credentials: 'same-origin',
+          headers
         });
         if (res.ok) {
+          location.reload();
+          return;
+        }
+        if (res.status === 419) {
           location.reload();
           return;
         }
