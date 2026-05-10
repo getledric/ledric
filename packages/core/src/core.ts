@@ -210,6 +210,17 @@ export interface ReadInput {
    * consumer reads should leave it false.
    */
   include_private?: boolean;
+  /**
+   * Project the response from `entries.published_version` instead of
+   * `current_version`. Returns null when the entry has never been
+   * published — callers asking for the public-facing copy must not
+   * accidentally see drafts.
+   *
+   * Mirrors `find({ published: true })`. Mutually exclusive with
+   * `version`: when both are set, `version` wins (you're asking for a
+   * specific revision, not the live one).
+   */
+  published?: boolean;
 }
 
 export interface PublishInput {
@@ -740,9 +751,14 @@ export class Core {
   }
 
   async read(input: ReadInput): Promise<EntryDetail | null> {
-    const opts: { version?: number; locale?: string } = {};
+    const opts: { version?: number; locale?: string; published?: boolean } = {};
     if (input.version !== undefined) opts.version = input.version;
     if (input.locale !== undefined) opts.locale = input.locale;
+    // version takes precedence over published — asking for a specific
+    // revision is more specific than "the live one."
+    if (input.published === true && input.version === undefined) {
+      opts.published = true;
+    }
     const entry = await this.storage.readEntry(input.ref, opts);
     if (!entry) return null;
 

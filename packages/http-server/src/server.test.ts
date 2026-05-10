@@ -159,6 +159,79 @@ describe('HTTP server', () => {
     expect(bareBody.results.map((r: { slug: string }) => r.slug)).toEqual(['first', 'middle', 'last']);
   });
 
+  it('GET /entries/:type/:slug?published=true projects from published version', async () => {
+    // Without this branch in storage, ?published=true was silently
+    // ignored: the head/draft was returned regardless. Drafts leaked
+    // straight to public consumers. Pin the projection here AND on
+    // /rpc so neither path regresses.
+    await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'create_type', args: {
+        name: 'page',
+        fields: { title: { type: 'string', required: true }, slug: { type: 'slug', from: 'title' } },
+        opts: { identifier_field: 'slug', display_field: 'title' }
+      }}
+    });
+    const drafted = await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'draft', args: { type: 'page', fields: { title: 'live', slug: 'about' } } }
+    });
+    const v1 = JSON.parse(drafted.body).result.version;
+    await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'publish', args: { ref: { type: 'page', slug: 'about' }, version: v1 } }
+    });
+    // Stack a draft on top — head advances, published stays. Pin
+    // slug so the title change doesn't accidentally rename the entry.
+    await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'draft', args: { type: 'page', fields: { title: 'draft', slug: 'about' }, ref: { type: 'page', slug: 'about' }, parent_version: v1 } }
+    });
+
+    const head = await app.inject({ method: 'GET', url: '/entries/page/about' });
+    expect(JSON.parse(head.body).fields.title).toBe('draft');
+
+    const onlyPublished = await app.inject({ method: 'GET', url: '/entries/page/about?published=true' });
+    expect(JSON.parse(onlyPublished.body).fields.title).toBe('live');
+
+    // Same projection via /rpc { tool: read, args: { ..., published: true } }.
+    const rpcRead = await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'read', args: { ref: { type: 'page', slug: 'about' }, published: true } }
+    });
+    expect(JSON.parse(rpcRead.body).result.fields.title).toBe('live');
+  });
+
+  it('GET /entries/:type/:slug?published=true 404s on never-published entries', async () => {
+    await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'create_type', args: {
+        name: 'page',
+        fields: { title: { type: 'string', required: true }, slug: { type: 'slug', from: 'title' } },
+        opts: { identifier_field: 'slug', display_field: 'title' }
+      }}
+    });
+    await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'draft', args: { type: 'page', fields: { title: 'draft only' } } }
+    });
+
+    // Head is reachable.
+    const head = await app.inject({ method: 'GET', url: '/entries/page/draft-only' });
+    expect(head.statusCode).toBe(200);
+
+    // Published-only is not — drafts must not be visible to public consumers.
+    const live = await app.inject({ method: 'GET', url: '/entries/page/draft-only?published=true' });
+    expect(live.statusCode).toBe(404);
+
+    // /rpc returns null in that case (the MCP-shaped envelope unwraps to it).
+    const rpcRead = await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'read', args: { ref: { type: 'page', slug: 'draft-only' }, published: true } }
+    });
+    expect(JSON.parse(rpcRead.body).result).toBeNull();
+  });
+
   it('GET /entries/:type/:slug 404s on missing entry', async () => {
     await app.inject({
       method: 'POST',

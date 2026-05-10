@@ -105,7 +105,8 @@ const ReadArgsSchema = z
     expand_assets: ExpandAssetsSchema,
     resolve_references: ExpandAssetsSchema,
     resolve_refs: z.boolean().optional(),
-    include_private: z.boolean().optional()
+    include_private: z.boolean().optional(),
+    published: z.boolean().optional()
   })
   .strict();
 

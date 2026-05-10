@@ -507,7 +507,7 @@ export class LedricStorage implements Storage {
 
   async readEntry(
     ref: EntryRef,
-    opts?: { version?: number; locale?: string }
+    opts?: { version?: number; locale?: string; published?: boolean }
   ): Promise<EntryDetail | null> {
     const envId = this.envIdBuf();
     const locale = opts?.locale;
@@ -592,10 +592,11 @@ export class LedricStorage implements Storage {
 
   private async readEntryDirect(
     ref: EntryRef,
-    opts?: { version?: number }
+    opts?: { version?: number; published?: boolean }
   ): Promise<EntryDetail | null> {
     const envId = this.envIdBuf();
     const versionMatch = opts?.version !== undefined ? opts.version : null;
+    const publishedOnly = versionMatch === null && opts?.published === true;
 
     let q = this.db
       .selectFrom('entries as e')
@@ -603,6 +604,16 @@ export class LedricStorage implements Storage {
       .innerJoin('entry_versions as ev', (join) => {
         if (versionMatch !== null) {
           return join.onRef('ev.entry_id', '=', 'e.id').on('ev.version', '=', versionMatch);
+        }
+        if (publishedOnly) {
+          // JOIN against published_version. The WHERE ... IS NOT NULL
+          // below filters out never-published entries — without it the
+          // INNER JOIN would silently drop them, but with it we can
+          // distinguish "not found" from "found but never published"
+          // for clearer diagnostics in the future.
+          return join
+            .onRef('ev.entry_id', '=', 'e.id')
+            .onRef('ev.version', '=', 'e.published_version');
         }
         return join.onRef('ev.entry_id', '=', 'e.id').onRef('ev.version', '=', 'e.current_version');
       })
@@ -622,6 +633,10 @@ export class LedricStorage implements Storage {
       .where('t.name', '=', ref.type)
       .where('e.slug', '=', ref.slug)
       .where('e.deleted_at', 'is', null);
+
+    if (publishedOnly) {
+      q = q.where('e.published_version', 'is not', null);
+    }
 
     const row = await q.executeTakeFirst();
     if (!row) return null;

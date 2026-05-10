@@ -1,6 +1,6 @@
 {
   "name": "@ledric/sdk",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "ledric vanilla TypeScript read client SDK.",
   "license": "Apache-2.0",
   "repository": {

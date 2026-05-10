@@ -435,6 +435,81 @@ describe('LedricStorage (sqlite)', () => {
     });
   });
 
+  describe('readEntry({ published: true })', () => {
+    // The mirror of findEntries({ published: true }) for single-entry
+    // reads. The flag was silently ignored in 0.3.x.* until 0.3.9 —
+    // both REST `/entries/:type/:slug?published=true` and `POST /rpc
+    // { tool: read, args: { ..., published: true } }` returned the
+    // head version's content, leaking drafts to public consumers.
+    // These tests pin the rename so a future regression is loud.
+    it('projects from the published version when set', async () => {
+      const def = defineType('post', {
+        title: field.string({ required: true }),
+        slug: field.slug({ from: 'title' })
+      });
+      await storage.createType({ definition: def });
+
+      const v1 = await storage.createEntry({
+        type: 'post', slug: 'a', content: { title: 'live', slug: 'a' }, schema_version: 1
+      });
+      await storage.publishEntry({ ref: { type: 'post', slug: 'a' }, version: v1.version });
+      // Stack a draft on top — current_version advances, published_version stays.
+      await storage.updateEntry({
+        ref: { type: 'post', slug: 'a' },
+        parent_version: v1.version,
+        schema_version: 1,
+        content: { title: 'draft', slug: 'a' }
+      });
+
+      const head = await storage.readEntry({ type: 'post', slug: 'a' });
+      expect(head?.content.title).toBe('draft');
+
+      const live = await storage.readEntry({ type: 'post', slug: 'a' }, { published: true });
+      expect(live?.content.title).toBe('live');
+      expect(live?.version).toBe(v1.version);
+    });
+
+    it('returns null for never-published entries', async () => {
+      const def = defineType('post', {
+        title: field.string({ required: true }),
+        slug: field.slug({ from: 'title' })
+      });
+      await storage.createType({ definition: def });
+      await storage.createEntry({
+        type: 'post', slug: 'b', content: { title: 'draft only', slug: 'b' }, schema_version: 1
+      });
+
+      const head = await storage.readEntry({ type: 'post', slug: 'b' });
+      expect(head).not.toBeNull();
+
+      const live = await storage.readEntry({ type: 'post', slug: 'b' }, { published: true });
+      expect(live).toBeNull();
+    });
+
+    it('explicit version wins over published — version selects exactly that revision', async () => {
+      const def = defineType('post', {
+        title: field.string({ required: true }),
+        slug: field.slug({ from: 'title' })
+      });
+      await storage.createType({ definition: def });
+      const v1 = await storage.createEntry({
+        type: 'post', slug: 'c', content: { title: 'one', slug: 'c' }, schema_version: 1
+      });
+      await storage.publishEntry({ ref: { type: 'post', slug: 'c' }, version: v1.version });
+      await storage.updateEntry({
+        ref: { type: 'post', slug: 'c' },
+        parent_version: v1.version,
+        schema_version: 1,
+        content: { title: 'two', slug: 'c' }
+      });
+
+      // version: 2 + published: true → version wins, returns v2 even
+      // though it's not published. Mirrors the resolver in core.read.
+      const v2 = await storage.readEntry({ type: 'post', slug: 'c' }, { version: 2 });
+      expect(v2?.content.title).toBe('two');
+    });
+  });
+
   describe('findEntries({ published: true })', () => {
     it('filters out drafts and projects from the published version', async () => {
       const def = defineType('post', {

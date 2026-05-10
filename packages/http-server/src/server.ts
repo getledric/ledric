@@ -570,6 +570,7 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       resolve_references?: string;
       resolve_refs?: string;
       include_private?: string;
+      published?: string;
     };
   }>('/entries/:type/:slug', async (req, reply) => {
     const versionNum = req.query.version ? parseInt(req.query.version, 10) : undefined;
@@ -579,6 +580,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     const resolveRefs = req.query.resolve_refs === '1' || req.query.resolve_refs === 'true';
     const includePrivate =
       req.query.include_private === '1' || req.query.include_private === 'true';
+    const publishedOnly =
+      req.query.published === '1' || req.query.published === 'true';
     const entry = await core.read({
       ref: { type: req.params.type, slug: req.params.slug },
       ...(versionNum !== undefined ? { version: versionNum } : {}),
@@ -586,7 +589,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       ...(expandAssets !== undefined ? { expand_assets: expandAssets } : {}),
       ...(resolveReferences !== undefined ? { resolve_references: resolveReferences } : {}),
       ...(resolveRefs ? { resolve_refs: true } : {}),
-      ...(includePrivate ? { include_private: true } : {})
+      ...(includePrivate ? { include_private: true } : {}),
+      ...(publishedOnly ? { published: true } : {})
     });
     if (!entry) {
       reply.code(404);
