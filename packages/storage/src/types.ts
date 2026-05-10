@@ -334,6 +334,20 @@ export interface ApiKeyLookup {
   revoked_at: number | null;
 }
 
+/**
+ * Lookup result that also exposes the stored `key_hash` so callers
+ * can verify it against a presented hash with `crypto.timingSafeEqual`.
+ *
+ * Used by the auth preHandler so the SQL equality on `key_hash` (which
+ * may be early-exit on byte mismatch in some backends) isn't the only
+ * thing standing between an attacker's timing oracle and stored hashes.
+ * Lookup is by the non-secret `key_prefix`; the hash compare happens
+ * in JS in constant time.
+ */
+export interface ApiKeyLookupWithHash extends ApiKeyLookup {
+  key_hash: Uint8Array;
+}
+
 export interface Storage {
   createType(input: CreateTypeInput): Promise<CreateTypeResult>;
   alterType(input: AlterTypeInput): Promise<AlterTypeResult>;
@@ -383,6 +397,13 @@ export interface Storage {
   createApiKey(input: CreateApiKeyInput): Promise<{ id: Uint8Array; created_at: number }>;
   /** Constant-time hash lookup. Returns null on miss. Revoked keys still return so the caller can distinguish "never existed" from "revoked". */
   findApiKeyByHash(hash: Uint8Array): Promise<ApiKeyLookup | null>;
+  /**
+   * Look up an api key by its public 12-char prefix. Returns the
+   * stored hash so the caller can verify the full secret in constant
+   * time (avoids relying on SQL equality timing). At most one row
+   * realistically matches — prefix space is ~48 bits.
+   */
+  findApiKeyByPrefix(prefix: string): Promise<ApiKeyLookupWithHash | null>;
   /** List keys (sorted newest-first). Excludes revoked keys unless `includeRevoked` is set. */
   listApiKeys(opts?: { includeRevoked?: boolean }): Promise<ApiKeyRow[]>;
   /** Mark a key as revoked. Idempotent — returns null if the id doesn't exist. */

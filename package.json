@@ -32,5 +32,14 @@
     "tsup": "^8.3.5",
     "typescript": "^5.6.3",
     "vitest": "^2.1.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "fast-uri": "^3.1.2",
+      "ip-address": "^10.1.1",
+      "hono": "^4.12.18",
+      "esbuild": "^0.25.0",
+      "vite": "^6.4.2"
+    }
   }
 }

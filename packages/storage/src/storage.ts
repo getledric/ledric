@@ -32,6 +32,7 @@ import type {
   DeleteEntryResult,
   CreateApiKeyInput,
   ApiKeyLookup,
+  ApiKeyLookupWithHash,
   ApiKeyRow,
   UpdateAssetInput
 } from './types.js';
@@ -1394,6 +1395,22 @@ export class LedricStorage implements Storage {
       role: row.role,
       label: row.label,
       revoked_at: row.revoked_at
+    };
+  }
+
+  async findApiKeyByPrefix(prefix: string): Promise<ApiKeyLookupWithHash | null> {
+    const row = await this.db
+      .selectFrom('api_keys')
+      .select(['id', 'role', 'label', 'revoked_at', 'key_hash'])
+      .where('key_prefix', '=', prefix)
+      .executeTakeFirst();
+    if (!row) return null;
+    return {
+      id: new Uint8Array(row.id),
+      role: row.role,
+      label: row.label,
+      revoked_at: row.revoked_at,
+      key_hash: new Uint8Array(row.key_hash)
     };
   }
 

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import type { LedricStorage } from '@ledric/storage';
 import { hashApiKey } from '@ledric/storage';
 import {
@@ -104,11 +105,44 @@ export async function mountOAuthRoutes(
         });
       };
 
+      // DCR lockdown switch. When `LEDRIC_DCR_INITIAL_TOKEN` is set,
+      // /oauth/register requires the operator-provided token in the
+      // `Authorization: Bearer <token>` header. Anonymous DCR is the
+      // default (rate-limited at the http-server level) so claude.ai's
+      // auto-DCR Just Works for new connectors; flip this on when
+      // you'd rather hand out tokens out-of-band than accept any
+      // signup-shaped request from the public internet.
+      const dcrInitialToken = process.env.LEDRIC_DCR_INITIAL_TOKEN;
+      const dcrTokenBuf =
+        dcrInitialToken !== undefined && dcrInitialToken.length > 0
+          ? Buffer.from(dcrInitialToken)
+          : null;
+      const checkDcrInitialToken = async (
+        req: FastifyRequest,
+        reply: FastifyReply
+      ): Promise<void> => {
+        if (dcrTokenBuf === null) return; // anonymous DCR (default)
+        const header = String(req.headers.authorization ?? '');
+        const presented = header.startsWith('Bearer ') ? header.slice(7) : '';
+        const presentedBuf = Buffer.from(presented);
+        if (
+          presentedBuf.length !== dcrTokenBuf.length ||
+          !timingSafeEqual(presentedBuf, dcrTokenBuf)
+        ) {
+          reply.code(401).send({
+            error: 'invalid_token',
+            error_description:
+              'DCR is locked: operator requires an initial access token (LEDRIC_DCR_INITIAL_TOKEN).'
+          });
+        }
+      };
+
       // Library-owned routes. Use wildcards so resume paths like
       // /oauth/authorize/<uid> (which oidc-provider mounts as a
       // sub-route of /oauth/authorize) also reach the library.
       // Consent UI is /oauth/consent/* — handled by separate Fastify
       // routes outside this plugin scope and so doesn't collide.
+      const dcrSubpaths = new Set(['/oauth/register', '/oauth/register/*']);
       const oidcSubpaths = [
         '/oauth/authorize',
         '/oauth/authorize/*',
@@ -128,7 +162,11 @@ export async function mountOAuthRoutes(
         '/.well-known/oauth-authorization-server'
       ];
       for (const path of oidcSubpaths) {
-        instance.all(path, handler);
+        if (dcrSubpaths.has(path)) {
+          instance.all(path, { preHandler: checkDcrInitialToken }, handler);
+        } else {
+          instance.all(path, handler);
+        }
       }
     }
   );
@@ -276,9 +314,26 @@ export async function mountOAuthRoutes(
 
 async function verifyAdminKey(storage: LedricStorage, presented: string): Promise<boolean> {
   if (presented.length === 0) return false;
-  if (process.env.LEDRIC_ADMIN_KEY === presented) return true;
-  const found = await storage.findApiKeyByHash(hashApiKey(presented));
-  return Boolean(found && found.role === 'admin' && found.revoked_at === null);
+  // Env-key check uses a constant-time compare too — string equality
+  // in JS engines often early-exits, and this is in a UI consent flow
+  // where the timing channel is reachable.
+  const envKey = process.env.LEDRIC_ADMIN_KEY;
+  if (envKey !== undefined && envKey.length === presented.length) {
+    const a = Buffer.from(envKey);
+    const b = Buffer.from(presented);
+    if (timingSafeEqual(a, b)) return true;
+  }
+  // Look up by the non-secret prefix, then verify the full hash with
+  // a constant-time compare in JS. SQL equality on `key_hash` is
+  // bypassed entirely as a timing oracle.
+  const found = await storage.findApiKeyByPrefix(presented.slice(0, 12));
+  if (!found || found.role !== 'admin' || found.revoked_at !== null) return false;
+  const presentedHash = Buffer.from(hashApiKey(presented));
+  const storedHash = Buffer.from(found.key_hash);
+  return (
+    storedHash.length === presentedHash.length &&
+    timingSafeEqual(storedHash, presentedHash)
+  );
 }
 
 function inferRole(scope: string): string {

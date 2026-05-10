@@ -604,6 +604,65 @@ describe('HTTP server', () => {
     expect(body.result.fields).toMatchObject({ title: 'Hi' });
     expect(body.result.content).toBeUndefined();
   });
+
+  // Always-on hardening (helmet, body limits, query bounds). These
+  // are sensible defaults — no flag required, every operator gets them.
+  it('always-on: helmet sets HSTS / nosniff / referrer-policy / permissions headers', async () => {
+    const res = await app.inject({ method: 'GET', url: '/' });
+    expect(res.headers['strict-transport-security']).toMatch(/max-age=\d+/);
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['referrer-policy']).toBe('strict-origin-when-cross-origin');
+    expect(res.headers['x-permitted-cross-domain-policies']).toBe('none');
+  });
+
+  it('always-on: REST /entries/:type clamps ?limit to 1..200', async () => {
+    await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'create_type', args: {
+        name: 'note',
+        fields: { title: { type: 'string', required: true }, slug: { type: 'slug', from: 'title' } },
+        opts: { identifier_field: 'slug', display_field: 'title' }
+      }}
+    });
+    const high = await app.inject({ method: 'GET', url: '/entries/note?limit=999' });
+    expect(high.statusCode).toBe(400);
+    expect(JSON.parse(high.body).error.code).toBe('INVALID_REQUEST');
+
+    const zero = await app.inject({ method: 'GET', url: '/entries/note?limit=0' });
+    expect(zero.statusCode).toBe(400);
+
+    const ok = await app.inject({ method: 'GET', url: '/entries/note?limit=10' });
+    expect(ok.statusCode).toBe(200);
+  });
+
+  it('always-on: REST /entries/:type rejects ?q over 256 chars', async () => {
+    await app.inject({
+      method: 'POST', url: '/rpc',
+      payload: { tool: 'create_type', args: {
+        name: 'note',
+        fields: { title: { type: 'string', required: true }, slug: { type: 'slug', from: 'title' } },
+        opts: { identifier_field: 'slug', display_field: 'title' }
+      }}
+    });
+    const huge = 'x'.repeat(257);
+    const res = await app.inject({ method: 'GET', url: `/entries/note?q=${huge}` });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe('INVALID_REQUEST');
+  });
+
+  it('always-on: POST /rpc rejects bodies over the 1 MiB per-route cap', async () => {
+    // /rpc cap is 1 MiB, far below the 25 MiB global upload cap.
+    // 1.5 MiB of JSON-shaped payload should fail-413; 0.5 MiB should
+    // succeed (or fail for tool-specific reasons, but not on size).
+    const huge = 'x'.repeat(1.5 * 1024 * 1024);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/rpc',
+      payload: { tool: 'describe_model', args: { padding: huge } }
+    });
+    // Fastify returns 413 (FST_ERR_CTP_BODY_TOO_LARGE).
+    expect(res.statusCode).toBe(413);
+  });
 });
 
 describe('HTTP server with GUI mount', () => {
@@ -689,6 +748,23 @@ describe('HTTP server with GUI mount', () => {
     });
     expect(res.statusCode).toBe(404);
     expect(JSON.parse(res.body).error.code).toBe('NOT_FOUND');
+  });
+
+  it("GUI HTML responses set CSP frame-ancestors 'self' (clickjacking guard)", async () => {
+    // Both the mount-root + SPA-fallback paths should set the header.
+    const root = await app.inject({
+      method: 'GET',
+      url: '/admin/',
+      headers: { accept: 'text/html' }
+    });
+    expect(root.headers['content-security-policy']).toBe("frame-ancestors 'self'");
+
+    const deep = await app.inject({
+      method: 'GET',
+      url: '/admin/types/blog/foo',
+      headers: { accept: 'text/html' }
+    });
+    expect(deep.headers['content-security-policy']).toBe("frame-ancestors 'self'");
   });
 
   it('X-Forwarded-Prefix overrides <base href> so the proxy prefix wins', async () => {

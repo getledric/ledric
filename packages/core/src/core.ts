@@ -44,6 +44,22 @@ import {
   type TransformParams
 } from './transforms.js';
 
+/**
+ * Cap on `width × height` for uploaded images. Decompression bombs
+ * (a 100k×100k PNG that fits in <1KB on disk but expands to gigabytes
+ * in RAM during any subsequent transform) are the threat model.
+ * Default 25M pixels covers any reasonable photo (≈5000×5000) and is
+ * way below the smallest realistic bomb. Override per-process with
+ * `LEDRIC_MAX_IMAGE_PIXELS=<n>` if you have a legitimate need for
+ * larger images.
+ */
+const MAX_IMAGE_PIXELS = (() => {
+  const fromEnv = process.env.LEDRIC_MAX_IMAGE_PIXELS;
+  if (fromEnv === undefined) return 25_000_000;
+  const n = parseInt(fromEnv, 10);
+  return Number.isFinite(n) && n > 0 ? n : 25_000_000;
+})();
+
 export interface Capabilities {
   vectorSearch: boolean;
   nativePubSub: boolean;
@@ -1067,19 +1083,39 @@ export class Core {
     // For images, extract intrinsic width/height via sharp so per-field
     // dimension constraints have something to validate against. We never
     // overwrite a width/height that the caller already supplied.
+    //
+    // Decompression-bomb guard: reject images whose dimensions exceed
+    // `MAX_IMAGE_PIXELS`. sharp's metadata() reads only the header and
+    // doesn't decompress, so the check is cheap; but a downstream
+    // transform that DID decompress would explode memory on a
+    // pixel-stuffed PNG. Default cap (25M pixels ≈ 5000×5000) covers
+    // any reasonable photo and rejects deliberate bombs (e.g. the
+    // classic 100k×100k PNG that takes <1KB on disk and 30GB in RAM).
     if (input.kind === 'image' && (meta.width === undefined || meta.height === undefined)) {
       try {
         const probe = await sharp(input.bytes as Buffer).metadata();
+        if (typeof probe.width === 'number' && typeof probe.height === 'number') {
+          const pixels = probe.width * probe.height;
+          if (pixels > MAX_IMAGE_PIXELS) {
+            throw new Error(
+              `Image rejected: ${probe.width}×${probe.height} = ${pixels.toLocaleString()} pixels exceeds the ${MAX_IMAGE_PIXELS.toLocaleString()}-pixel cap (set LEDRIC_MAX_IMAGE_PIXELS to override). This guards against decompression-bomb uploads.`
+            );
+          }
+        }
         if (typeof probe.width === 'number' && meta.width === undefined) {
           meta.width = probe.width;
         }
         if (typeof probe.height === 'number' && meta.height === undefined) {
           meta.height = probe.height;
         }
-      } catch {
-        // Non-image bytes labelled as image, or sharp can't read them.
-        // Leave width/height unset; constraint checks treat absent
-        // dimensions as "unknown" and skip dimension rules.
+      } catch (err) {
+        // Surface the bomb-rejection but swallow generic sharp parse
+        // errors (non-image bytes labelled as image, etc.) — those
+        // leave width/height unset and the constraint layer treats
+        // absent dimensions as "unknown" rather than rejecting.
+        if (err instanceof Error && err.message.startsWith('Image rejected:')) {
+          throw err;
+        }
       }
     }
     return this.storage.createAsset({

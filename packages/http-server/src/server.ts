@@ -2,11 +2,14 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import formbody from '@fastify/formbody';
+import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import { promises as fs, readFileSync } from 'node:fs';
 import { join as pathJoin, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { timingSafeEqual } from 'node:crypto';
 
 // Read our own version once at module load. tsup bundles to
 // `dist/index.js`; `../package.json` resolves to the shipped manifest.
@@ -24,6 +27,14 @@ import { SCOPE_TO_ROLE } from '@ledric/oauth';
 import type { Storage, ApiKeyRole, LedricStorage } from '@ledric/storage';
 import { hashApiKey, parseApiKeyRole, looksLikeApiKey } from '@ledric/storage';
 import { mountOAuthRoutes, type AccessTokenVerifier } from './oauth-routes.js';
+
+// Server-side bounds on a couple of query params. Mirrors the same
+// limits the MCP `FindArgsSchema` enforces via zod — the REST handler
+// historically didn't and would happily forward `?limit=10000` straight
+// to the DB. Kept as constants so storage tests and HTTP tests stay
+// in sync.
+export const MAX_FIND_LIMIT = 200;
+export const MAX_FTS_Q_LENGTH = 256;
 
 function toHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -179,6 +190,23 @@ export interface HttpServerOptions {
   /** Maximum upload size in bytes for POST /assets. Default 25 MiB. */
   uploadLimitBytes?: number;
   /**
+   * Honor `X-Forwarded-*` headers from a trusted reverse proxy so
+   * `req.ip` reflects the originating client, not the proxy. Required
+   * for `mcp.allowedCidrs` to evaluate correct IPs when fronted by
+   * nginx/Caddy/Cloudflare/etc. — without it, the CIDR check sees
+   * `127.0.0.1` (or the proxy's IP) on every request and silently
+   * lets everything through (or blocks everything, depending on the
+   * allowlist).
+   *
+   *   true            — trust X-Forwarded-* from any upstream
+   *   string          — trust the named hop (e.g. '127.0.0.1')
+   *   string[]        — trust any of these hops
+   *   number          — trust the Nth-from-last hop
+   *
+   * Defaults to false. The `--public` CLI preset sets it true.
+   */
+  trustProxy?: boolean | string | string[] | number;
+  /**
    * API-key auth configuration. When omitted, ALL routes are open.
    * When present, auth is enforced — but only once at least one
    * non-revoked DB key OR an env var key exists; until then the
@@ -224,7 +252,10 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
   const uploadLimit = opts.uploadLimitBytes ?? 25 * 1024 * 1024;
   const app = Fastify({
     logger: opts.logger ?? false,
-    bodyLimit: uploadLimit
+    bodyLimit: uploadLimit,
+    // false is Fastify's default — kept explicit so the line is
+    // documented at the constructor and the option is discoverable.
+    trustProxy: opts.trustProxy ?? false
   });
 
   // Default 404 handler: return the same `{error: {code, message}}`
@@ -260,13 +291,96 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     });
   });
 
-  // Content-API ergonomics: CORS open by default so any frontend can read.
-  const corsOption = opts.cors ?? '*';
+  // Always-on security headers. Off-by-default knobs are kept off so
+  // we don't break the GUI's CDN-imported components or the inline
+  // editor's iframe drawer:
+  //   - contentSecurityPolicy: false — the GUI loads htm/react via
+  //     unpkg etc; CSP needs co-design with the GUI before we can
+  //     turn it on globally. The GUI mount route adds its own CSP
+  //     (frame-ancestors 'self') for clickjacking protection.
+  //   - crossOriginEmbedderPolicy: false — would block the inline
+  //     editor's same-origin iframe.
+  //   - frameguard: false — superseded by per-route CSP frame-ancestors.
+  // Everything else is on with reasonable defaults.
+  app.register(helmet, {
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    frameguard: false,
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: false },
+    noSniff: true,
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    permittedCrossDomainPolicies: { permittedPolicies: 'none' }
+  });
+
+  // Mode flags hoisted up so CORS auto-derive + rate-limit registration
+  // (below) can read them. Used again later by attachAuth and the /mcp
+  // mount; second usage just re-references these constants.
+  const mcpHttpFlag = opts.mcp?.http === true || opts.mcp?.public === true;
+  const mcpPublicFlag = opts.mcp?.public === true;
+
+  // CORS — open by default for the content-API use case. In public-MCP
+  // mode, narrow to the publicUrl host + claude.ai unless the operator
+  // has explicitly set `cors` or `mcp.allowedOrigins`. Stops a hostile
+  // origin from reading content responses or initiating cross-site
+  // mutations under a stolen credential.
+  let corsOption: string | string[] | boolean = opts.cors ?? '*';
+  if (
+    mcpPublicFlag &&
+    (corsOption === '*' || corsOption === undefined) &&
+    typeof opts.mcp?.publicUrl === 'string' &&
+    opts.mcp.publicUrl.length > 0
+  ) {
+    try {
+      const u = new URL(opts.mcp.publicUrl);
+      const allowed = [`${u.protocol}//${u.host}`, 'https://claude.ai'];
+      // mcp.allowedOrigins is the authoritative override if present —
+      // public-MCP already uses it for the /mcp Origin gate.
+      const explicit = opts.mcp.allowedOrigins;
+      corsOption = Array.isArray(explicit) && explicit.length > 0 ? [...explicit] : allowed;
+    } catch {
+      // malformed publicUrl — boot validation already errors above
+      // when public is on. Fall through to '*' here so we don't
+      // double-throw with a confusing CORS error.
+    }
+  }
   if (corsOption !== false) {
     app.register(cors, {
       origin: corsOption,
       methods: ['GET', 'POST', 'OPTIONS'],
       exposedHeaders: ['X-Ledric-Redirect', 'X-Ledric-Redirect-Locale']
+    });
+  }
+
+  // Rate limiting (only when publicly exposed). Limits are
+  // per-IP-per-window with sensible defaults that don't hurt
+  // legitimate consumers but blunt brute-force / DCR-flood / upload
+  // abuse:
+  //   - global:      100 req/min/IP
+  //   - OAuth + auth probes: 10 req/min/IP (anti-DCR-flood)
+  //   - POST /assets: 30 req/hour/IP (uploads are expensive)
+  // Per-route 429 lockout from auth-fail tracking is layered on top
+  // (see logAuthFail above).
+  if (mcpPublicFlag) {
+    app.register(rateLimit, {
+      global: true,
+      max: (req) => {
+        if (req.url.startsWith('/oauth/') || req.url.startsWith('/.well-known/') || req.url.startsWith('/auth/')) {
+          return 10;
+        }
+        if (req.method === 'POST' && req.url === '/assets') return 30;
+        return 100;
+      },
+      timeWindow: (req) => {
+        if (req.method === 'POST' && req.url === '/assets') return 60 * 60 * 1000; // 1 hour
+        return 60 * 1000; // 1 minute
+      },
+      keyGenerator: (req) => req.ip,
+      errorResponseBuilder: (_req, ctx) => ({
+        error: {
+          code: 'RATE_LIMIT',
+          message: `Rate limit exceeded — retry in ${Math.ceil(ctx.ttl / 1000)}s`
+        }
+      })
     });
   }
 
@@ -283,8 +397,8 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
   // both reference them. Validation (publicUrl required when public
   // is on) happens at the /mcp mount further down — early exit there
   // keeps the error message close to the route it concerns.
-  const mcpHttpFlag = opts.mcp?.http === true || opts.mcp?.public === true;
-  const mcpPublicFlag = opts.mcp?.public === true;
+  // (mcpHttpFlag / mcpPublicFlag declared above so CORS + rate-limit
+  // registration can reference them.)
 
   // OAuth routes mount BEFORE the auth preHandler so its `verify` is
   // captured by the closure attachAuth holds. The mount itself is async
@@ -345,7 +459,14 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       try {
         const raw = await fs.readFile(indexPath, 'utf-8');
         const externalPrefix = resolveExternalPrefix(req.headers, prefix);
-        reply.code(200).type('text/html; charset=utf-8').send(injectGuiBootstrap(raw, prefix, externalPrefix));
+        // CSP frame-ancestors 'self' — clickjacking protection scoped
+        // to the GUI HTML routes. Allows the inline editor's
+        // same-origin iframe drawer; blocks any cross-origin embed.
+        reply
+          .code(200)
+          .header('Content-Security-Policy', "frame-ancestors 'self'")
+          .type('text/html; charset=utf-8')
+          .send(injectGuiBootstrap(raw, prefix, externalPrefix));
       } catch (err) {
         reply.code(500).send({
           error: {
@@ -380,7 +501,11 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
         try {
           const raw = await fs.readFile(indexPath, 'utf-8');
           const externalPrefix = resolveExternalPrefix(req.headers, prefix);
-          reply.code(200).type('text/html; charset=utf-8').send(injectGuiBootstrap(raw, prefix, externalPrefix));
+          reply
+            .code(200)
+            .header('Content-Security-Policy', "frame-ancestors 'self'")
+            .type('text/html; charset=utf-8')
+            .send(injectGuiBootstrap(raw, prefix, externalPrefix));
           return;
         } catch {
           // fall through to default
@@ -517,8 +642,20 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
       published?: string;
       summary?: string;
     };
-  }>('/entries/:type', async (req) => {
-    const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
+  }>('/entries/:type', async (req, reply) => {
+    // Mirror MCP FindArgsSchema bounds: limit 1–200, q max 256 chars.
+    // Anything past these is rejected outright rather than silently
+    // clamped — surfaces caller bugs early instead of returning a
+    // truncated result that looks correct.
+    let limit: number | undefined;
+    if (req.query.limit !== undefined) {
+      const n = parseInt(req.query.limit, 10);
+      if (!Number.isFinite(n) || n < 1 || n > MAX_FIND_LIMIT) {
+        reply.code(400);
+        return { error: { code: 'INVALID_REQUEST', message: `limit must be 1-${MAX_FIND_LIMIT}` } };
+      }
+      limit = n;
+    }
     const offset = req.query.offset ? parseInt(req.query.offset, 10) : undefined;
     const expandAssets = parseExpandAssets(req.query.expand_assets);
     const resolveReferences = parseExpandAssets(req.query.resolve_references);
@@ -528,7 +665,12 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     const published = req.query.published === '1' || req.query.published === 'true';
     const summary = req.query.summary === '1' || req.query.summary === 'true';
     const tags = collectTagParam(req.query.tag);
-    const q = typeof req.query.q === 'string' && req.query.q.length > 0 ? req.query.q : undefined;
+    const rawQ = typeof req.query.q === 'string' && req.query.q.length > 0 ? req.query.q : undefined;
+    if (rawQ !== undefined && rawQ.length > MAX_FTS_Q_LENGTH) {
+      reply.code(400);
+      return { error: { code: 'INVALID_REQUEST', message: `q must be ≤ ${MAX_FTS_Q_LENGTH} chars` } };
+    }
+    const q = rawQ;
     const order = parseOrderParam(req.query.order);
     const result = await core.find({
       type: req.params.type,
@@ -855,7 +997,11 @@ export function createHttpServer(core: Core, opts: HttpServerOptions = {}): Fast
     return reply.send(bytes);
   });
 
-  app.post<{ Body: { tool?: string; args?: Record<string, unknown> } }>('/rpc', async (req, reply) => {
+  // /rpc payloads are tool args — JSON-shaped, well-bounded. Cap at
+  // 1 MiB so an attacker can't push 25 MiB of garbage at every
+  // anonymous endpoint that doesn't otherwise rate-limit. /assets
+  // POST has its own multipart cap (uploadLimit) and is unaffected.
+  app.post<{ Body: { tool?: string; args?: Record<string, unknown> } }>('/rpc', { bodyLimit: 1024 * 1024 }, async (req, reply) => {
     const tool = req.body?.tool;
     const args = req.body?.args ?? {};
     if (typeof tool !== 'string' || tool.length === 0) {
@@ -1294,11 +1440,51 @@ function attachAuth(
     mcpPublic && publicUrl !== undefined
       ? `Bearer realm="ledric", resource_metadata="${publicUrl}/.well-known/oauth-protected-resource"`
       : null;
+  // Debounced auth-failure log. Surfaces brute-force attempts in the
+  // operator's logs without flooding (one line per IP per 60s, even
+  // if the attacker is sending hundreds of bad-auth requests in that
+  // window). The first failure from a fresh IP logs immediately; the
+  // last entry's `attempts` field shows how many additional rejects
+  // were rolled into the same window. Map is bounded by trimming
+  // entries past the window on each insert.
+  const authFailLog = new Map<string, { firstAt: number; attempts: number }>();
+  const AUTH_FAIL_WINDOW_MS = 60_000;
+  function logAuthFail(req: import('fastify').FastifyRequest, reason: string): void {
+    const ip = req.ip || 'unknown';
+    const now = Date.now();
+    const existing = authFailLog.get(ip);
+    if (existing && now - existing.firstAt < AUTH_FAIL_WINDOW_MS) {
+      existing.attempts += 1;
+      return; // debounced
+    }
+    // Trim stale entries — bounded memory.
+    if (authFailLog.size > 1024) {
+      for (const [k, v] of authFailLog) {
+        if (now - v.firstAt >= AUTH_FAIL_WINDOW_MS) authFailLog.delete(k);
+      }
+    }
+    authFailLog.set(ip, { firstAt: now, attempts: 1 });
+    if (req.log) {
+      req.log.warn(
+        { event: 'auth.fail', ip, route: req.url, method: req.method, reason },
+        `auth.fail ${ip} ${req.method} ${req.url}: ${reason}`
+      );
+    } else {
+      // Fastify logger may be off (default). Surface via stderr so
+      // brute-force attempts aren't completely invisible.
+      process.stderr.write(
+        `ledric auth.fail ${new Date(now).toISOString()} ${ip} ${req.method} ${req.url}: ${reason}\n`
+      );
+    }
+  }
+
   function send401(
     reply: import('fastify').FastifyReply,
-    message: string
+    message: string,
+    req?: import('fastify').FastifyRequest
   ): import('fastify').FastifyReply {
     if (wwwAuthenticate !== null) reply.header('WWW-Authenticate', wwwAuthenticate);
+    if (req !== undefined) logAuthFail(req, message);
     reply.code(401).send({ error: { code: 'UNAUTHORIZED', message } });
     return reply;
   }
@@ -1426,14 +1612,26 @@ function attachAuth(
 
     if (role === null) {
       if (!presented || !looksLikeApiKey(presented)) {
-        return send401(reply, 'Missing or malformed bearer credential');
+        return send401(reply, 'Missing or malformed bearer credential', req);
       }
       role = envKeys.get(presented) ?? null;
       if (role === null) {
-        const found = await auth.storage.findApiKeyByHash(hashApiKey(presented));
+        // Lookup by the public 12-char prefix, then verify the full
+        // hash in constant time. Avoids any SQL-equality timing
+        // oracle on `key_hash` — attackers can't learn anything from
+        // the lookup time because the prefix is non-secret.
+        const prefix = presented.slice(0, 12);
+        const found = await auth.storage.findApiKeyByPrefix(prefix);
         if (found && found.revoked_at === null) {
-          role = found.role;
-          keyId = found.id;
+          const presentedHash = Buffer.from(hashApiKey(presented));
+          const storedHash = Buffer.from(found.key_hash);
+          if (
+            storedHash.length === presentedHash.length &&
+            timingSafeEqual(storedHash, presentedHash)
+          ) {
+            role = found.role;
+            keyId = found.id;
+          }
         }
       }
     }
@@ -1444,7 +1642,8 @@ function attachAuth(
       const hinted = parseApiKeyRole(presented ?? '');
       return send401(
         reply,
-        hinted ? 'API key is unknown or revoked' : 'Invalid credential'
+        hinted ? 'API key is unknown or revoked' : 'Invalid credential',
+        req
       );
     }
 

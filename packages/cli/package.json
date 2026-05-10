@@ -1,6 +1,6 @@
 {
   "name": "ledric",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "description": "ledric CLI — single-binary entry point.",
   "license": "Apache-2.0",
   "repository": {

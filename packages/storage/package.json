@@ -1,6 +1,6 @@
 {
   "name": "@ledric/storage",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "description": "ledric storage: Kysely-based dialect adapters. SQLite (better-sqlite3) default; MySQL and Postgres also supported.",
   "license": "Apache-2.0",
   "repository": {
@@ -34,7 +34,7 @@
   "dependencies": {
     "@ledric/schema": "workspace:*",
     "better-sqlite3": "^11.5.0",
-    "kysely": "^0.27.4",
+    "kysely": "^0.28.17",
     "uuid": "^11.0.3"
   },
   "peerDependencies": {
@@ -42,8 +42,12 @@
     "pg": "^8.13.0"
   },
   "peerDependenciesMeta": {
-    "mysql2": { "optional": true },
-    "pg": { "optional": true }
+    "mysql2": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",

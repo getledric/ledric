@@ -90,6 +90,18 @@ export const serveCommand = defineCommand({
       description:
         'Expose this ledric on the public internet so claude.ai custom connectors can reach it. Implies --http-mcp. Mounts the OAuth provider, accepts OAuth bearers on /mcp, requires publicUrl, and defaults the bind to 0.0.0.0.',
       default: false
+    },
+    'trust-proxy': {
+      type: 'boolean',
+      description:
+        'Trust X-Forwarded-* headers from a reverse proxy. Required when fronted by nginx/Caddy/Cloudflare/etc. so req.ip reflects the originating client (without this, mcp.allowedCidrs allowlists silently fail). Implied by --public.',
+      default: false
+    },
+    public: {
+      type: 'boolean',
+      description:
+        'Hardened public-internet preset. Implies --public-mcp + --require-reader-key + --http-host 0.0.0.0 + --trust-proxy. Refuses to start without LEDRIC_ADMIN_KEY (no first-boot auto-mint) and without publicUrl. Adds rate limiting, security headers, CORS auto-derived from publicUrl, and brute-force protection on the /rpc auth path. The "safe to point a domain at" mode.',
+      default: false
     }
   },
   async run({ args }) {
@@ -99,14 +111,27 @@ export const serveCommand = defineCommand({
       args['http-port'] ?? (cfg.http?.port !== undefined ? String(cfg.http.port) : '3000');
     const assetsBackend = args['assets-backend'] ?? cfg.assets?.backend;
     const assetsRoot = args['assets-root'] ?? cfg.assets?.path;
+    // --public is the "safe to expose to the internet" preset. It
+    // bundles together every other flag the operator would otherwise
+    // have to remember, plus a few first-boot refusals that prevent
+    // common shoot-yourself scenarios on a fresh public deployment.
+    const publicMode = args.public === true || cfg.mode === 'public';
+
     const requireReaderKey =
-      args['require-reader-key'] === true || cfg.auth?.requireReaderKey === true;
+      publicMode ||
+      args['require-reader-key'] === true ||
+      cfg.auth?.requireReaderKey === true;
     const wantGui = args.gui === true || cfg.gui?.enabled === true;
-    const publicMcp = args['public-mcp'] === true || cfg.mcp?.public === true;
+    const publicMcp =
+      publicMode || args['public-mcp'] === true || cfg.mcp?.public === true;
     // public implies http; otherwise honor each independently.
     const httpMcp =
       publicMcp || args['http-mcp'] === true || cfg.mcp?.http === true;
     const wantHttp = args.http === true || wantGui || httpMcp;
+    const trustProxy =
+      publicMode ||
+      args['trust-proxy'] === true ||
+      cfg.http?.trustProxy === true;
     // Public mode flips the default bind to 0.0.0.0; otherwise the
     // existing 127.0.0.1 default stands. Explicit --http-host always wins.
     const httpHostDefault = publicMcp ? '0.0.0.0' : '127.0.0.1';
@@ -158,12 +183,31 @@ export const serveCommand = defineCommand({
     if (wantHttp) {
       const envAdminKey = process.env.LEDRIC_ADMIN_KEY;
       const envReaderKey = process.env.LEDRIC_READER_KEY;
-      const bootstrapped = await bootstrapApiKeysIfEmpty(
-        storage,
-        envAdminKey,
-        envReaderKey,
-        { mintReader: requireReaderKey }
-      );
+
+      // Public-mode boot refusal: never auto-mint. The print-once flow
+      // is fine on a localhost dev box (operator sees stderr); on a
+      // freshly provisioned public host, the printed key gets lost in
+      // systemd journal noise and the operator has no recourse but to
+      // wipe the DB and try again. Force them to set LEDRIC_ADMIN_KEY
+      // up front, OR have an existing admin key already in the DB.
+      if (publicMode) {
+        const dbAdminKeys = await storage.countActiveApiKeys();
+        if (envAdminKey === undefined && dbAdminKeys === 0) {
+          process.stderr.write(
+            'ledric --public: no admin key configured. Set LEDRIC_ADMIN_KEY in the environment OR mint one with `ledric keys add admin --raw` before starting in public mode. Auto-minting is disabled here on purpose — the print-once key is too easy to lose on a fresh public deployment.\n'
+          );
+          process.exit(2);
+        }
+      }
+
+      const bootstrapped = publicMode
+        ? null
+        : await bootstrapApiKeysIfEmpty(
+            storage,
+            envAdminKey,
+            envReaderKey,
+            { mintReader: requireReaderKey }
+          );
       if (bootstrapped !== null) printFirstBootKeys(bootstrapped);
 
       const guiMount = args['gui-mount'] ?? cfg.gui?.mount ?? '/admin';
@@ -180,7 +224,8 @@ export const serveCommand = defineCommand({
       const publicUrl = cfg.publicUrl;
       if (publicMcp && (publicUrl === undefined || publicUrl.length === 0)) {
         process.stderr.write(
-          'ledric: --public-mcp requires `publicUrl` to be set in ledric.config.json (it identifies this server as an OAuth issuer and anchors the Origin allowlist). See docs/remote-mcp.md.\n'
+          (publicMode ? 'ledric --public' : 'ledric: --public-mcp') +
+            ' requires `publicUrl` to be set in ledric.config.json (it identifies this server as an OAuth issuer and anchors the Origin allowlist). See docs/remote-mcp.md.\n'
         );
         process.exit(2);
       }
@@ -200,6 +245,7 @@ export const serveCommand = defineCommand({
       httpServer = await runHttp(core, {
         port: parseInt(httpPortStr, 10),
         host: httpHost,
+        ...(trustProxy ? { trustProxy: true } : {}),
         ...(guiOpts !== undefined ? { gui: guiOpts } : {}),
         ...(mcpOpts !== undefined ? { mcp: mcpOpts } : {}),
         auth: {

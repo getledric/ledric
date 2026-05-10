@@ -132,7 +132,7 @@ const FindArgsSchema = z
     include_private: z.boolean().optional(),
     published: z.boolean().optional(),
     summary: z.boolean().optional(),
-    q: z.string().optional(),
+    q: z.string().max(256, 'q must be ≤ 256 chars').optional(),
     tags: z.array(z.string()).optional()
   })
   .strict();

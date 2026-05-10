@@ -37,7 +37,8 @@ export type {
   ApiKeyRole,
   CreateApiKeyInput,
   ApiKeyRow,
-  ApiKeyLookup
+  ApiKeyLookup,
+  ApiKeyLookupWithHash
 } from './types.js';
 
 export {

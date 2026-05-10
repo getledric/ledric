@@ -3,9 +3,25 @@ import { resolve } from 'node:path';
 
 export interface LedricConfig {
   db?: string;
+  /**
+   * Hardening preset. `'public'` is equivalent to `--public` on the CLI:
+   * implies `mcp.public`, `auth.requireReaderKey`, `http.host=0.0.0.0`,
+   * `http.trustProxy=true`, and adds rate limiting / brute-force
+   * protection / CSP / boot-time refusals (admin key + publicUrl
+   * required). Any other value is ignored.
+   */
+  mode?: 'public';
   http?: {
     port?: number;
     host?: string;
+    /**
+     * Honor `X-Forwarded-*` headers from a trusted reverse proxy.
+     * Required when fronted by nginx/Caddy/Cloudflare/etc. — without
+     * this, `mcp.allowedCidrs` allowlists silently fail because
+     * `req.ip` is the proxy's IP, not the client's. Implied by
+     * `mode: 'public'`.
+     */
+    trustProxy?: boolean;
   };
   assets?: {
     backend?: 'db' | 'local';
